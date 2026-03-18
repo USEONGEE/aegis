@@ -1,0 +1,26 @@
+{
+  "name": "wdk-app",
+  "private": true,
+  "workspaces": [
+    "packages/canonical",
+    "packages/guarded-wdk",
+    "packages/manifest",
+    "packages/daemon",
+    "packages/relay",
+    "packages/app"
+  ],
+  "scripts": {
+    "test": "node --experimental-vm-modules node_modules/.bin/jest --projects packages/canonical packages/guarded-wdk packages/manifest packages/daemon",
+    "test:canonical": "npm test --workspace=packages/canonical",
+    "test:guarded-wdk": "npm test --workspace=packages/guarded-wdk",
+    "test:manifest": "npm test --workspace=packages/manifest",
+    "test:daemon": "npm test --workspace=packages/daemon"
+  },
+  "devDependencies": {
+    "@babel/preset-typescript": "^7.28.5",
+    "@jest/globals": "^29.7.0",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.4.6",
+    "typescript": "^5.9.3"
+  }
+}
