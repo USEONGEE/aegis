@@ -1,0 +1,35 @@
+{
+  "name": "@wdk-app/daemon",
+  "version": "0.1.0",
+  "description": "WDK daemon — orchestrates WDK + OpenClaw + Relay",
+  "type": "module",
+  "main": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "bin": {
+    "wdk-daemon": "./src/index.ts"
+  },
+  "scripts": {
+    "start": "node --loader ts-node/esm src/index.ts",
+    "build": "tsc",
+    "test": "node --experimental-vm-modules ../../node_modules/.bin/jest"
+  },
+  "dependencies": {
+    "openai": "^4.40.0",
+    "ws": "^8.16.0",
+    "pino": "^8.19.0",
+    "tweetnacl": "^1.0.3",
+    "@wdk-app/guarded-wdk": "*",
+    "@wdk-app/canonical": "*"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0",
+    "ts-node": "^10.9.0",
+    "ts-jest": "^29.1.0",
+    "@types/node": "^20.11.0",
+    "@types/ws": "^8.5.10",
+    "jest": "^29.7.0",
+    "@jest/globals": "^29.7.0"
+  }
+}
