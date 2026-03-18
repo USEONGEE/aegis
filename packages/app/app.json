@@ -1,0 +1,27 @@
+{
+  "expo": {
+    "name": "WDK-APP",
+    "slug": "wdk-app",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "splash": {
+      "backgroundColor": "#0a0a0a"
+    },
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.wdkapp.mobile"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#0a0a0a"
+      },
+      "package": "com.wdkapp.mobile"
+    },
+    "plugins": [
+      "expo-secure-store",
+      "expo-notifications"
+    ]
+  }
+}

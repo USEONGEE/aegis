@@ -1,0 +1,493 @@
+import React, { useState, useEffect, useCallback } from 'react';
+import {
+  View,
+  Text,
+  Pressable,
+  ScrollView,
+  Alert,
+  StyleSheet,
+} from 'react-native';
+import { IdentityKeyManager } from '../../../core/identity/IdentityKeyManager';
+import { PairingService, type PairingQRPayload } from '../../../core/crypto/PairingService';
+import { RelayClient, type RelayMessage } from '../../../core/relay/RelayClient';
+import { SignedApprovalBuilder } from '../../../core/approval/SignedApprovalBuilder';
+import { useToast } from '../../../shared/ui/ToastProvider';
+
+/**
+ * SettingsScreen — Device management + pairing.
+ *
+ * Features:
+ * - Identity key info (public key hex)
+ * - Paired devices list with revoke option
+ * - Pairing button (scan QR from daemon)
+ * - Connection status
+ */
+
+interface PairedDevice {
+  deviceId: string;
+  name?: string;
+  type: 'app' | 'daemon';
+  pairedAt: number;
+  isRevoked: boolean;
+}
+
+export function SettingsScreen() {
+  const [publicKeyHex, setPublicKeyHex] = useState<string | null>(null);
+  const [deviceId, setDeviceId] = useState<string | null>(null);
+  const [devices, setDevices] = useState<PairedDevice[]>([]);
+  const [pairingSAS, setPairingSAS] = useState<string | null>(null);
+  const [pairingConfirm, setPairingConfirm] = useState<(() => Promise<void>) | null>(null);
+  const [connected, setConnected] = useState(false);
+  const { showToast } = useToast();
+
+  // Singletons — stable references, safe in dependency arrays
+  const identity = React.useMemo(() => IdentityKeyManager.getInstance(), []);
+  const relay = React.useMemo(() => RelayClient.getInstance(), []);
+
+  // Load identity on mount
+  useEffect(() => {
+    (async () => {
+      const pubKey = await identity.getPublicKeyHex();
+      const devId = await identity.getDeviceId();
+      setPublicKeyHex(pubKey);
+      setDeviceId(devId);
+    })();
+  }, [identity]);
+
+  // Listen for device updates from daemon
+  useEffect(() => {
+    const handler = (message: RelayMessage) => {
+      if (message.channel !== 'control') return;
+      const data = message.payload as { type?: string; devices?: PairedDevice[] };
+      if (data.type === 'device_list' && data.devices) {
+        setDevices(data.devices);
+      }
+    };
+
+    relay.addMessageHandler(handler);
+
+    const connHandler = (isConnected: boolean) => setConnected(isConnected);
+    relay.addConnectionHandler(connHandler);
+
+    return () => {
+      relay.removeMessageHandler(handler);
+      relay.removeConnectionHandler(connHandler);
+    };
+  }, [relay]);
+
+  // Generate identity key
+  const handleGenerateKey = useCallback(async () => {
+    Alert.alert(
+      'Generate New Identity Key',
+      'This will replace your existing identity key. You will need to re-pair with your daemon. Continue?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Generate',
+          style: 'destructive',
+          onPress: async () => {
+            await identity.generate();
+            const pubKey = await identity.getPublicKeyHex();
+            const devId = await identity.getDeviceId();
+            setPublicKeyHex(pubKey);
+            setDeviceId(devId);
+            showToast('Identity key generated', 'success');
+          },
+        },
+      ],
+    );
+  }, [identity, showToast]);
+
+  // Start pairing (in a real app, this would scan a QR code)
+  const handleStartPairing = useCallback(async () => {
+    // In production: open camera, scan QR from daemon
+    // For now: placeholder that demonstrates the flow
+    showToast('In production, this opens the camera to scan daemon QR code', 'info');
+
+    // Mock QR payload for development
+    const mockQR: PairingQRPayload = {
+      relayUrl: 'wss://relay.wdk-app.com',
+      userId: 'user_mock',
+      pairingToken: 'pair_mock_token',
+      daemonPubKey: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=', // mock
+    };
+
+    try {
+      const pairingService = new PairingService();
+      const { sas, confirmPairing, cancelPairing } = await pairingService.initiatePairing(mockQR);
+      setPairingSAS(sas);
+      setPairingConfirm(() => async () => {
+        const result = await confirmPairing();
+        if (result.success) {
+          showToast(`Paired! Device: ${result.deviceId}`, 'success');
+          setPairingSAS(null);
+          setPairingConfirm(null);
+        }
+      });
+    } catch (e) {
+      showToast(`Pairing failed: ${e instanceof Error ? e.message : String(e)}`, 'error');
+    }
+  }, [showToast]);
+
+  // Revoke a device — builds a proper SignedApproval via SignedApprovalBuilder
+  const handleRevoke = useCallback(
+    (device: PairedDevice) => {
+      Alert.alert(
+        'Revoke Device',
+        `Revoke "${device.name ?? device.deviceId}"? This device will no longer be able to sign approvals.`,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Revoke',
+            style: 'destructive',
+            onPress: async () => {
+              try {
+                const keyPair = await identity.getKeyPair();
+                if (!keyPair) {
+                  showToast('No identity key — cannot sign revocation', 'error');
+                  return;
+                }
+                const builder = new SignedApprovalBuilder(keyPair, deviceId ?? undefined);
+                const signedApproval = builder.forDeviceRevoke({
+                  targetDeviceId: device.deviceId,
+                  chain: 'ethereum', // default chain for device ops
+                });
+                await relay.sendApproval(signedApproval);
+                showToast('Device revoke request sent', 'info');
+              } catch (e) {
+                showToast('Failed to revoke device', 'error');
+              }
+            },
+          },
+        ],
+      );
+    },
+    [relay, identity, deviceId, showToast],
+  );
+
+  // Delete identity key
+  const handleDeleteKey = useCallback(async () => {
+    Alert.alert(
+      'Delete Identity Key',
+      'This will delete your identity key. You will need to generate a new one and re-pair. This action cannot be undone.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            await identity.delete();
+            setPublicKeyHex(null);
+            setDeviceId(null);
+            showToast('Identity key deleted', 'info');
+          },
+        },
+      ],
+    );
+  }, [identity, showToast]);
+
+  return (
+    <ScrollView style={styles.container} contentContainerStyle={styles.contentContainer}>
+      {/* Identity Section */}
+      <Text style={styles.sectionHeader}>Identity</Text>
+      <View style={styles.card}>
+        {publicKeyHex ? (
+          <>
+            <View style={styles.row}>
+              <Text style={styles.label}>Public Key</Text>
+              <Text style={styles.monoValue} numberOfLines={1}>
+                {publicKeyHex.slice(0, 18)}...{publicKeyHex.slice(-8)}
+              </Text>
+            </View>
+            <View style={styles.row}>
+              <Text style={styles.label}>Device ID</Text>
+              <Text style={styles.monoValue}>{deviceId ?? '-'}</Text>
+            </View>
+            <View style={styles.buttonGroup}>
+              <Pressable style={styles.secondaryButton} onPress={handleGenerateKey}>
+                <Text style={styles.secondaryButtonText}>Regenerate Key</Text>
+              </Pressable>
+              <Pressable style={styles.dangerButton} onPress={handleDeleteKey}>
+                <Text style={styles.dangerButtonText}>Delete Key</Text>
+              </Pressable>
+            </View>
+          </>
+        ) : (
+          <View style={styles.noKeyState}>
+            <Text style={styles.noKeyText}>No identity key found</Text>
+            <Pressable style={styles.primaryButton} onPress={handleGenerateKey}>
+              <Text style={styles.primaryButtonText}>Generate Identity Key</Text>
+            </Pressable>
+          </View>
+        )}
+      </View>
+
+      {/* Pairing Section */}
+      <Text style={styles.sectionHeader}>Pairing</Text>
+      <View style={styles.card}>
+        <View style={styles.row}>
+          <Text style={styles.label}>Status</Text>
+          <View style={styles.statusRow}>
+            <View style={[styles.dot, connected ? styles.connectedDot : styles.disconnectedDot]} />
+            <Text style={styles.value}>{connected ? 'Connected' : 'Not paired'}</Text>
+          </View>
+        </View>
+
+        {pairingSAS ? (
+          <View style={styles.sasSection}>
+            <Text style={styles.sasLabel}>Verify this code matches your daemon:</Text>
+            <Text style={styles.sasCode}>{pairingSAS}</Text>
+            <View style={styles.buttonGroup}>
+              <Pressable
+                style={styles.secondaryButton}
+                onPress={() => {
+                  setPairingSAS(null);
+                  setPairingConfirm(null);
+                }}
+              >
+                <Text style={styles.secondaryButtonText}>Cancel</Text>
+              </Pressable>
+              <Pressable style={styles.primaryButton} onPress={pairingConfirm ?? undefined}>
+                <Text style={styles.primaryButtonText}>Confirm Match</Text>
+              </Pressable>
+            </View>
+          </View>
+        ) : (
+          <Pressable style={styles.primaryButton} onPress={handleStartPairing}>
+            <Text style={styles.primaryButtonText}>Scan Daemon QR Code</Text>
+          </Pressable>
+        )}
+      </View>
+
+      {/* Devices Section */}
+      <Text style={styles.sectionHeader}>Paired Devices</Text>
+      <View style={styles.card}>
+        {devices.length === 0 ? (
+          <Text style={styles.emptyText}>No paired devices</Text>
+        ) : (
+          devices.map((device) => (
+            <View key={device.deviceId} style={styles.deviceRow}>
+              <View style={styles.deviceInfo}>
+                <Text style={styles.deviceName}>
+                  {device.name ?? device.deviceId}
+                </Text>
+                <Text style={styles.deviceMeta}>
+                  {device.type} | {new Date(device.pairedAt).toLocaleDateString()}
+                </Text>
+                {device.isRevoked && (
+                  <Text style={styles.revokedBadge}>REVOKED</Text>
+                )}
+              </View>
+              {!device.isRevoked && device.deviceId !== deviceId && (
+                <Pressable
+                  style={styles.revokeButton}
+                  onPress={() => handleRevoke(device)}
+                >
+                  <Text style={styles.revokeButtonText}>Revoke</Text>
+                </Pressable>
+              )}
+            </View>
+          ))
+        )}
+      </View>
+
+      {/* App Info */}
+      <Text style={styles.sectionHeader}>About</Text>
+      <View style={styles.card}>
+        <View style={styles.row}>
+          <Text style={styles.label}>App</Text>
+          <Text style={styles.value}>WDK-APP v0.1.0</Text>
+        </View>
+        <View style={styles.row}>
+          <Text style={styles.label}>Crypto</Text>
+          <Text style={styles.value}>Ed25519 + Curve25519 (tweetnacl)</Text>
+        </View>
+        <View style={styles.row}>
+          <Text style={styles.label}>Storage</Text>
+          <Text style={styles.value}>Expo SecureStore</Text>
+        </View>
+      </View>
+    </ScrollView>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#0a0a0a',
+  },
+  contentContainer: {
+    paddingBottom: 40,
+  },
+  sectionHeader: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#9ca3af',
+    paddingHorizontal: 16,
+    paddingTop: 20,
+    paddingBottom: 8,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  card: {
+    backgroundColor: '#111111',
+    marginHorizontal: 16,
+    borderRadius: 12,
+    padding: 16,
+  },
+  row: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 8,
+  },
+  label: {
+    fontSize: 14,
+    color: '#6b7280',
+  },
+  value: {
+    fontSize: 14,
+    color: '#ffffff',
+  },
+  monoValue: {
+    fontSize: 12,
+    fontFamily: 'Menlo',
+    color: '#9ca3af',
+    maxWidth: '60%',
+    textAlign: 'right',
+  },
+  statusRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  dot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    marginRight: 6,
+  },
+  connectedDot: {
+    backgroundColor: '#22c55e',
+  },
+  disconnectedDot: {
+    backgroundColor: '#ef4444',
+  },
+  noKeyState: {
+    alignItems: 'center',
+    paddingVertical: 16,
+  },
+  noKeyText: {
+    fontSize: 14,
+    color: '#6b7280',
+    marginBottom: 16,
+  },
+  emptyText: {
+    fontSize: 13,
+    color: '#4b5563',
+    textAlign: 'center',
+    paddingVertical: 16,
+  },
+  buttonGroup: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 12,
+  },
+  primaryButton: {
+    flex: 1,
+    backgroundColor: '#3b82f6',
+    borderRadius: 8,
+    paddingVertical: 12,
+    alignItems: 'center',
+    marginTop: 8,
+  },
+  primaryButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#ffffff',
+  },
+  secondaryButton: {
+    flex: 1,
+    backgroundColor: '#1a1a1a',
+    borderRadius: 8,
+    paddingVertical: 12,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#374151',
+  },
+  secondaryButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#ffffff',
+  },
+  dangerButton: {
+    flex: 1,
+    backgroundColor: '#450a0a',
+    borderRadius: 8,
+    paddingVertical: 12,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#7f1d1d',
+  },
+  dangerButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#ef4444',
+  },
+  sasSection: {
+    alignItems: 'center',
+    paddingVertical: 16,
+  },
+  sasLabel: {
+    fontSize: 13,
+    color: '#6b7280',
+    marginBottom: 12,
+    textAlign: 'center',
+  },
+  sasCode: {
+    fontSize: 36,
+    fontWeight: 'bold',
+    fontFamily: 'Menlo',
+    color: '#3b82f6',
+    letterSpacing: 8,
+    marginBottom: 16,
+  },
+  deviceRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#1a1a1a',
+  },
+  deviceInfo: {
+    flex: 1,
+  },
+  deviceName: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#ffffff',
+  },
+  deviceMeta: {
+    fontSize: 12,
+    color: '#6b7280',
+    marginTop: 2,
+  },
+  revokedBadge: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: '#ef4444',
+    marginTop: 2,
+  },
+  revokeButton: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 6,
+    backgroundColor: '#450a0a',
+    borderWidth: 1,
+    borderColor: '#7f1d1d',
+  },
+  revokeButtonText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#ef4444',
+  },
+});
