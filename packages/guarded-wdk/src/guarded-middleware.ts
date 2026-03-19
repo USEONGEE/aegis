@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto'
+import { randomUUID, createHash } from 'node:crypto'
 import { intentHash } from '@wdk-app/canonical'
 import { ForbiddenError, PolicyRejectionError } from './errors.js'
 import type { SignedApprovalBroker } from './signed-approval-broker.js'
@@ -13,17 +13,22 @@ export interface ArgCondition {
   value: string | string[]
 }
 
-export interface Permission {
-  target?: string
-  selector?: string
+export interface Rule {
+  order: number
   args?: Record<string, ArgCondition>
   valueLimit?: string | number
   decision: Decision
 }
 
+export interface PermissionDict {
+  [target: string]: {
+    [selector: string]: Rule[]
+  }
+}
+
 export interface CallPolicy {
   type: 'call'
-  permissions: Permission[]
+  permissions: PermissionDict
 }
 
 export interface TimestampPolicy {
@@ -39,7 +44,7 @@ export interface ChainPolicyConfig {
   [key: string]: unknown
 }
 
-export type ChainPolicies = Record<string, ChainPolicyConfig>
+export type ChainPolicies = Record<number, ChainPolicyConfig>
 
 interface Transaction {
   to?: string
@@ -58,15 +63,23 @@ interface TransactionResult {
   fee: bigint
 }
 
+export interface SignTransactionResult {
+  signedTx: string
+  intentHash: string
+  requestId: string
+  intentId: string
+}
+
 interface TransactionReceipt {
   status: number
 }
 
 interface GuardedAccount {
   sendTransaction: (tx: Transaction) => Promise<TransactionResult>
+  signTransaction?: (tx: Transaction) => Promise<SignTransactionResult>
   transfer: (options: TransferOptions) => Promise<TransactionResult>
   sign: (...args: unknown[]) => never
-  signTypedData: (...args: unknown[]) => never
+  signTypedData?: (...args: unknown[]) => never
   dispose: (...args: unknown[]) => never
   keyPair: unknown
   getAddress: () => Promise<string>
@@ -76,7 +89,7 @@ interface GuardedAccount {
 
 export interface EvaluationResult {
   decision: Decision
-  matchedPermission: Permission | null
+  matchedPermission: Rule | null
   reason: string
 }
 
@@ -84,7 +97,7 @@ interface MiddlewareConfig {
   policiesRef: () => ChainPolicies
   approvalBroker: SignedApprovalBroker
   emitter: EventEmitter
-  chain: string
+  chainId: number
 }
 
 function validatePolicy (policy: Policy): void {
@@ -95,24 +108,28 @@ function validatePolicy (policy: Policy): void {
     throw new Error("Policy must have a 'type' field.")
   }
   if (policy.type === 'call') {
-    if (!Array.isArray(policy.permissions)) {
-      throw new Error("Call policy must have a 'permissions' array.")
+    if (!policy.permissions || typeof policy.permissions !== 'object') {
+      throw new Error("Call policy must have a 'permissions' object.")
     }
-    for (const perm of policy.permissions) {
-      if (!perm.decision) {
-        throw new Error("Each permission must have a 'decision' field.")
-      }
-      if (!['AUTO', 'REQUIRE_APPROVAL', 'REJECT'].includes(perm.decision)) {
-        throw new Error(`Invalid decision: ${perm.decision}`)
-      }
-      if (perm.args) {
-        for (const [, cond] of Object.entries(perm.args)) {
-          if (!cond.condition) {
-            throw new Error("Each arg condition must have a 'condition' field.")
+    for (const [, selectorMap] of Object.entries(policy.permissions)) {
+      for (const [, rules] of Object.entries(selectorMap as Record<string, Rule[]>)) {
+        for (const rule of rules) {
+          if (!rule.decision) {
+            throw new Error("Each rule must have a 'decision' field.")
           }
-          const valid = ['EQ', 'NEQ', 'GT', 'GTE', 'LT', 'LTE', 'ONE_OF', 'NOT_ONE_OF']
-          if (!valid.includes(cond.condition)) {
-            throw new Error(`Invalid condition operator: ${cond.condition}`)
+          if (!['AUTO', 'REQUIRE_APPROVAL', 'REJECT'].includes(rule.decision)) {
+            throw new Error(`Invalid decision: ${rule.decision}`)
+          }
+          if (rule.args) {
+            for (const [, cond] of Object.entries(rule.args)) {
+              if (!cond.condition) {
+                throw new Error("Each arg condition must have a 'condition' field.")
+              }
+              const valid = ['EQ', 'NEQ', 'GT', 'GTE', 'LT', 'LTE', 'ONE_OF', 'NOT_ONE_OF']
+              if (!valid.includes(cond.condition)) {
+                throw new Error(`Invalid condition operator: ${cond.condition}`)
+              }
+            }
           }
         }
       }
@@ -131,6 +148,23 @@ export function validatePolicies (policies: Policy[]): void {
   for (const policy of policies) {
     validatePolicy(policy)
   }
+}
+
+export function permissionsToDict (permissions: Array<{ target?: string; selector?: string; args?: Record<string, ArgCondition>; valueLimit?: string | number; decision: Decision }>): PermissionDict {
+  const dict: PermissionDict = {}
+  permissions.forEach((perm, i) => {
+    const target = perm.target?.toLowerCase() ?? '*'
+    const selector = perm.selector ?? '*'
+    if (!dict[target]) dict[target] = {}
+    if (!dict[target][selector]) dict[target][selector] = []
+    dict[target][selector].push({
+      order: i,
+      args: perm.args,
+      valueLimit: perm.valueLimit,
+      decision: perm.decision
+    })
+  })
+  return dict
 }
 
 function matchCondition (condition: string, actual: string, expected: string | string[]): boolean {
@@ -166,8 +200,8 @@ function matchArgs (data: string, argConditions: Record<string, ArgCondition>): 
   return true
 }
 
-export function evaluatePolicy (chainPolicies: ChainPolicies, chain: string, tx: Transaction): EvaluationResult {
-  const config = chainPolicies[chain]
+export function evaluatePolicy (chainPolicies: ChainPolicies, chainId: number, tx: Transaction): EvaluationResult {
+  const config = chainPolicies[chainId]
   if (!config || !config.policies) {
     return { decision: 'REJECT', matchedPermission: null, reason: 'no policies for chain' }
   }
@@ -202,12 +236,32 @@ export function evaluatePolicy (chainPolicies: ChainPolicies, chain: string, tx:
     return { decision: 'REJECT', matchedPermission: null, reason: 'missing or invalid tx.data' }
   }
 
-  for (const perm of callPolicy.permissions) {
-    if (perm.target && perm.target.toLowerCase() !== txTo) continue
-    if (perm.selector && perm.selector !== txSelector) continue
-    if (perm.args && !matchArgs(tx.data, perm.args)) continue
-    if (perm.valueLimit !== undefined && BigInt(tx.value || 0) > BigInt(perm.valueLimit)) continue
-    return { decision: perm.decision, matchedPermission: perm, reason: 'matched' }
+  // Collect candidates from matching buckets
+  const candidates: Rule[] = []
+  const perms = callPolicy.permissions
+
+  // Check exact target + exact selector / wildcard selector
+  const exactTarget = perms[txTo]
+  if (exactTarget) {
+    if (txSelector && exactTarget[txSelector]) candidates.push(...exactTarget[txSelector])
+    if (exactTarget['*']) candidates.push(...exactTarget['*'])
+  }
+
+  // Check wildcard target + exact selector / wildcard selector
+  const wildTarget = perms['*']
+  if (wildTarget) {
+    if (txSelector && wildTarget[txSelector]) candidates.push(...wildTarget[txSelector])
+    if (wildTarget['*']) candidates.push(...wildTarget['*'])
+  }
+
+  // Sort by original order to preserve Permission[] semantics
+  candidates.sort((a, b) => a.order - b.order)
+
+  // Match in order
+  for (const rule of candidates) {
+    if (rule.args && !matchArgs(tx.data, rule.args)) continue
+    if (rule.valueLimit !== undefined && BigInt(tx.value || 0) > BigInt(rule.valueLimit)) continue
+    return { decision: rule.decision, matchedPermission: rule, reason: 'matched' }
   }
 
   return { decision: 'REJECT', matchedPermission: null, reason: 'no matching permission' }
@@ -235,10 +289,16 @@ async function pollReceipt (account: GuardedAccount, hash: string, emitter: Even
   }
 }
 
-export function createGuardedMiddleware ({ policiesRef, approvalBroker, emitter, chain }: MiddlewareConfig): (account: GuardedAccount) => Promise<void> {
+export function createGuardedMiddleware ({ policiesRef, approvalBroker, emitter, chainId }: MiddlewareConfig): (account: GuardedAccount) => Promise<void> {
   return async (account: GuardedAccount) => {
     const rawSendTransaction = account.sendTransaction.bind(account)
     const rawTransfer = account.transfer.bind(account)
+    // Save raw sign before override (used by signTransaction fallback)
+    const rawSign: ((...args: unknown[]) => unknown) | null =
+      typeof account.sign === 'function' ? account.sign.bind(account) : null
+    // Save raw signTransaction before override (preferred for signTransaction if WDK provides it)
+    const rawSignTransaction: ((tx: Transaction) => Promise<unknown>) | null =
+      typeof account.signTransaction === 'function' ? account.signTransaction.bind(account) : null
 
     account.sign = () => { throw new ForbiddenError('sign') }
     account.signTypedData = () => { throw new ForbiddenError('signTypedData') }
@@ -256,11 +316,11 @@ export function createGuardedMiddleware ({ policiesRef, approvalBroker, emitter,
         type: 'IntentProposed',
         requestId,
         tx: { to: tx.to, data: tx.data?.slice?.(0, 10), value: tx.value },
-        chain,
+        chainId,
         timestamp: Date.now()
       })
 
-      const { decision, matchedPermission, reason } = evaluatePolicy(policies, chain, tx)
+      const { decision, matchedPermission, reason } = evaluatePolicy(policies, chainId, tx)
 
       emitter.emit('PolicyEvaluated', {
         type: 'PolicyEvaluated',
@@ -277,7 +337,7 @@ export function createGuardedMiddleware ({ policiesRef, approvalBroker, emitter,
 
       if (decision === 'REQUIRE_APPROVAL') {
         const targetHash = intentHash({
-          chain,
+          chainId,
           to: tx.to!,
           data: tx.data!,
           value: String(tx.value || '0')
@@ -294,7 +354,7 @@ export function createGuardedMiddleware ({ policiesRef, approvalBroker, emitter,
 
         const request = await approvalBroker.createRequest('tx', {
           requestId,
-          chain,
+          chainId,
           targetHash,
           metadata: {
             walletAddress: await account.getAddress(),
@@ -360,11 +420,11 @@ export function createGuardedMiddleware ({ policiesRef, approvalBroker, emitter,
         type: 'IntentProposed',
         requestId,
         tx: { to: mockTx.to, data: mockTx.data?.slice?.(0, 10), value: mockTx.value },
-        chain,
+        chainId,
         timestamp: Date.now()
       })
 
-      const { decision, matchedPermission, reason } = evaluatePolicy(policies, chain, mockTx)
+      const { decision, matchedPermission, reason } = evaluatePolicy(policies, chainId, mockTx)
 
       emitter.emit('PolicyEvaluated', {
         type: 'PolicyEvaluated',
@@ -381,7 +441,7 @@ export function createGuardedMiddleware ({ policiesRef, approvalBroker, emitter,
 
       if (decision === 'REQUIRE_APPROVAL') {
         const targetHash = intentHash({
-          chain,
+          chainId,
           to: mockTx.to!,
           data: mockTx.data!,
           value: String(mockTx.value || '0')
@@ -398,7 +458,7 @@ export function createGuardedMiddleware ({ policiesRef, approvalBroker, emitter,
 
         const request = await approvalBroker.createRequest('tx', {
           requestId,
-          chain,
+          chainId,
           targetHash,
           metadata: {
             target: mockTx.to,
@@ -440,6 +500,121 @@ export function createGuardedMiddleware ({ policiesRef, approvalBroker, emitter,
       pollReceipt(account, result.hash, emitter, requestId)
 
       return result
+    }
+
+    account.signTransaction = async (tx: Transaction): Promise<SignTransactionResult> => {
+      const policies = policiesRef()
+      const requestId = randomUUID()
+      const intentId = randomUUID()
+
+      emitter.emit('IntentProposed', {
+        type: 'IntentProposed',
+        requestId,
+        tx: { to: tx.to, data: tx.data?.slice?.(0, 10), value: tx.value },
+        chainId,
+        timestamp: Date.now()
+      })
+
+      const { decision, matchedPermission, reason } = evaluatePolicy(policies, chainId, tx)
+
+      emitter.emit('PolicyEvaluated', {
+        type: 'PolicyEvaluated',
+        requestId,
+        decision,
+        matchedPermission,
+        reason,
+        timestamp: Date.now()
+      })
+
+      if (decision === 'REJECT') {
+        throw new PolicyRejectionError(reason)
+      }
+
+      const targetHash = intentHash({
+        chainId,
+        to: tx.to!,
+        data: tx.data!,
+        value: String(tx.value || '0')
+      })
+
+      if (decision === 'REQUIRE_APPROVAL') {
+        emitter.emit('ApprovalRequested', {
+          type: 'ApprovalRequested',
+          requestId,
+          target: tx.to,
+          selector: tx.data?.slice?.(0, 10),
+          targetHash,
+          timestamp: Date.now()
+        })
+
+        const request = await approvalBroker.createRequest('tx', {
+          requestId,
+          chainId,
+          targetHash,
+          metadata: {
+            walletAddress: await account.getAddress(),
+            target: tx.to,
+            selector: tx.data?.slice?.(0, 10)
+          }
+        })
+
+        const signedApproval = await approvalBroker.waitForApproval(request.requestId, 60000)
+
+        emitter.emit('ApprovalGranted', {
+          type: 'ApprovalGranted',
+          requestId,
+          approver: signedApproval.approver,
+          timestamp: Date.now()
+        })
+      }
+
+      // Sign the transaction:
+      // 1. Prefer rawSignTransaction (original account.signTransaction saved before override)
+      // 2. Fallback to rawSign (original account.sign)
+      // 3. Last resort: deterministic SHA-256 hash (mock/test only)
+      // The signed tx format depends on the WDK implementation; mock uses '0x' + sha256.
+      const txPayload = JSON.stringify({
+        to: tx.to,
+        data: tx.data,
+        value: String(tx.value || '0'),
+        chainId,
+        intentHash: targetHash
+      })
+
+      let signedTx: string
+      if (rawSignTransaction) {
+        // Use the original account.signTransaction (saved before our override)
+        const rawResult = await rawSignTransaction(tx)
+        const resultObj = rawResult as { signedTx?: string } | string
+        signedTx = typeof resultObj === 'string' ? resultObj
+          : (resultObj?.signedTx ?? String(resultObj))
+        // Ensure hex prefix
+        if (!signedTx.startsWith('0x')) signedTx = '0x' + signedTx
+      } else if (rawSign) {
+        // Fallback: use the raw account.sign method
+        const signResult = await Promise.resolve(rawSign(txPayload))
+        signedTx = typeof signResult === 'string' ? signResult
+          : '0x' + Buffer.from(String(signResult)).toString('hex')
+        if (!signedTx.startsWith('0x')) signedTx = '0x' + signedTx
+      } else {
+        // Last resort: deterministic hash (mock/test only)
+        signedTx = '0x' + createHash('sha256').update(txPayload).digest('hex')
+      }
+
+      emitter.emit('TransactionSigned', {
+        type: 'TransactionSigned',
+        requestId,
+        intentId,
+        intentHash: targetHash,
+        timestamp: Date.now()
+      })
+
+      return {
+        signedTx,
+        intentHash: targetHash,
+        requestId,
+        intentId
+      }
     }
   }
 }

@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { readFile, writeFile, rename, mkdir } from 'node:fs/promises'
+import { chmodSync } from 'node:fs'
 import { join } from 'node:path'
 import { homedir } from 'node:os'
 import {
@@ -7,18 +8,17 @@ import {
   type SignedPolicy,
   type StoredPolicy,
   type ApprovalRequest,
-  type PendingRequest,
+  type PendingApprovalRequest,
   type HistoryEntry,
-  type StoredHistoryEntry,
   type DeviceRecord,
-  type CronRecord,
   type CronInput,
   type SeedRecord,
   type JournalEntry,
-  type StoredJournalEntry,
   type HistoryQueryOpts,
-  type JournalQueryOpts
+  type JournalQueryOpts,
+  type SignedApproval
 } from './approval-store.js'
+import type { PendingRequest, StoredHistoryEntry, CronRecord, StoredJournalEntry } from './store-types.js'
 
 interface SeedsFile {
   seeds: SeedRecord[]
@@ -65,6 +65,7 @@ export class JsonApprovalStore extends ApprovalStore {
 
   override async init (): Promise<void> {
     await mkdir(this._dir, { recursive: true })
+    chmodSync(this._dir, 0o700)
     // Ensure all files exist with defaults
     const defaults: Record<string, unknown> = {
       'policies.json': {},
@@ -90,20 +91,20 @@ export class JsonApprovalStore extends ApprovalStore {
 
   // --- Active Policy ---
 
-  override async loadPolicy (seedId: string, chain: string): Promise<StoredPolicy | null> {
+  override async loadPolicy (seedId: string, chainId: number): Promise<StoredPolicy | null> {
     const policies = await this._read<Record<string, StoredPolicy>>('policies.json') || {}
-    const key = `${seedId}:${chain}`
+    const key = `${seedId}:${chainId}`
     return policies[key] || null
   }
 
-  override async savePolicy (seedId: string, chain: string, signedPolicy: SignedPolicy): Promise<void> {
+  override async savePolicy (seedId: string, chainId: number, signedPolicy: SignedPolicy): Promise<void> {
     const policies = await this._read<Record<string, StoredPolicy>>('policies.json') || {}
-    const key = `${seedId}:${chain}`
+    const key = `${seedId}:${chainId}`
     const existing = policies[key]
     const version = existing ? (existing.policy_version || 0) + 1 : 1
     policies[key] = {
       seed_id: seedId,
-      chain,
+      chain_id: chainId,
       ...signedPolicy,
       policy_version: version,
       updated_at: Date.now()
@@ -111,30 +112,53 @@ export class JsonApprovalStore extends ApprovalStore {
     await this._write('policies.json', policies)
   }
 
-  override async getPolicyVersion (seedId: string, chain: string): Promise<number> {
-    const policy = await this.loadPolicy(seedId, chain)
+  override async getPolicyVersion (seedId: string, chainId: number): Promise<number> {
+    const policy = await this.loadPolicy(seedId, chainId)
     return policy ? policy.policy_version : 0
+  }
+
+  override async listPolicyChains (seedId: string): Promise<string[]> {
+    const policies = await this._read<Record<string, StoredPolicy>>('policies.json') || {}
+    const prefix = `${seedId}:`
+    return Object.keys(policies)
+      .filter(key => key.startsWith(prefix))
+      .map(key => key.slice(prefix.length))
   }
 
   // --- Pending Requests ---
 
-  override async loadPending (seedId: string | null, type: string | null, chain: string | null): Promise<PendingRequest[]> {
+  override async loadPendingApprovals (seedId: string | null, type: string | null, chainId: number | null): Promise<PendingApprovalRequest[]> {
     const pending = await this._read<PendingRequest[]>('pending.json') || []
-    return pending.filter(p => {
-      if (seedId && p.seed_id !== seedId) return false
-      if (type && p.type !== type) return false
-      if (chain && p.chain !== chain) return false
-      return true
-    })
+    return pending
+      .filter(p => {
+        if (seedId && p.seed_id !== seedId) return false
+        if (type && p.type !== type) return false
+        if (chainId !== null && chainId !== undefined && p.chain_id !== chainId) return false
+        return true
+      })
+      .map(p => ({
+        requestId: p.request_id,
+        seedId: p.seed_id,
+        type: p.type,
+        chainId: p.chain_id,
+        targetHash: p.target_hash,
+        metadata: p.metadata_json ? JSON.parse(p.metadata_json) as Record<string, unknown> : undefined,
+        createdAt: p.created_at
+      }))
   }
 
-  override async savePending (seedId: string, request: ApprovalRequest): Promise<void> {
+  override async loadPendingByRequestId (requestId: string): Promise<PendingRequest | null> {
+    const pending = await this._read<PendingRequest[]>('pending.json') || []
+    return pending.find(p => p.request_id === requestId) || null
+  }
+
+  override async savePendingApproval (seedId: string, request: ApprovalRequest): Promise<void> {
     const pending = await this._read<PendingRequest[]>('pending.json') || []
     pending.push({
       request_id: request.requestId,
       seed_id: seedId,
       type: request.type,
-      chain: request.chain,
+      chain_id: request.chainId,
       target_hash: request.targetHash,
       metadata_json: request.metadata ? JSON.stringify(request.metadata) : null,
       created_at: request.createdAt || Date.now()
@@ -142,7 +166,7 @@ export class JsonApprovalStore extends ApprovalStore {
     await this._write('pending.json', pending)
   }
 
-  override async removePending (requestId: string): Promise<void> {
+  override async removePendingApproval (requestId: string): Promise<void> {
     const pending = await this._read<PendingRequest[]>('pending.json') || []
     const filtered = pending.filter(p => p.request_id !== requestId)
     await this._write('pending.json', filtered)
@@ -153,20 +177,20 @@ export class JsonApprovalStore extends ApprovalStore {
   override async appendHistory (entry: HistoryEntry): Promise<void> {
     const history = await this._read<StoredHistoryEntry[]>('history.json') || []
     history.push({
-      seed_id: entry.seedId || entry.seed_id || '',
+      seed_id: entry.seedId,
       type: entry.type,
-      chain: entry.chain || null,
-      target_hash: entry.targetHash || entry.target_hash || '',
+      chain_id: entry.chainId ?? null,
+      target_hash: entry.targetHash,
       approver: entry.approver,
-      device_id: entry.deviceId || entry.device_id || '',
+      device_id: entry.deviceId,
       action: entry.action,
       signed_approval_json: entry.signedApproval ? JSON.stringify(entry.signedApproval) : null,
-      timestamp: entry.timestamp || Date.now()
+      timestamp: entry.timestamp
     })
     await this._write('history.json', history)
   }
 
-  override async getHistory (opts: HistoryQueryOpts = {}): Promise<StoredHistoryEntry[]> {
+  override async getHistory (opts: HistoryQueryOpts = {}): Promise<HistoryEntry[]> {
     const history = await this._read<StoredHistoryEntry[]>('history.json') || []
     let result = history
     if (opts.seedId) {
@@ -175,13 +199,23 @@ export class JsonApprovalStore extends ApprovalStore {
     if (opts.type) {
       result = result.filter(h => h.type === opts.type)
     }
-    if (opts.chain) {
-      result = result.filter(h => h.chain === opts.chain)
+    if (opts.chainId !== undefined) {
+      result = result.filter(h => h.chain_id === opts.chainId)
     }
     if (opts.limit) {
       result = result.slice(-opts.limit)
     }
-    return result
+    return result.map(h => ({
+      seedId: h.seed_id,
+      type: h.type,
+      chainId: h.chain_id,
+      targetHash: h.target_hash,
+      approver: h.approver,
+      deviceId: h.device_id,
+      action: h.action,
+      signedApproval: h.signed_approval_json ? JSON.parse(h.signed_approval_json) as SignedApproval : undefined,
+      timestamp: h.timestamp
+    }))
   }
 
   // --- Devices ---
@@ -253,10 +287,10 @@ export class JsonApprovalStore extends ApprovalStore {
     crons.push({
       id: cron.id || randomUUID(),
       seed_id: seedId,
-      session_id: cron.sessionId || cron.session_id || '',
+      session_id: cron.sessionId || '',
       interval: cron.interval,
       prompt: cron.prompt,
-      chain: cron.chain || null,
+      chain_id: cron.chainId ?? null,
       created_at: cron.createdAt || Date.now(),
       last_run_at: null,
       is_active: 1
@@ -340,20 +374,31 @@ export class JsonApprovalStore extends ApprovalStore {
 
   // --- Execution Journal ---
 
-  override async getJournalEntry (intentId: string): Promise<StoredJournalEntry | null> {
+  override async getJournalEntry (intentId: string): Promise<JournalEntry | null> {
     const journal = await this._read<StoredJournalEntry[]>('journal.json') || []
-    return journal.find(j => j.intent_id === intentId) || null
+    const found = journal.find(j => j.intent_id === intentId)
+    if (!found) return null
+    return {
+      intentId: found.intent_id,
+      seedId: found.seed_id,
+      chainId: found.chain_id,
+      targetHash: found.target_hash,
+      status: found.status,
+      txHash: found.tx_hash,
+      createdAt: found.created_at,
+      updatedAt: found.updated_at
+    }
   }
 
   override async saveJournalEntry (entry: JournalEntry): Promise<void> {
     const journal = await this._read<StoredJournalEntry[]>('journal.json') || []
     journal.push({
-      intent_id: entry.intentId || entry.intent_id || '',
-      seed_id: entry.seedId || entry.seed_id || '',
-      chain: entry.chain,
-      target_hash: entry.targetHash || entry.target_hash || '',
+      intent_id: entry.intentId || '',
+      seed_id: entry.seedId || '',
+      chain_id: entry.chainId,
+      target_hash: entry.targetHash || '',
       status: entry.status,
-      tx_hash: entry.txHash || entry.tx_hash || null,
+      tx_hash: entry.txHash ?? null,
       created_at: entry.createdAt || Date.now(),
       updated_at: entry.updatedAt || Date.now()
     })
@@ -371,7 +416,7 @@ export class JsonApprovalStore extends ApprovalStore {
     }
   }
 
-  override async listJournal (opts: JournalQueryOpts = {}): Promise<StoredJournalEntry[]> {
+  override async listJournal (opts: JournalQueryOpts = {}): Promise<JournalEntry[]> {
     const journal = await this._read<StoredJournalEntry[]>('journal.json') || []
     let result = journal
     if (opts.seedId) {
@@ -380,12 +425,21 @@ export class JsonApprovalStore extends ApprovalStore {
     if (opts.status) {
       result = result.filter(j => j.status === opts.status)
     }
-    if (opts.chain) {
-      result = result.filter(j => j.chain === opts.chain)
+    if (opts.chainId !== undefined) {
+      result = result.filter(j => j.chain_id === opts.chainId)
     }
     if (opts.limit) {
       result = result.slice(-opts.limit)
     }
-    return result
+    return result.map(j => ({
+      intentId: j.intent_id,
+      seedId: j.seed_id,
+      chainId: j.chain_id,
+      targetHash: j.target_hash,
+      status: j.status,
+      txHash: j.tx_hash,
+      createdAt: j.created_at,
+      updatedAt: j.updated_at
+    }))
   }
 }

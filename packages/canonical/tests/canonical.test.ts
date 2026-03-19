@@ -1,5 +1,5 @@
 import { describe, test, expect } from '@jest/globals'
-import { sortKeysDeep, canonicalJSON, intentHash, policyHash } from '../src/index.js'
+import { sortKeysDeep, canonicalJSON, intentHash, policyHash, CHAIN_IDS } from '../src/index.js'
 import type { PolicyObject } from '../src/index.js'
 
 describe('sortKeysDeep', () => {
@@ -53,31 +53,31 @@ describe('canonicalJSON', () => {
 
 describe('intentHash', () => {
   test('produces deterministic hash', () => {
-    const hash1 = intentHash({ chain: 'ethereum', to: '0xAbC', data: '0xDef', value: '0' })
-    const hash2 = intentHash({ chain: 'ethereum', to: '0xAbC', data: '0xDef', value: '0' })
+    const hash1 = intentHash({ chainId: CHAIN_IDS.ethereum, to: '0xAbC', data: '0xDef', value: '0' })
+    const hash2 = intentHash({ chainId: CHAIN_IDS.ethereum, to: '0xAbC', data: '0xDef', value: '0' })
     expect(hash1).toBe(hash2)
   })
 
   test('normalizes addresses to lowercase', () => {
-    const hash1 = intentHash({ chain: 'ethereum', to: '0xABC', data: '0xDEF', value: '0' })
-    const hash2 = intentHash({ chain: 'ethereum', to: '0xabc', data: '0xdef', value: '0' })
+    const hash1 = intentHash({ chainId: CHAIN_IDS.ethereum, to: '0xABC', data: '0xDEF', value: '0' })
+    const hash2 = intentHash({ chainId: CHAIN_IDS.ethereum, to: '0xabc', data: '0xdef', value: '0' })
     expect(hash1).toBe(hash2)
   })
 
-  test('keys are sorted alphabetically (chain, data, to, value)', () => {
-    const hash = intentHash({ chain: 'ethereum', to: '0xabc', data: '0xdef', value: '0' })
+  test('keys are sorted alphabetically (chainId, data, to, value)', () => {
+    const hash = intentHash({ chainId: CHAIN_IDS.ethereum, to: '0xabc', data: '0xdef', value: '0' })
     expect(hash).toMatch(/^0x[0-9a-f]{64}$/)
   })
 
   test('different inputs produce different hashes', () => {
-    const hash1 = intentHash({ chain: 'ethereum', to: '0xabc', data: '0xdef', value: '0' })
-    const hash2 = intentHash({ chain: 'arbitrum', to: '0xabc', data: '0xdef', value: '0' })
+    const hash1 = intentHash({ chainId: CHAIN_IDS.ethereum, to: '0xabc', data: '0xdef', value: '0' })
+    const hash2 = intentHash({ chainId: CHAIN_IDS.arbitrum, to: '0xabc', data: '0xdef', value: '0' })
     expect(hash1).not.toBe(hash2)
   })
 
   test('value is normalized to string', () => {
-    const hash1 = intentHash({ chain: 'ethereum', to: '0xabc', data: '0xdef', value: 0 })
-    const hash2 = intentHash({ chain: 'ethereum', to: '0xabc', data: '0xdef', value: '0' })
+    const hash1 = intentHash({ chainId: CHAIN_IDS.ethereum, to: '0xabc', data: '0xdef', value: 0 })
+    const hash2 = intentHash({ chainId: CHAIN_IDS.ethereum, to: '0xabc', data: '0xdef', value: '0' })
     expect(hash1).toBe(hash2)
   })
 })

@@ -1,6 +1,6 @@
 import { SignedApprovalBroker } from '../src/signed-approval-broker.js'
 import { ApprovalStore } from '../src/approval-store.js'
-import type { HistoryEntry, HistoryQueryOpts, ApprovalRequest, StoredHistoryEntry } from '../src/approval-store.js'
+import type { HistoryEntry, HistoryQueryOpts, ApprovalRequest } from '../src/approval-store.js'
 import { ApprovalTimeoutError } from '../src/errors.js'
 import { generateKeyPair, sign } from '../src/crypto-utils.js'
 import type { KeyPair } from '../src/crypto-utils.js'
@@ -24,11 +24,11 @@ class MockApprovalStore extends ApprovalStore {
   override async loadPolicy (seedId: string, chain: string) { return (this._policies[`${seedId}:${chain}`] || null) as never }
   override async savePolicy (seedId: string, chain: string, policy: unknown) { this._policies[`${seedId}:${chain}`] = policy }
   override async getPolicyVersion (_seedId: string, _chain: string) { return 0 }
-  override async loadPending (_seedId: string | null, type: string | null, chain: string | null) { return this._pending.filter(p => (!type || p.type === type) && (!chain || p.chain === chain)) as never }
-  override async savePending (_seedId: string, request: ApprovalRequest) { this._pending.push(request as ApprovalRequest & Record<string, unknown>) }
-  override async removePending (requestId: string) { this._pending = this._pending.filter(p => p.requestId !== requestId) }
+  override async loadPendingApprovals (_seedId: string | null, type: string | null, chain: string | null) { return this._pending.filter(p => (!type || p.type === type) && (!chain || (p as any).chain === chain)) as never }
+  override async savePendingApproval (_seedId: string, request: ApprovalRequest) { this._pending.push(request as ApprovalRequest & Record<string, unknown>) }
+  override async removePendingApproval (requestId: string) { this._pending = this._pending.filter(p => p.requestId !== requestId) }
   override async appendHistory (entry: HistoryEntry) { this._history.push(entry) }
-  override async getHistory (_opts?: HistoryQueryOpts) { return this._history as unknown as StoredHistoryEntry[] }
+  override async getHistory (_opts?: HistoryQueryOpts) { return this._history as HistoryEntry[] }
   override async isDeviceRevoked (deviceId: string) { return this._devices[deviceId]?.revoked === true }
   override async revokeDevice (deviceId: string) { this._devices[deviceId] = { revoked: true } }
   override async getLastNonce (approver: string, deviceId: string) { return this._nonces[`${approver}:${deviceId}`] || 0 }
@@ -39,7 +39,7 @@ function makeSignedApproval (keyPair: KeyPair, overrides: Record<string, unknown
   const approval: Record<string, unknown> = {
     type: 'tx',
     requestId: 'req-1',
-    chain: 'ethereum',
+    chainId: 1,
     targetHash: '0xabc123',
     approver: keyPair.publicKey,
     deviceId: 'device-1',
@@ -77,17 +77,17 @@ describe('SignedApprovalBroker', () => {
   test('createRequest creates a pending request', async () => {
     const request = await broker.createRequest('tx', {
       requestId: 'req-1',
-      chain: 'ethereum',
+      chainId: 1,
       targetHash: '0xabc123'
     })
     expect(request.requestId).toBe('req-1')
     expect(request.type).toBe('tx')
-    expect(request.chain).toBe('ethereum')
+    expect(request.chainId).toBe(1)
   })
 
   test('createRequest generates requestId if not provided', async () => {
     const request = await broker.createRequest('tx', {
-      chain: 'ethereum',
+      chainId: 1,
       targetHash: '0xabc123'
     })
     expect(request.requestId).toBeTruthy()
@@ -150,7 +150,7 @@ describe('SignedApprovalBroker', () => {
   test('policy request stored as pending and removed on approval', async () => {
     const request = await broker.createRequest('policy', {
       requestId: 'policy-1',
-      chain: 'ethereum',
+      chainId: 1,
       targetHash: '0xpolicyhash',
       metadata: { seedId: 'seed-1' }
     })
@@ -199,5 +199,36 @@ describe('SignedApprovalBroker', () => {
     expect(events.length).toBe(1)
     expect(events[0].type).toBe('ApprovalVerified')
     expect(events[0].approver).toBe(keyPair.publicKey)
+  })
+
+  test('emits ApprovalRejected event on policy_reject', async () => {
+    const events: Array<{ type: string; requestId: string; timestamp: number }> = []
+    emitter.on('ApprovalRejected', (e: { type: string; requestId: string; timestamp: number }) => events.push(e))
+
+    // Create a policy request first so removePending has something to remove
+    await broker.createRequest('policy', {
+      requestId: 'policy-reject-1',
+      chainId: 1,
+      targetHash: '0xpolicyhash',
+      metadata: { seedId: 'seed-1' }
+    })
+
+    const approval = makeSignedApproval(keyPair, {
+      type: 'policy_reject',
+      requestId: 'policy-reject-1',
+      targetHash: '0xpolicyhash'
+    })
+
+    const waitPromise = broker.waitForApproval('policy-reject-1', 5000)
+    await broker.submitApproval(approval as never)
+
+    // The waiter should be rejected
+    await expect(waitPromise).rejects.toThrow('Policy rejected by owner')
+
+    // ApprovalRejected event should have been emitted
+    expect(events.length).toBe(1)
+    expect(events[0].type).toBe('ApprovalRejected')
+    expect(events[0].requestId).toBe('policy-reject-1')
+    expect(events[0].timestamp).toBeGreaterThan(0)
   })
 })

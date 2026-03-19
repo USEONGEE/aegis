@@ -1,4 +1,4 @@
-import { evaluatePolicy, validatePolicies } from '../src/guarded-middleware.js'
+import { evaluatePolicy, validatePolicies, permissionsToDict } from '../src/guarded-middleware.js'
 
 describe('evaluatePolicy', () => {
   const aavePool = '0x1234567890abcdef1234567890abcdef12345678'
@@ -13,12 +13,12 @@ describe('evaluatePolicy', () => {
   })
 
   const policies = {
-    ethereum: {
+    1: {
       policies: [
         { type: 'timestamp' as const, validAfter: 1000000000, validUntil: 2000000000 },
         {
           type: 'call' as const,
-          permissions: [
+          permissions: permissionsToDict([
             {
               target: aavePool,
               selector: repaySelector,
@@ -39,7 +39,7 @@ describe('evaluatePolicy', () => {
               },
               decision: 'AUTO' as const
             }
-          ]
+          ])
         }
       ]
     }
@@ -50,7 +50,7 @@ describe('evaluatePolicy', () => {
     const arg0 = usdcAddr.replace('0x', '').padStart(64, '0')
     const tx = makeTx(aavePool, repaySelector, arg0 + amount)
 
-    const result = evaluatePolicy(policies, 'ethereum', tx)
+    const result = evaluatePolicy(policies, 1, tx)
     expect(result.decision).toBe('AUTO')
   })
 
@@ -59,38 +59,38 @@ describe('evaluatePolicy', () => {
     const arg0 = usdcAddr.replace('0x', '').padStart(64, '0')
     const tx = makeTx(aavePool, repaySelector, arg0 + amount)
 
-    const result = evaluatePolicy(policies, 'ethereum', tx)
+    const result = evaluatePolicy(policies, 1, tx)
     expect(result.decision).toBe('REQUIRE_APPROVAL')
   })
 
   test('no matching permission -> REJECT', () => {
     const tx = makeTx('0x0000000000000000000000000000000000000000', '0xdeadbeef', '00'.repeat(32))
-    const result = evaluatePolicy(policies, 'ethereum', tx)
+    const result = evaluatePolicy(policies, 1, tx)
     expect(result.decision).toBe('REJECT')
   })
 
   test('no policies for chain -> REJECT', () => {
     const tx = makeTx(aavePool, repaySelector, '00'.repeat(64))
-    const result = evaluatePolicy(policies, 'bitcoin', tx)
+    const result = evaluatePolicy(policies, 999, tx)
     expect(result.decision).toBe('REJECT')
     expect(result.reason).toBe('no policies for chain')
   })
 
   test('empty permissions -> REJECT', () => {
-    const emptyPolicies = { ethereum: { policies: [{ type: 'call' as const, permissions: [] }] } }
+    const emptyPolicies = { 1: { policies: [{ type: 'call' as const, permissions: {} }] } }
     const tx = makeTx(aavePool, repaySelector, '00'.repeat(64))
-    const result = evaluatePolicy(emptyPolicies, 'ethereum', tx)
+    const result = evaluatePolicy(emptyPolicies, 1, tx)
     expect(result.decision).toBe('REJECT')
   })
 
   test('missing tx.to -> REJECT', () => {
-    const result = evaluatePolicy(policies, 'ethereum', { data: '0xdeadbeef' })
+    const result = evaluatePolicy(policies, 1, { data: '0xdeadbeef' })
     expect(result.decision).toBe('REJECT')
     expect(result.reason).toBe('missing tx.to')
   })
 
   test('missing tx.data (< 4 bytes) -> REJECT', () => {
-    const result = evaluatePolicy(policies, 'ethereum', { to: aavePool, data: '0x12' })
+    const result = evaluatePolicy(policies, 1, { to: aavePool, data: '0x12' })
     expect(result.decision).toBe('REJECT')
   })
 
@@ -99,7 +99,7 @@ describe('evaluatePolicy', () => {
     const amount = (3000n).toString(16).padStart(64, '0')
     const tx = makeTx(usdcAddr, approveSelector, spender + amount)
 
-    const result = evaluatePolicy(policies, 'ethereum', tx)
+    const result = evaluatePolicy(policies, 1, tx)
     expect(result.decision).toBe('AUTO')
   })
 
@@ -108,7 +108,7 @@ describe('evaluatePolicy', () => {
     const amount = (100n).toString(16).padStart(64, '0')
     const tx = makeTx(usdcAddr, approveSelector, wrongSpender + amount)
 
-    const result = evaluatePolicy(policies, 'ethereum', tx)
+    const result = evaluatePolicy(policies, 1, tx)
     expect(result.decision).toBe('REJECT')
   })
 
@@ -117,7 +117,7 @@ describe('evaluatePolicy', () => {
     const amount = (99999n).toString(16).padStart(64, '0')
     const tx = makeTx(usdcAddr, approveSelector, spender + amount)
 
-    const result = evaluatePolicy(policies, 'ethereum', tx)
+    const result = evaluatePolicy(policies, 1, tx)
     expect(result.decision).toBe('REJECT')
   })
 })
@@ -125,30 +125,63 @@ describe('evaluatePolicy', () => {
 describe('evaluatePolicy timestamp gate', () => {
   test('validAfter in future -> REJECT too early', () => {
     const futurePolicy = {
-      ethereum: {
+      1: {
         policies: [
           { type: 'timestamp' as const, validAfter: Date.now() / 1000 + 9999 },
-          { type: 'call' as const, permissions: [{ target: '0x01', decision: 'AUTO' as const }] }
+          { type: 'call' as const, permissions: permissionsToDict([{ target: '0x01', decision: 'AUTO' as const }]) }
         ]
       }
     }
-    const result = evaluatePolicy(futurePolicy, 'ethereum', { to: '0x01', data: '0xdeadbeef' + '00'.repeat(32) })
+    const result = evaluatePolicy(futurePolicy, 1, { to: '0x01', data: '0xdeadbeef' + '00'.repeat(32) })
     expect(result.decision).toBe('REJECT')
     expect(result.reason).toBe('too early')
   })
 
   test('validUntil in past -> REJECT expired', () => {
     const expiredPolicy = {
-      ethereum: {
+      1: {
         policies: [
           { type: 'timestamp' as const, validUntil: 1000000 },
-          { type: 'call' as const, permissions: [{ target: '0x01', decision: 'AUTO' as const }] }
+          { type: 'call' as const, permissions: permissionsToDict([{ target: '0x01', decision: 'AUTO' as const }]) }
         ]
       }
     }
-    const result = evaluatePolicy(expiredPolicy, 'ethereum', { to: '0x01', data: '0xdeadbeef' + '00'.repeat(32) })
+    const result = evaluatePolicy(expiredPolicy, 1, { to: '0x01', data: '0xdeadbeef' + '00'.repeat(32) })
     expect(result.decision).toBe('REJECT')
     expect(result.reason).toBe('expired')
+  })
+})
+
+describe('evaluatePolicy wildcard order preservation', () => {
+  const aavePool = '0x1234567890abcdef1234567890abcdef12345678'
+  const repaySelector = '0x573ade81'
+
+  const makeTx = (to: string, selector: string, args: string = '') => ({
+    to,
+    value: 0,
+    data: selector + args
+  })
+
+  test('wildcard-first: wildcard rule with lower order takes priority over specific rule', () => {
+    const perms = permissionsToDict([
+      { decision: 'REJECT' as const },           // order 0: wildcard target+selector, matches everything
+      { target: aavePool, selector: repaySelector, decision: 'AUTO' as const }  // order 1: specific
+    ])
+    const policies = { 1: { policies: [{ type: 'call' as const, permissions: perms }] } }
+    const tx = makeTx(aavePool, repaySelector, '00'.repeat(64))
+    const result = evaluatePolicy(policies, 1, tx)
+    expect(result.decision).toBe('REJECT')  // wildcard has lower order, matches first
+  })
+
+  test('specific-first: specific rule with lower order takes priority over wildcard', () => {
+    const perms = permissionsToDict([
+      { target: aavePool, selector: repaySelector, decision: 'AUTO' as const },  // order 0: specific
+      { decision: 'REJECT' as const }             // order 1: wildcard
+    ])
+    const policies = { 1: { policies: [{ type: 'call' as const, permissions: perms }] } }
+    const tx = makeTx(aavePool, repaySelector, '00'.repeat(64))
+    const result = evaluatePolicy(policies, 1, tx)
+    expect(result.decision).toBe('AUTO')  // specific has lower order, matches first
   })
 })
 
@@ -156,7 +189,7 @@ describe('validatePolicies', () => {
   test('valid policies pass', () => {
     expect(() => validatePolicies([
       { type: 'timestamp' as const, validAfter: 100 },
-      { type: 'call' as const, permissions: [{ decision: 'AUTO' as const }] }
+      { type: 'call' as const, permissions: permissionsToDict([{ decision: 'AUTO' as const }]) }
     ])).not.toThrow()
   })
 
@@ -165,13 +198,16 @@ describe('validatePolicies', () => {
   })
 
   test('missing decision throws', () => {
-    expect(() => validatePolicies([{ type: 'call' as const, permissions: [{} as never] }])).toThrow('decision')
+    expect(() => validatePolicies([{
+      type: 'call' as const,
+      permissions: permissionsToDict([{} as never])
+    }])).toThrow('decision')
   })
 
   test('invalid operator throws', () => {
     expect(() => validatePolicies([{
       type: 'call' as const,
-      permissions: [{ decision: 'AUTO' as const, args: { 0: { condition: 'INVALID' as never, value: '1' } } }]
+      permissions: permissionsToDict([{ decision: 'AUTO' as const, args: { 0: { condition: 'INVALID' as never, value: '1' } } }])
     }])).toThrow('Invalid condition operator')
   })
 })

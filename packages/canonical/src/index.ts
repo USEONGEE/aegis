@@ -1,5 +1,11 @@
 import { createHash } from 'node:crypto'
 
+/** Well-known chain IDs */
+export const CHAIN_IDS = { ethereum: 1, arbitrum: 42161, sepolia: 11155111, polygon: 137 } as const satisfies Record<string, number>
+
+/** A known chain ID value */
+export type ChainId = (typeof CHAIN_IDS)[keyof typeof CHAIN_IDS]
+
 /** JSON-compatible primitive types */
 type JsonPrimitive = string | number | boolean | null
 
@@ -10,7 +16,7 @@ type JsonValue = JsonPrimitive | JsonValue[] | { [key: string]: JsonValue }
  * Input fields for computing an intent hash.
  */
 export interface IntentInput {
-  chain: string | number
+  chainId: number
   to: string
   data: string
   value?: string | number | null
@@ -65,9 +71,9 @@ function normalizeValue(val: string | number | null | undefined): string {
  * Fields: chain, to (lowercase), data (lowercase), value (decimal string).
  * Keys sorted alphabetically -> SHA-256 hex with 0x prefix.
  */
-export function intentHash({ chain, to, data, value }: IntentInput): string {
-  const normalized: Record<string, string> = {
-    chain: String(chain),
+export function intentHash({ chainId, to, data, value }: IntentInput): string {
+  const normalized: Record<string, string | number> = {
+    chainId,
     data: normalizeAddress(data),
     to: normalizeAddress(to),
     value: normalizeValue(value)

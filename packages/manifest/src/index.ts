@@ -10,7 +10,10 @@ export type {
   Constraint,
   ValidationResult,
   UserConfig,
-  PolicyPermission
+  PolicyPermission,
+  ManifestRule,
+  ManifestArgCondition,
+  ManifestPermissionDict
 } from './types.js'
 
 // Examples

@@ -9,8 +9,8 @@ export const aaveV3Manifest: Manifest = {
   version: '1.0.0',
   description: 'Aave V3 Lending Protocol',
   chains: {
-    ethereum: {
-      chainId: 'ethereum',
+    1: {
+      chainId: 1,
       contracts: {
         pool: '0x87870Bca3F3fD6335C3F4ce8392D69350B4fA4E2',
         oracle: '0x54586bE62E3c3580375aE3723C145253060Ca0C2',

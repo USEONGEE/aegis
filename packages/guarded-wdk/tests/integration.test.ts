@@ -1,9 +1,9 @@
 import { jest } from '@jest/globals'
 import { EventEmitter } from 'node:events'
-import { createGuardedMiddleware, evaluatePolicy, validatePolicies, type ChainPolicies } from '../src/guarded-middleware.js'
+import { createGuardedMiddleware, evaluatePolicy, validatePolicies, permissionsToDict, type ChainPolicies } from '../src/guarded-middleware.js'
 import { SignedApprovalBroker } from '../src/signed-approval-broker.js'
 import { ApprovalStore } from '../src/approval-store.js'
-import type { HistoryEntry, HistoryQueryOpts, ApprovalRequest, StoredHistoryEntry } from '../src/approval-store.js'
+import type { HistoryEntry, HistoryQueryOpts, ApprovalRequest } from '../src/approval-store.js'
 import { ForbiddenError, PolicyRejectionError } from '../src/errors.js'
 import { intentHash } from '@wdk-app/canonical'
 import { generateKeyPair, sign } from '../src/crypto-utils.js'
@@ -32,11 +32,11 @@ class MockApprovalStore extends ApprovalStore {
   override async loadPolicy (seedId: string, chain: string) { return (this._policies[`${seedId}:${chain}`] || null) as never }
   override async savePolicy (seedId: string, chain: string, policy: unknown) { this._policies[`${seedId}:${chain}`] = policy }
   override async getPolicyVersion (_seedId: string, _chain: string) { return 0 }
-  override async loadPending (_seedId: string | null, _type: string | null, _chain: string | null) { return this._pending as never }
-  override async savePending (_seedId: string, request: ApprovalRequest) { this._pending.push(request as ApprovalRequest & Record<string, unknown>) }
-  override async removePending (requestId: string) { this._pending = this._pending.filter(p => p.requestId !== requestId) }
+  override async loadPendingApprovals (_seedId: string | null, _type: string | null, _chain: string | null) { return this._pending as never }
+  override async savePendingApproval (_seedId: string, request: ApprovalRequest) { this._pending.push(request as ApprovalRequest & Record<string, unknown>) }
+  override async removePendingApproval (requestId: string) { this._pending = this._pending.filter(p => p.requestId !== requestId) }
   override async appendHistory (entry: HistoryEntry) { this._history.push(entry) }
-  override async getHistory (_opts?: HistoryQueryOpts) { return this._history as unknown as StoredHistoryEntry[] }
+  override async getHistory (_opts?: HistoryQueryOpts) { return this._history as HistoryEntry[] }
   override async isDeviceRevoked (_deviceId: string) { return false }
   override async revokeDevice (deviceId: string) { this._devices[deviceId] = { revoked: true } }
   override async getLastNonce (approver: string, deviceId: string) { return this._nonces[`${approver}:${deviceId}`] || 0 }
@@ -76,12 +76,12 @@ function createMockAccount (): MockAccount {
 
 function makePolicies () {
   return {
-    ethereum: {
+    1: {
       policies: [
         { type: 'timestamp' as const, validAfter: 1000000000, validUntil: 2000000000 },
         {
           type: 'call' as const,
-          permissions: [
+          permissions: permissionsToDict([
             {
               target: aavePool,
               selector: repaySelector,
@@ -102,7 +102,7 @@ function makePolicies () {
               },
               decision: 'AUTO' as const
             }
-          ]
+          ])
         }
       ]
     }
@@ -132,11 +132,11 @@ function makeApproveTx (spender: string, amount: number | bigint) {
 /**
  * Helper: create a valid SignedApproval and submit it to the broker.
  */
-function createSignedApprovalAndSubmit (broker: SignedApprovalBroker, keyPair: KeyPair, { requestId, chain, targetHash, nonce }: { requestId: string; chain: string; targetHash: string; nonce: number }) {
+function createSignedApprovalAndSubmit (broker: SignedApprovalBroker, keyPair: KeyPair, { requestId, chainId, targetHash, nonce }: { requestId: string; chainId: number; targetHash: string; nonce: number }) {
   const approval: Record<string, unknown> = {
     type: 'tx',
     requestId,
-    chain,
+    chainId,
     targetHash,
     approver: keyPair.publicKey,
     deviceId: 'device-1',
@@ -180,7 +180,7 @@ describe('Integration: Guarded Middleware', () => {
       policiesRef: () => policies,
       approvalBroker: broker,
       emitter,
-      chain: 'ethereum'
+      chainId: 1
     })
     await middleware(account as never)
   }
@@ -216,7 +216,7 @@ describe('Integration: Guarded Middleware', () => {
     const tx = makeRepayTx(5000)
 
     const targetHashForTx = intentHash({
-      chain: 'ethereum',
+      chainId: 1,
       to: tx.to,
       data: tx.data,
       value: tx.value || '0'
@@ -227,7 +227,7 @@ describe('Integration: Guarded Middleware', () => {
       try {
         await createSignedApprovalAndSubmit(broker, keyPair, {
           requestId: events.find(e => e.type === 'ApprovalRequested')?.requestId || '',
-          chain: 'ethereum',
+          chainId: 1,
           targetHash: targetHashForTx,
           nonce: 1
         })
@@ -246,7 +246,7 @@ describe('Integration: Guarded Middleware', () => {
     const requestId = await requestIdPromise
     await createSignedApprovalAndSubmit(broker, keyPair, {
       requestId,
-      chain: 'ethereum',
+      chainId: 1,
       targetHash: targetHashForTx,
       nonce: 2
     })
@@ -350,6 +350,66 @@ describe('Integration: Guarded Middleware', () => {
     expect((r2 as PromiseRejectedResult).reason).toBeInstanceOf(PolicyRejectionError)
   })
 
+  test('signTransaction: AUTO repay returns signed tx', async () => {
+    await applyMiddleware()
+
+    const tx = makeRepayTx(500)
+    const result = await account.signTransaction(tx) as unknown as { signedTx: string; intentHash: string; requestId: string; intentId: string }
+
+    expect(result.signedTx).toBeDefined()
+    expect(result.signedTx.startsWith('0x')).toBe(true)
+    expect(result.intentHash).toBeDefined()
+    expect(result.intentHash.startsWith('0x')).toBe(true)
+    expect(result.requestId).toBeDefined()
+    expect(result.intentId).toBeDefined()
+  })
+
+  test('signTransaction: REJECT throws PolicyRejectionError', async () => {
+    await applyMiddleware()
+    const tx = { to: '0x0000000000000000000000000000000000000099', value: 0, data: '0xdeadbeef' + '00'.repeat(32) }
+
+    await expect(account.signTransaction(tx)).rejects.toThrow(PolicyRejectionError)
+  })
+
+  test('signTransaction: REQUIRE_APPROVAL waits for signed approval', async () => {
+    await applyMiddleware()
+    const events: Array<{ type: string; requestId?: string }> = []
+    emitter.on('ApprovalRequested', (e: { type: string; requestId: string }) => events.push(e))
+    emitter.on('TransactionSigned', (e: { type: string }) => events.push(e))
+
+    const tx = makeRepayTx(5000)
+
+    const targetHashForTx = intentHash({
+      chainId: 1,
+      to: tx.to,
+      data: tx.data,
+      value: tx.value || '0'
+    })
+
+    // Use listener approach: wait for ApprovalRequested, then submit
+    const requestIdPromise = new Promise<string>(resolve => {
+      emitter.on('ApprovalRequested', (e: { requestId: string }) => resolve(e.requestId))
+    })
+
+    const signPromise = account.signTransaction(tx)
+
+    const requestId = await requestIdPromise
+    await createSignedApprovalAndSubmit(broker, keyPair, {
+      requestId,
+      chainId: 1,
+      targetHash: targetHashForTx,
+      nonce: 2
+    })
+
+    const result = await signPromise as unknown as { signedTx: string; intentHash: string }
+    expect(result.signedTx).toBeDefined()
+    expect(result.signedTx.startsWith('0x')).toBe(true)
+    expect(result.intentHash).toBeDefined()
+    const eventTypes = events.map(e => e.type)
+    expect(eventTypes).toContain('ApprovalRequested')
+    expect(eventTypes).toContain('TransactionSigned')
+  })
+
   test('updatePolicies snapshot: old policy preserved for in-flight', async () => {
     await applyMiddleware()
 
@@ -359,7 +419,7 @@ describe('Integration: Guarded Middleware', () => {
     expect(result.hash).toBe('0xhash123')
 
     // Update policies to reject everything
-    policies.ethereum = { policies: [{ type: 'call' as const, permissions: [] }] }
+    policies[1] = { policies: [{ type: 'call' as const, permissions: {} }] }
 
     // Next call should REJECT
     await expect(account.sendTransaction(tx)).rejects.toThrow(PolicyRejectionError)

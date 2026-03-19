@@ -31,8 +31,8 @@ export function validateManifest(manifest: Manifest | null | undefined): Validat
   for (const [chainId, chainConfig] of Object.entries(manifest.chains)) {
     const prefix = `manifest.chains.${chainId}`
 
-    if (typeof chainConfig.chainId !== 'string' || chainConfig.chainId.length === 0) {
-      errors.push(`${prefix}.chainId must be a non-empty string`)
+    if (typeof chainConfig.chainId !== 'number' || !Number.isInteger(chainConfig.chainId)) {
+      errors.push(`${prefix}.chainId must be an integer`)
     }
 
     if (!chainConfig.contracts || typeof chainConfig.contracts !== 'object') {

@@ -88,14 +88,14 @@ describe('SqliteApprovalStore', () => {
 
     test('removeSeed cleans up related data', async () => {
       const s = await store.addSeed('test', 'mnemonic')
-      await store.savePolicy(s.id, 'ethereum', { policies_json: '{}', signature_json: '{}' })
-      await store.savePending(s.id, { requestId: 'r1', type: 'tx', chain: 'ethereum', targetHash: '0x1', createdAt: Date.now() })
+      await store.savePolicy(s.id, 1, { policies_json: '{}', signature_json: '{}' })
+      await store.savePendingApproval(s.id, { requestId: 'r1', type: 'tx', chainId: 1, targetHash: '0x1', createdAt: Date.now() })
       await store.saveCron(s.id, { id: 'c1', sessionId: 'sess', interval: '* * * * *', prompt: 'test' })
       await store.removeSeed(s.id)
 
-      const policies = await store.loadPolicy(s.id, 'ethereum')
+      const policies = await store.loadPolicy(s.id, 1)
       expect(policies).toBeNull()
-      const pending = await store.loadPending(s.id, null, null)
+      const pending = await store.loadPendingApprovals(s.id, null, null)
       expect(pending).toHaveLength(0)
       const crons = await store.listCrons(s.id)
       expect(crons).toHaveLength(0)
@@ -113,53 +113,51 @@ describe('SqliteApprovalStore', () => {
     })
 
     test('loadPolicy returns null when no policy exists', async () => {
-      const policy = await store.loadPolicy(seedId, 'ethereum')
+      const policy = await store.loadPolicy(seedId, 1)
       expect(policy).toBeNull()
     })
 
     test('savePolicy + loadPolicy round-trips', async () => {
-      await store.savePolicy(seedId, 'ethereum', {
+      await store.savePolicy(seedId, 1, {
         policies_json: '{"maxAmount":"1000"}',
-        signature_json: '{"sig":"abc"}',
-        wdk_countersig: 'xyz'
+        signature_json: '{"sig":"abc"}'
       })
-      const loaded = await store.loadPolicy(seedId, 'ethereum')
+      const loaded = await store.loadPolicy(seedId, 1)
       expect(loaded!.seed_id).toBe(seedId)
-      expect(loaded!.chain).toBe('ethereum')
+      expect(loaded!.chain_id).toBe(1)
       expect(loaded!.policies_json).toBe('{"maxAmount":"1000"}')
       expect(loaded!.policy_version).toBe(1)
-      expect(loaded!.wdk_countersig).toBe('xyz')
     })
 
     test('savePolicy increments version on update', async () => {
-      await store.savePolicy(seedId, 'ethereum', { policies_json: '{}', signature_json: '{}' })
-      await store.savePolicy(seedId, 'ethereum', { policies_json: '{"v":2}', signature_json: '{}' })
-      const loaded = await store.loadPolicy(seedId, 'ethereum')
+      await store.savePolicy(seedId, 1, { policies_json: '{}', signature_json: '{}' })
+      await store.savePolicy(seedId, 1, { policies_json: '{"v":2}', signature_json: '{}' })
+      const loaded = await store.loadPolicy(seedId, 1)
       expect(loaded!.policy_version).toBe(2)
     })
 
     test('getPolicyVersion returns 0 when no policy', async () => {
-      const v = await store.getPolicyVersion(seedId, 'solana')
+      const v = await store.getPolicyVersion(seedId, 900)
       expect(v).toBe(0)
     })
 
     test('getPolicyVersion returns current version', async () => {
-      await store.savePolicy(seedId, 'ethereum', { policies_json: '{}', signature_json: '{}' })
-      const v = await store.getPolicyVersion(seedId, 'ethereum')
+      await store.savePolicy(seedId, 1, { policies_json: '{}', signature_json: '{}' })
+      const v = await store.getPolicyVersion(seedId, 1)
       expect(v).toBe(1)
     })
 
     test('policies are scoped to seed+chain', async () => {
       const s2 = await store.addSeed('second', 'm2')
-      await store.savePolicy(seedId, 'ethereum', { policies_json: '{"s1":"eth"}', signature_json: '{}' })
-      await store.savePolicy(s2.id, 'ethereum', { policies_json: '{"s2":"eth"}', signature_json: '{}' })
-      await store.savePolicy(seedId, 'solana', { policies_json: '{"s1":"sol"}', signature_json: '{}' })
+      await store.savePolicy(seedId, 1, { policies_json: '{"s1":"eth"}', signature_json: '{}' })
+      await store.savePolicy(s2.id, 1, { policies_json: '{"s2":"eth"}', signature_json: '{}' })
+      await store.savePolicy(seedId, 900, { policies_json: '{"s1":"sol"}', signature_json: '{}' })
 
-      const p1 = await store.loadPolicy(seedId, 'ethereum')
+      const p1 = await store.loadPolicy(seedId, 1)
       expect(p1!.policies_json).toBe('{"s1":"eth"}')
-      const p2 = await store.loadPolicy(s2.id, 'ethereum')
+      const p2 = await store.loadPolicy(s2.id, 1)
       expect(p2!.policies_json).toBe('{"s2":"eth"}')
-      const p3 = await store.loadPolicy(seedId, 'solana')
+      const p3 = await store.loadPolicy(seedId, 900)
       expect(p3!.policies_json).toBe('{"s1":"sol"}')
     })
   })
@@ -174,39 +172,39 @@ describe('SqliteApprovalStore', () => {
       seedId = seed.id
     })
 
-    test('savePending + loadPending round-trips', async () => {
-      await store.savePending(seedId, {
+    test('savePendingApproval + loadPendingApprovals round-trips', async () => {
+      await store.savePendingApproval(seedId, {
         requestId: 'req-1',
         type: 'tx',
-        chain: 'ethereum',
+        chainId: 1,
         targetHash: '0xabc',
         metadata: { amount: '100' },
         createdAt: 1000
       })
-      const pending = await store.loadPending(seedId, 'tx', 'ethereum')
+      const pending = await store.loadPendingApprovals(seedId, 'tx', 1)
       expect(pending).toHaveLength(1)
-      expect(pending[0].request_id).toBe('req-1')
-      expect(pending[0].target_hash).toBe('0xabc')
-      expect(JSON.parse(pending[0].metadata_json!)).toEqual({ amount: '100' })
+      expect(pending[0].requestId).toBe('req-1')
+      expect(pending[0].targetHash).toBe('0xabc')
+      expect(pending[0].metadata).toEqual({ amount: '100' })
     })
 
-    test('loadPending filters by seedId, type, chain', async () => {
-      await store.savePending(seedId, { requestId: 'r1', type: 'tx', chain: 'ethereum', targetHash: '0x1', createdAt: Date.now() })
-      await store.savePending(seedId, { requestId: 'r2', type: 'policy', chain: 'ethereum', targetHash: '0x2', createdAt: Date.now() })
-      await store.savePending(seedId, { requestId: 'r3', type: 'tx', chain: 'solana', targetHash: '0x3', createdAt: Date.now() })
+    test('loadPendingApprovals filters by seedId, type, chain', async () => {
+      await store.savePendingApproval(seedId, { requestId: 'r1', type: 'tx', chainId: 1, targetHash: '0x1', createdAt: Date.now() })
+      await store.savePendingApproval(seedId, { requestId: 'r2', type: 'policy', chainId: 1, targetHash: '0x2', createdAt: Date.now() })
+      await store.savePendingApproval(seedId, { requestId: 'r3', type: 'tx', chainId: 900, targetHash: '0x3', createdAt: Date.now() })
 
-      const ethTx = await store.loadPending(seedId, 'tx', 'ethereum')
+      const ethTx = await store.loadPendingApprovals(seedId, 'tx', 1)
       expect(ethTx).toHaveLength(1)
-      expect(ethTx[0].request_id).toBe('r1')
+      expect(ethTx[0].requestId).toBe('r1')
 
-      const allForSeed = await store.loadPending(seedId, null, null)
+      const allForSeed = await store.loadPendingApprovals(seedId, null, null)
       expect(allForSeed).toHaveLength(3)
     })
 
-    test('removePending deletes the request', async () => {
-      await store.savePending(seedId, { requestId: 'req-1', type: 'tx', chain: 'ethereum', targetHash: '0x1', createdAt: Date.now() })
-      await store.removePending('req-1')
-      const pending = await store.loadPending(seedId, null, null)
+    test('removePendingApproval deletes the request', async () => {
+      await store.savePendingApproval(seedId, { requestId: 'req-1', type: 'tx', chainId: 1, targetHash: '0x1', createdAt: Date.now() })
+      await store.removePendingApproval('req-1')
+      const pending = await store.loadPendingApprovals(seedId, null, null)
       expect(pending).toHaveLength(0)
     })
   })
@@ -225,7 +223,7 @@ describe('SqliteApprovalStore', () => {
       await store.appendHistory({
         seedId,
         type: 'tx',
-        chain: 'ethereum',
+        chainId: 1,
         targetHash: '0xabc',
         approver: '0xpub',
         deviceId: 'dev-1',
@@ -235,23 +233,23 @@ describe('SqliteApprovalStore', () => {
       const history = await store.getHistory({})
       expect(history).toHaveLength(1)
       expect(history[0].action).toBe('approved')
-      expect(history[0].seed_id).toBe(seedId)
+      expect(history[0].seedId).toBe(seedId)
     })
 
     test('getHistory filters by seedId, type, chain', async () => {
       const s2 = await store.addSeed('second', 'm2')
-      await store.appendHistory({ seedId, type: 'tx', chain: 'ethereum', targetHash: '0x1', approver: 'a', deviceId: 'd', action: 'approved' })
-      await store.appendHistory({ seedId, type: 'policy', chain: 'ethereum', targetHash: '0x2', approver: 'a', deviceId: 'd', action: 'approved' })
-      await store.appendHistory({ seedId: s2.id, type: 'tx', chain: 'solana', targetHash: '0x3', approver: 'a', deviceId: 'd', action: 'rejected' })
+      await store.appendHistory({ seedId, type: 'tx', chainId: 1, targetHash: '0x1', approver: 'a', deviceId: 'd', action: 'approved', timestamp: Date.now() })
+      await store.appendHistory({ seedId, type: 'policy', chainId: 1, targetHash: '0x2', approver: 'a', deviceId: 'd', action: 'approved', timestamp: Date.now() })
+      await store.appendHistory({ seedId: s2.id, type: 'tx', chainId: 900, targetHash: '0x3', approver: 'a', deviceId: 'd', action: 'rejected', timestamp: Date.now() })
 
       const s1Tx = await store.getHistory({ seedId, type: 'tx' })
       expect(s1Tx).toHaveLength(1)
-      expect(s1Tx[0].target_hash).toBe('0x1')
+      expect(s1Tx[0].targetHash).toBe('0x1')
     })
 
     test('getHistory respects limit', async () => {
       for (let i = 0; i < 5; i++) {
-        await store.appendHistory({ seedId, type: 'tx', chain: 'eth', targetHash: `0x${i}`, approver: 'a', deviceId: 'd', action: 'approved' })
+        await store.appendHistory({ seedId, type: 'tx', chainId: 1, targetHash: `0x${i}`, approver: 'a', deviceId: 'd', action: 'approved', timestamp: Date.now() })
       }
       const limited = await store.getHistory({ limit: 2 })
       expect(limited).toHaveLength(2)
@@ -357,7 +355,7 @@ describe('SqliteApprovalStore', () => {
         sessionId: 'sess-1',
         interval: '*/5 * * * *',
         prompt: 'check balance',
-        chain: 'ethereum'
+        chainId: 1
       })
       const crons = await store.listCrons(seedId)
       expect(crons).toHaveLength(1)
@@ -412,14 +410,14 @@ describe('SqliteApprovalStore', () => {
       await store.saveJournalEntry({
         intentId: 'int-1',
         seedId,
-        chain: 'ethereum',
+        chainId: 1,
         targetHash: '0xabc',
         status: 'received'
       })
       const entry = await store.getJournalEntry('int-1')
-      expect(entry!.intent_id).toBe('int-1')
+      expect(entry!.intentId).toBe('int-1')
       expect(entry!.status).toBe('received')
-      expect(entry!.seed_id).toBe(seedId)
+      expect(entry!.seedId).toBe(seedId)
     })
 
     test('getJournalEntry returns null for unknown id', async () => {
@@ -431,21 +429,21 @@ describe('SqliteApprovalStore', () => {
       await store.saveJournalEntry({
         intentId: 'int-1',
         seedId,
-        chain: 'ethereum',
+        chainId: 1,
         targetHash: '0xabc',
         status: 'received'
       })
       await store.updateJournalStatus('int-1', 'broadcasted', '0xtx123')
       const entry = await store.getJournalEntry('int-1')
       expect(entry!.status).toBe('broadcasted')
-      expect(entry!.tx_hash).toBe('0xtx123')
+      expect(entry!.txHash).toBe('0xtx123')
     })
 
     test('updateJournalStatus without txHash preserves existing', async () => {
       await store.saveJournalEntry({
         intentId: 'int-1',
         seedId,
-        chain: 'ethereum',
+        chainId: 1,
         targetHash: '0xabc',
         status: 'received',
         txHash: '0xold'
@@ -453,30 +451,30 @@ describe('SqliteApprovalStore', () => {
       await store.updateJournalStatus('int-1', 'settled', undefined)
       const entry = await store.getJournalEntry('int-1')
       expect(entry!.status).toBe('settled')
-      expect(entry!.tx_hash).toBe('0xold')
+      expect(entry!.txHash).toBe('0xold')
     })
 
     test('listJournal returns all entries', async () => {
-      await store.saveJournalEntry({ intentId: 'i1', seedId, chain: 'eth', targetHash: '0x1', status: 'received' })
-      await store.saveJournalEntry({ intentId: 'i2', seedId, chain: 'eth', targetHash: '0x2', status: 'settled' })
+      await store.saveJournalEntry({ intentId: 'i1', seedId, chainId: 1, targetHash: '0x1', status: 'received' })
+      await store.saveJournalEntry({ intentId: 'i2', seedId, chainId: 1, targetHash: '0x2', status: 'settled' })
       const all = await store.listJournal({})
       expect(all).toHaveLength(2)
     })
 
     test('listJournal filters by seedId, status, chain', async () => {
       const s2 = await store.addSeed('second', 'm2')
-      await store.saveJournalEntry({ intentId: 'i1', seedId, chain: 'eth', targetHash: '0x1', status: 'received' })
-      await store.saveJournalEntry({ intentId: 'i2', seedId, chain: 'eth', targetHash: '0x2', status: 'settled' })
-      await store.saveJournalEntry({ intentId: 'i3', seedId: s2.id, chain: 'sol', targetHash: '0x3', status: 'received' })
+      await store.saveJournalEntry({ intentId: 'i1', seedId, chainId: 1, targetHash: '0x1', status: 'received' })
+      await store.saveJournalEntry({ intentId: 'i2', seedId, chainId: 1, targetHash: '0x2', status: 'settled' })
+      await store.saveJournalEntry({ intentId: 'i3', seedId: s2.id, chainId: 900, targetHash: '0x3', status: 'received' })
 
       const s1Received = await store.listJournal({ seedId, status: 'received' })
       expect(s1Received).toHaveLength(1)
-      expect(s1Received[0].intent_id).toBe('i1')
+      expect(s1Received[0].intentId).toBe('i1')
     })
 
     test('listJournal respects limit', async () => {
       for (let i = 0; i < 5; i++) {
-        await store.saveJournalEntry({ intentId: `i${i}`, seedId, chain: 'eth', targetHash: `0x${i}`, status: 'received' })
+        await store.saveJournalEntry({ intentId: `i${i}`, seedId, chainId: 1, targetHash: `0x${i}`, status: 'received' })
       }
       const limited = await store.listJournal({ limit: 3 })
       expect(limited).toHaveLength(3)

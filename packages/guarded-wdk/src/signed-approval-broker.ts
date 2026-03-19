@@ -2,11 +2,11 @@ import { randomUUID } from 'node:crypto'
 import { verifyApproval } from './approval-verifier.js'
 import type { VerificationContext } from './approval-verifier.js'
 import { ApprovalTimeoutError } from './errors.js'
-import type { SignedApproval, ApprovalStore, ApprovalType, ApprovalRequest, PendingRequest } from './approval-store.js'
+import type { SignedApproval, ApprovalStore, ApprovalType, ApprovalRequest, PendingApprovalRequest } from './approval-store.js'
 import type { EventEmitter } from 'node:events'
 
 interface CreateRequestOptions {
-  chain: string
+  chainId: number
   targetHash: string
   requestId?: string
   metadata?: Record<string, unknown>
@@ -39,12 +39,12 @@ export class SignedApprovalBroker {
    * Create an approval request. Returns a request object.
    * Stores as pending if type is 'policy' or tx.
    */
-  async createRequest (type: ApprovalType, { chain, targetHash, requestId, metadata }: CreateRequestOptions): Promise<ApprovalRequest> {
+  async createRequest (type: ApprovalType, { chainId, targetHash, requestId, metadata }: CreateRequestOptions): Promise<ApprovalRequest> {
     const id = requestId || randomUUID()
     const request: ApprovalRequest = {
       requestId: id,
       type,
-      chain,
+      chainId,
       targetHash,
       metadata,
       createdAt: Date.now()
@@ -54,7 +54,7 @@ export class SignedApprovalBroker {
     if (type === 'policy' || type === 'tx') {
       const seedId = metadata?.seedId as string | undefined
       if (seedId) {
-        await this._store.savePending(seedId, request)
+        await this._store.savePendingApproval(seedId, request)
       }
     }
 
@@ -63,7 +63,7 @@ export class SignedApprovalBroker {
         this._emitter.emit('PendingPolicyRequested', {
           type: 'PendingPolicyRequested',
           requestId: id,
-          chain,
+          chainId,
           timestamp: Date.now()
         })
       }
@@ -107,12 +107,12 @@ export class SignedApprovalBroker {
 
       case 'policy': {
         // Remove from pending, apply policy
-        await this._store.removePending(requestId)
+        await this._store.removePendingApproval(requestId)
         if (this._emitter) {
           this._emitter.emit('PolicyApplied', {
             type: 'PolicyApplied',
             requestId,
-            chain: signedApproval.chain,
+            chainId: signedApproval.chainId,
             timestamp: Date.now()
           })
         }
@@ -127,7 +127,14 @@ export class SignedApprovalBroker {
       }
 
       case 'policy_reject': {
-        await this._store.removePending(requestId)
+        await this._store.removePendingApproval(requestId)
+        if (this._emitter) {
+          this._emitter.emit('ApprovalRejected', {
+            type: 'ApprovalRejected',
+            requestId,
+            timestamp: Date.now()
+          })
+        }
         const waiter = this._waiters.get(requestId)
         if (waiter) {
           clearTimeout(waiter.timer)
@@ -157,9 +164,10 @@ export class SignedApprovalBroker {
 
     // Record in history
     await this._store.appendHistory({
+      seedId: ((signedApproval.metadata as Record<string, unknown> | undefined)?.seedId as string) || '',
       type,
       requestId,
-      chain: signedApproval.chain,
+      chainId: signedApproval.chainId,
       targetHash: signedApproval.targetHash,
       approver: signedApproval.approver,
       deviceId: signedApproval.deviceId,
@@ -184,10 +192,10 @@ export class SignedApprovalBroker {
   }
 
   /**
-   * Get pending requests.
+   * Get pending approval requests.
    */
-  async getPending (seedId: string, type: string | null, chain: string | null): Promise<PendingRequest[]> {
-    return this._store.loadPending(seedId, type, chain)
+  async getPendingApprovals (seedId: string, type: string | null, chainId: number | null): Promise<PendingApprovalRequest[]> {
+    return this._store.loadPendingApprovals(seedId, type, chainId)
   }
 
   /**

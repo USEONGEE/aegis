@@ -1,29 +1,29 @@
-import type { Manifest, UserConfig, PolicyPermission, Feature } from './types.js'
+import type { Manifest, UserConfig, Feature, ManifestPermissionDict, ManifestRule } from './types.js'
 
 /** ERC-20 approve(address,uint256) selector */
 const APPROVE_SELECTOR = '0x095ea7b3'
 
 /**
- * Convert a Manifest to WDK call policy permissions.
+ * Convert a Manifest to WDK call policy PermissionDict.
  *
  * For each feature:
- *   - Generate call permissions from feature.calls[]
- *   - Auto-generate approve permissions from feature.approvals[]
+ *   - Generate call rules from feature.calls[]
+ *   - Auto-generate approve rules from feature.approvals[]
  *
  * Apply userConfig overrides:
  *   - features: filter to specific feature IDs
- *   - decision: override default decision for all permissions
- *   - argsConditions: add argument conditions to permissions
+ *   - decision: override default decision for all rules
+ *   - argsConditions: add argument conditions to rules
  *   - tokenAddresses: map token symbols to addresses
  *   - userAddress: user wallet address
  */
 export function manifestToPolicy(
   manifest: Manifest,
-  chainId: string,
+  chainId: number,
   userConfig: UserConfig = {}
-): PolicyPermission[] {
+): ManifestPermissionDict {
   const chainConfig = manifest.chains[chainId]
-  if (!chainConfig) return []
+  if (!chainConfig) return {}
 
   const {
     features: enabledFeatures,
@@ -37,50 +37,51 @@ export function manifestToPolicy(
     ? chainConfig.features.filter((f: Feature) => enabledFeatures.includes(f.id))
     : chainConfig.features
 
-  const permissions: PolicyPermission[] = []
+  const dict: ManifestPermissionDict = {}
+  let order = 0
 
   for (const feature of selectedFeatures) {
-    // 1. Feature calls -> call policy permissions
+    // 1. Feature calls -> call policy rules
     for (const call of feature.calls) {
-      const contractAddress: string = chainConfig.contracts[call.contract]
-      const permission: PolicyPermission = {
-        type: 'call',
-        address: contractAddress,
-        selector: call.selector,
-        description: `${manifest.protocol}/${feature.id}: ${call.description}`
-      }
+      const address: string = chainConfig.contracts[call.contract].toLowerCase()
+      const selector = call.selector
 
-      if (decision) {
-        permission.decision = decision
+      if (!dict[address]) dict[address] = {}
+      if (!dict[address][selector]) dict[address][selector] = []
+
+      const rule: ManifestRule = {
+        order: order++,
+        decision: decision || 'REQUIRE_APPROVAL'
       }
 
       if (argsConditions) {
-        permission.argsConditions = { ...argsConditions }
-      }
-
-      permissions.push(permission)
-    }
-
-    // 2. Feature approvals -> ERC-20 approve permissions (auto-generated)
-    for (const approval of feature.approvals) {
-      const spenderAddress: string = chainConfig.contracts[approval.spender]
-      const permission: PolicyPermission = {
-        type: 'call',
-        address: '*',
-        selector: APPROVE_SELECTOR,
-        description: `${manifest.protocol}/${feature.id}: ${approval.description}`,
-        constraints: {
-          spender: spenderAddress
+        rule.args = {}
+        for (const [key, value] of Object.entries(argsConditions)) {
+          rule.args[key] = { condition: 'EQ', value: value as string }
         }
       }
 
-      if (decision) {
-        permission.decision = decision
+      dict[address][selector].push(rule)
+    }
+
+    // 2. Feature approvals -> ERC-20 approve rules (auto-generated)
+    for (const approval of feature.approvals) {
+      const spenderAddress: string = chainConfig.contracts[approval.spender].toLowerCase()
+
+      if (!dict['*']) dict['*'] = {}
+      if (!dict['*'][APPROVE_SELECTOR]) dict['*'][APPROVE_SELECTOR] = []
+
+      const rule: ManifestRule = {
+        order: order++,
+        decision: decision || 'REQUIRE_APPROVAL',
+        args: {
+          0: { condition: 'EQ', value: spenderAddress }
+        }
       }
 
-      permissions.push(permission)
+      dict['*'][APPROVE_SELECTOR].push(rule)
     }
   }
 
-  return permissions
+  return dict
 }
