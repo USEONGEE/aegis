@@ -12,6 +12,7 @@ import {
   type PendingApprovalRequest,
   type HistoryEntry,
   type StoredSigner,
+  type JournalStatus,
   type JournalInput,
   type CronInput,
   type StoredCron,
@@ -482,7 +483,7 @@ export class JsonApprovalStore extends ApprovalStore {
     await this._write('journal.json', journal)
   }
 
-  override async updateJournalStatus (intentId: string, status: string, txHash?: string): Promise<void> {
+  override async updateJournalStatus (intentId: string, status: JournalStatus, txHash?: string): Promise<void> {
     const journal = await this._read<StoredJournalEntry[]>('journal.json') || []
     const entry = journal.find(j => j.intent_id === intentId)
     if (entry) {

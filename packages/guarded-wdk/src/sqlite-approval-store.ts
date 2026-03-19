@@ -11,6 +11,7 @@ import {
   type PendingApprovalRequest,
   type HistoryEntry,
   type StoredSigner,
+  type JournalStatus,
   type JournalInput,
   type CronInput,
   type StoredCron,
@@ -515,7 +516,7 @@ export class SqliteApprovalStore extends ApprovalStore {
     )
   }
 
-  override async updateJournalStatus (intentId: string, status: string, txHash?: string): Promise<void> {
+  override async updateJournalStatus (intentId: string, status: JournalStatus, txHash?: string): Promise<void> {
     this._db!.prepare(`
       UPDATE execution_journal SET status = ?, tx_hash = COALESCE(?, tx_hash), updated_at = ?
       WHERE intent_id = ?

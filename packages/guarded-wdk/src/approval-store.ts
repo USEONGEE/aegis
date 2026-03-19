@@ -5,6 +5,10 @@ import type { PendingApprovalRow, CronRow } from './store-types.js'
 
 export type ApprovalType = 'tx' | 'policy' | 'policy_reject' | 'device_revoke'
 
+export type JournalStatus = 'received' | 'pending_approval' | 'settled' | 'signed' | 'failed' | 'rejected'
+
+export type HistoryAction = 'approved' | 'rejected'
+
 export interface SignedApproval {
   type: ApprovalType
   requestId: string
@@ -51,12 +55,12 @@ export interface PendingApprovalRequest extends ApprovalRequest {
 export interface HistoryEntry {
   seedId: string
   requestId?: string
-  type: string
+  type: ApprovalType
   chainId?: number | null
   targetHash: string
   approver: string
   signerId: string
-  action: string
+  action: HistoryAction
   signedApproval?: SignedApproval
   timestamp: number
 }
@@ -105,7 +109,7 @@ export interface JournalInput {
   seedId: string
   chainId: number
   targetHash: string
-  status: string
+  status: JournalStatus
 }
 
 export interface StoredJournal {
@@ -113,7 +117,7 @@ export interface StoredJournal {
   seedId: string
   chainId: number
   targetHash: string
-  status: string
+  status: JournalStatus
   txHash: string | null
   createdAt: number
   updatedAt: number
@@ -123,14 +127,14 @@ export interface StoredJournal {
 
 export interface HistoryQueryOpts {
   seedId?: string
-  type?: string
+  type?: ApprovalType
   chainId?: number
   limit?: number
 }
 
 export interface JournalQueryOpts {
   seedId?: string
-  status?: string
+  status?: JournalStatus
   chainId?: number
   limit?: number
 }
@@ -192,7 +196,7 @@ export abstract class ApprovalStore {
 
   async getJournalEntry (_intentId: string): Promise<StoredJournal | null> { throw new Error('Not implemented') }
   async saveJournalEntry (_entry: JournalInput): Promise<void> { throw new Error('Not implemented') }
-  async updateJournalStatus (_intentId: string, _status: string, _txHash?: string): Promise<void> { throw new Error('Not implemented') }
+  async updateJournalStatus (_intentId: string, _status: JournalStatus, _txHash?: string): Promise<void> { throw new Error('Not implemented') }
   async listJournal (_opts: JournalQueryOpts): Promise<StoredJournal[]> { throw new Error('Not implemented') }
 
   // --- Lifecycle ---

@@ -21,6 +21,8 @@ export type {
   SignedApproval,
   ApprovalRequest,
   ApprovalType,
+  JournalStatus,
+  HistoryAction,
   PolicyInput,
   StoredPolicy,
   PendingApprovalRequest,
