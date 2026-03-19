@@ -212,16 +212,16 @@ export class AdminServer {
       // device_list -- paired devices
       // -------------------------------------------------------------------
       case 'device_list': {
-        const devices: any[] = await this._store.listDevices()
+        const devices = await this._store.listDevices()
         return {
           ok: true,
           data: {
-            devices: devices.map((d: any) => ({
-              deviceId: d.device_id,
+            devices: devices.map(d => ({
+              deviceId: d.deviceId,
               name: d.name,
-              pairedAt: d.paired_at,
-              revokedAt: d.revoked_at,
-              active: d.revoked_at === null || d.revoked_at === undefined
+              pairedAt: d.pairedAt,
+              revokedAt: d.revokedAt,
+              active: d.revokedAt === null || d.revokedAt === undefined
             }))
           }
         }
@@ -242,16 +242,16 @@ export class AdminServer {
       // seed_list -- seeds (mnemonic redacted)
       // -------------------------------------------------------------------
       case 'seed_list': {
-        const seeds: any[] = await this._store.listSeeds()
+        const seeds = await this._store.listSeeds()
         const activeSeed = await this._store.getActiveSeed()
 
         return {
           ok: true,
           data: {
-            seeds: seeds.map((s: any) => ({
+            seeds: seeds.map(s => ({
               id: s.id,
               name: s.name,
-              createdAt: s.created_at,
+              createdAt: s.createdAt,
               isActive: s.id === activeSeed?.id
             })),
             activeSeedId: activeSeed?.id || null

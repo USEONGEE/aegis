@@ -10,17 +10,17 @@ import {
   type ApprovalRequest,
   type PendingApprovalRequest,
   type HistoryEntry,
-  type DeviceRecord,
+  type StoredDevice,
   type JournalInput,
   type CronInput,
   type StoredCron,
-  type SeedRecord,
-  type JournalEntry,
+  type StoredSeed,
+  type StoredJournal,
   type HistoryQueryOpts,
   type JournalQueryOpts,
   type SignedApproval
 } from './approval-store.js'
-import type { PendingApprovalRow, StoredHistoryEntry, CronRow, StoredJournalEntry } from './store-types.js'
+import type { PendingApprovalRow, StoredHistoryEntry, CronRow, StoredJournalEntry, DeviceRow, SeedRow, PolicyRow } from './store-types.js'
 
 /**
  * SQLite-backed implementation of ApprovalStore.
@@ -142,13 +142,21 @@ export class SqliteApprovalStore extends ApprovalStore {
   override async loadPolicy (seedId: string, chainId: number): Promise<StoredPolicy | null> {
     const row = this._db!.prepare(
       'SELECT * FROM policies WHERE seed_id = ? AND chain_id = ?'
-    ).get(seedId, chainId) as StoredPolicy | undefined
-    return row || null
+    ).get(seedId, chainId) as PolicyRow | undefined
+    if (!row) return null
+    return {
+      seedId: row.seed_id,
+      chainId: row.chain_id,
+      policiesJson: row.policies_json,
+      signatureJson: row.signature_json,
+      policyVersion: row.policy_version,
+      updatedAt: row.updated_at
+    }
   }
 
   override async savePolicy (seedId: string, chainId: number, input: PolicyInput): Promise<void> {
     const existing = await this.loadPolicy(seedId, chainId)
-    const version = existing ? existing.policy_version + 1 : 1
+    const version = existing ? existing.policyVersion + 1 : 1
     const now = Date.now()
 
     this._db!.prepare(`
@@ -291,13 +299,27 @@ export class SqliteApprovalStore extends ApprovalStore {
     `).run(deviceId, publicKey, Date.now())
   }
 
-  override async getDevice (deviceId: string): Promise<DeviceRecord | null> {
-    const row = this._db!.prepare('SELECT * FROM devices WHERE device_id = ?').get(deviceId) as DeviceRecord | undefined
-    return row || null
+  override async getDevice (deviceId: string): Promise<StoredDevice | null> {
+    const row = this._db!.prepare('SELECT * FROM devices WHERE device_id = ?').get(deviceId) as DeviceRow | undefined
+    if (!row) return null
+    return {
+      deviceId: row.device_id,
+      publicKey: row.public_key,
+      name: row.name,
+      pairedAt: row.paired_at,
+      revokedAt: row.revoked_at
+    }
   }
 
-  override async listDevices (): Promise<DeviceRecord[]> {
-    return this._db!.prepare('SELECT * FROM devices').all() as DeviceRecord[]
+  override async listDevices (): Promise<StoredDevice[]> {
+    const rows = this._db!.prepare('SELECT * FROM devices').all() as DeviceRow[]
+    return rows.map(row => ({
+      deviceId: row.device_id,
+      publicKey: row.public_key,
+      name: row.name,
+      pairedAt: row.paired_at,
+      revokedAt: row.revoked_at
+    }))
   }
 
   override async revokeDevice (deviceId: string): Promise<void> {
@@ -373,16 +395,30 @@ export class SqliteApprovalStore extends ApprovalStore {
 
   // --- Seeds ---
 
-  override async listSeeds (): Promise<SeedRecord[]> {
-    return this._db!.prepare('SELECT * FROM seeds ORDER BY created_at ASC').all() as SeedRecord[]
+  override async listSeeds (): Promise<StoredSeed[]> {
+    const rows = this._db!.prepare('SELECT * FROM seeds ORDER BY created_at ASC').all() as SeedRow[]
+    return rows.map(row => ({
+      id: row.id,
+      name: row.name,
+      mnemonic: row.mnemonic,
+      createdAt: row.created_at,
+      isActive: row.is_active === 1
+    }))
   }
 
-  override async getSeed (seedId: string): Promise<SeedRecord | null> {
-    const row = this._db!.prepare('SELECT * FROM seeds WHERE id = ?').get(seedId) as SeedRecord | undefined
-    return row || null
+  override async getSeed (seedId: string): Promise<StoredSeed | null> {
+    const row = this._db!.prepare('SELECT * FROM seeds WHERE id = ?').get(seedId) as SeedRow | undefined
+    if (!row) return null
+    return {
+      id: row.id,
+      name: row.name,
+      mnemonic: row.mnemonic,
+      createdAt: row.created_at,
+      isActive: row.is_active === 1
+    }
   }
 
-  override async addSeed (name: string, mnemonic: string): Promise<SeedRecord> {
+  override async addSeed (name: string, mnemonic: string): Promise<StoredSeed> {
     const id = randomUUID()
     const now = Date.now()
     const count = (this._db!.prepare('SELECT COUNT(*) AS cnt FROM seeds').get() as { cnt: number }).cnt
@@ -393,7 +429,7 @@ export class SqliteApprovalStore extends ApprovalStore {
       VALUES (?, ?, ?, ?, ?)
     `).run(id, name, mnemonic, now, isActive)
 
-    return { id, name, mnemonic, created_at: now, is_active: isActive }
+    return { id, name, mnemonic, createdAt: now, isActive: isActive === 1 }
   }
 
   override async removeSeed (seedId: string): Promise<void> {
@@ -433,14 +469,21 @@ export class SqliteApprovalStore extends ApprovalStore {
     setActiveTx()
   }
 
-  override async getActiveSeed (): Promise<SeedRecord | null> {
-    const row = this._db!.prepare('SELECT * FROM seeds WHERE is_active = 1').get() as SeedRecord | undefined
-    return row || null
+  override async getActiveSeed (): Promise<StoredSeed | null> {
+    const row = this._db!.prepare('SELECT * FROM seeds WHERE is_active = 1').get() as SeedRow | undefined
+    if (!row) return null
+    return {
+      id: row.id,
+      name: row.name,
+      mnemonic: row.mnemonic,
+      createdAt: row.created_at,
+      isActive: row.is_active === 1
+    }
   }
 
   // --- Execution Journal ---
 
-  override async getJournalEntry (intentId: string): Promise<JournalEntry | null> {
+  override async getJournalEntry (intentId: string): Promise<StoredJournal | null> {
     const row = this._db!.prepare('SELECT * FROM execution_journal WHERE intent_id = ?').get(intentId) as StoredJournalEntry | undefined
     if (!row) return null
     return {
@@ -479,7 +522,7 @@ export class SqliteApprovalStore extends ApprovalStore {
     `).run(status, txHash !== undefined ? txHash : null, Date.now(), intentId)
   }
 
-  override async listJournal (opts: JournalQueryOpts = {}): Promise<JournalEntry[]> {
+  override async listJournal (opts: JournalQueryOpts = {}): Promise<StoredJournal[]> {
     let sql = 'SELECT * FROM execution_journal WHERE 1=1'
     const params: (string | number)[] = []
     if (opts.seedId) { sql += ' AND seed_id = ?'; params.push(opts.seedId) }

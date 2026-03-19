@@ -295,8 +295,8 @@ describe('handleControlMessage', () => {
     const expectedHash = '0x' + createHash('sha256').update(deviceId).digest('hex')
 
     store.listDevices.mockResolvedValue([
-      { public_key: '0xactive1', revoked_at: null },
-      { public_key: '0xrevoked', revoked_at: new Date() }
+      { publicKey: '0xactive1', revokedAt: null },
+      { publicKey: '0xrevoked', revokedAt: new Date() }
     ])
 
     const msg: ControlMessage = {
@@ -322,9 +322,9 @@ describe('handleControlMessage', () => {
 
   test('device_revoke: updates trusted approvers to only active devices', async () => {
     store.listDevices.mockResolvedValue([
-      { public_key: '0xactive1', revoked_at: null },
-      { public_key: '0xactive2', revoked_at: null },
-      { public_key: '0xrevoked', revoked_at: new Date() }
+      { publicKey: '0xactive1', revokedAt: null },
+      { publicKey: '0xactive2', revokedAt: null },
+      { publicKey: '0xrevoked', revokedAt: new Date() }
     ])
 
     const msg: ControlMessage = {

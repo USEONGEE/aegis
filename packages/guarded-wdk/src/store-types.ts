@@ -52,3 +52,31 @@ export interface StoredJournalEntry {
   created_at: number
   updated_at: number
 }
+
+/** @internal */
+export interface DeviceRow {
+  device_id: string
+  public_key: string
+  name: string | null
+  paired_at: number
+  revoked_at: number | null
+}
+
+/** @internal */
+export interface SeedRow {
+  id: string
+  name: string
+  mnemonic: string
+  created_at: number
+  is_active: number
+}
+
+/** @internal */
+export interface PolicyRow {
+  seed_id: string
+  chain_id: number
+  policies_json: string
+  signature_json: string
+  policy_version: number
+  updated_at: number
+}

@@ -69,8 +69,8 @@ export async function initWDK (config: DaemonConfig, logger: Logger): Promise<WD
   // Load trusted approvers (public keys) from paired devices
   const devices = await store.listDevices()
   const trustedApprovers: string[] = devices
-    .filter((d: any) => d.revoked_at === null || d.revoked_at === undefined)
-    .map((d: any) => d.public_key)
+    .filter(d => d.revokedAt === null || d.revokedAt === undefined)
+    .map(d => d.publicKey)
 
   // Step 07: Create shared EventEmitter and pass to broker
   const emitter = new EventEmitter()
@@ -84,7 +84,7 @@ export async function initWDK (config: DaemonConfig, logger: Logger): Promise<WD
       const chainId = Number(chainIdStr)
       const stored = await store.loadPolicy(seedId, chainId)
       if (stored) {
-        const policiesArr = JSON.parse(stored.policies_json)
+        const policiesArr = JSON.parse(stored.policiesJson)
         restoredPolicies[chainIdStr] = { policies: policiesArr }
         logger.info({ seedId, chainId }, 'Restored policy from store')
       }

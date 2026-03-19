@@ -34,12 +34,12 @@ export interface PolicyInput {
 }
 
 export interface StoredPolicy {
-  seed_id: string
-  chain_id: number
-  policies_json: string
-  signature_json: string
-  policy_version: number
-  updated_at: number
+  seedId: string
+  chainId: number
+  policiesJson: string
+  signatureJson: string
+  policyVersion: number
+  updatedAt: number
 }
 
 export interface PendingApprovalRequest extends ApprovalRequest {
@@ -63,12 +63,12 @@ export interface HistoryEntry {
 
 // StoredHistoryEntry moved to store-types.ts (@internal)
 
-export interface DeviceRecord {
-  device_id: string
-  public_key: string
+export interface StoredDevice {
+  deviceId: string
+  publicKey: string
   name: string | null
-  paired_at: number
-  revoked_at: number | null
+  pairedAt: number
+  revokedAt: number | null
 }
 
 // CronRow: see store-types.ts (@internal)
@@ -92,12 +92,12 @@ export interface StoredCron {
   isActive: boolean
 }
 
-export interface SeedRecord {
+export interface StoredSeed {
   id: string
   name: string
   mnemonic: string
-  created_at: number
-  is_active: number
+  createdAt: number
+  isActive: boolean
 }
 
 export interface JournalInput {
@@ -108,7 +108,7 @@ export interface JournalInput {
   status: string
 }
 
-export interface JournalEntry {
+export interface StoredJournal {
   intentId: string
   seedId: string
   chainId: number
@@ -162,8 +162,8 @@ export abstract class ApprovalStore {
   // --- Devices ---
 
   async saveDevice (_deviceId: string, _publicKey: string): Promise<void> { throw new Error('Not implemented') }
-  async getDevice (_deviceId: string): Promise<DeviceRecord | null> { throw new Error('Not implemented') }
-  async listDevices (): Promise<DeviceRecord[]> { throw new Error('Not implemented') }
+  async getDevice (_deviceId: string): Promise<StoredDevice | null> { throw new Error('Not implemented') }
+  async listDevices (): Promise<StoredDevice[]> { throw new Error('Not implemented') }
   async revokeDevice (_deviceId: string): Promise<void> { throw new Error('Not implemented') }
   async isDeviceRevoked (_deviceId: string): Promise<boolean> { throw new Error('Not implemented') }
 
@@ -181,19 +181,19 @@ export abstract class ApprovalStore {
 
   // --- Seeds ---
 
-  async listSeeds (): Promise<SeedRecord[]> { throw new Error('Not implemented') }
-  async getSeed (_seedId: string): Promise<SeedRecord | null> { throw new Error('Not implemented') }
-  async addSeed (_name: string, _mnemonic: string): Promise<SeedRecord> { throw new Error('Not implemented') }
+  async listSeeds (): Promise<StoredSeed[]> { throw new Error('Not implemented') }
+  async getSeed (_seedId: string): Promise<StoredSeed | null> { throw new Error('Not implemented') }
+  async addSeed (_name: string, _mnemonic: string): Promise<StoredSeed> { throw new Error('Not implemented') }
   async removeSeed (_seedId: string): Promise<void> { throw new Error('Not implemented') }
   async setActiveSeed (_seedId: string): Promise<void> { throw new Error('Not implemented') }
-  async getActiveSeed (): Promise<SeedRecord | null> { throw new Error('Not implemented') }
+  async getActiveSeed (): Promise<StoredSeed | null> { throw new Error('Not implemented') }
 
   // --- Execution Journal ---
 
-  async getJournalEntry (_intentId: string): Promise<JournalEntry | null> { throw new Error('Not implemented') }
+  async getJournalEntry (_intentId: string): Promise<StoredJournal | null> { throw new Error('Not implemented') }
   async saveJournalEntry (_entry: JournalInput): Promise<void> { throw new Error('Not implemented') }
   async updateJournalStatus (_intentId: string, _status: string, _txHash?: string): Promise<void> { throw new Error('Not implemented') }
-  async listJournal (_opts: JournalQueryOpts): Promise<JournalEntry[]> { throw new Error('Not implemented') }
+  async listJournal (_opts: JournalQueryOpts): Promise<StoredJournal[]> { throw new Error('Not implemented') }
 
   // --- Lifecycle ---
 

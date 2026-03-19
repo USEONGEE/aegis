@@ -26,14 +26,14 @@ describe('SqliteApprovalStore', () => {
       expect(seed.id).toBeTruthy()
       expect(seed.name).toBe('main')
       expect(seed.mnemonic).toBe('abandon abandon abandon')
-      expect(seed.is_active).toBe(1)
+      expect(seed.isActive).toBe(true)
     })
 
     test('first seed is active, second is not', async () => {
       const s1 = await store.addSeed('first', 'mnemonic1')
       const s2 = await store.addSeed('second', 'mnemonic2')
-      expect(s1.is_active).toBe(1)
-      expect(s2.is_active).toBe(0)
+      expect(s1.isActive).toBe(true)
+      expect(s2.isActive).toBe(false)
     })
 
     test('listSeeds returns all seeds', async () => {
@@ -123,17 +123,17 @@ describe('SqliteApprovalStore', () => {
         signature: { sig: 'abc' }
       })
       const loaded = await store.loadPolicy(seedId, 1)
-      expect(loaded!.seed_id).toBe(seedId)
-      expect(loaded!.chain_id).toBe(1)
-      expect(loaded!.policies_json).toBe('[{"maxAmount":"1000"}]')
-      expect(loaded!.policy_version).toBe(1)
+      expect(loaded!.seedId).toBe(seedId)
+      expect(loaded!.chainId).toBe(1)
+      expect(loaded!.policiesJson).toBe('[{"maxAmount":"1000"}]')
+      expect(loaded!.policyVersion).toBe(1)
     })
 
     test('savePolicy increments version on update', async () => {
       await store.savePolicy(seedId, 1, { policies: [], signature: {} })
       await store.savePolicy(seedId, 1, { policies: [{ v: 2 }], signature: {} })
       const loaded = await store.loadPolicy(seedId, 1)
-      expect(loaded!.policy_version).toBe(2)
+      expect(loaded!.policyVersion).toBe(2)
     })
 
     test('getPolicyVersion returns 0 when no policy', async () => {
@@ -154,18 +154,18 @@ describe('SqliteApprovalStore', () => {
       await store.savePolicy(seedId, 900, { policies: [{ s1: 'sol' }], signature: {} })
 
       const p1 = await store.loadPolicy(seedId, 1)
-      expect(p1!.policies_json).toBe('[{"s1":"eth"}]')
+      expect(p1!.policiesJson).toBe('[{"s1":"eth"}]')
       const p2 = await store.loadPolicy(s2.id, 1)
-      expect(p2!.policies_json).toBe('[{"s2":"eth"}]')
+      expect(p2!.policiesJson).toBe('[{"s2":"eth"}]')
       const p3 = await store.loadPolicy(seedId, 900)
-      expect(p3!.policies_json).toBe('[{"s1":"sol"}]')
+      expect(p3!.policiesJson).toBe('[{"s1":"sol"}]')
     })
 
     test('savePolicy with empty policies array round-trips', async () => {
       await store.savePolicy(seedId, 1, { policies: [], signature: {} })
       const loaded = await store.loadPolicy(seedId, 1)
-      expect(loaded!.policies_json).toBe('[]')
-      expect(loaded!.signature_json).toBe('{}')
+      expect(loaded!.policiesJson).toBe('[]')
+      expect(loaded!.signatureJson).toBe('{}')
     })
   })
 
@@ -281,9 +281,9 @@ describe('SqliteApprovalStore', () => {
     test('saveDevice + getDevice round-trips', async () => {
       await store.saveDevice('dev-1', '0xpubkey123')
       const dev = await store.getDevice('dev-1')
-      expect(dev!.device_id).toBe('dev-1')
-      expect(dev!.public_key).toBe('0xpubkey123')
-      expect(dev!.revoked_at).toBeNull()
+      expect(dev!.deviceId).toBe('dev-1')
+      expect(dev!.publicKey).toBe('0xpubkey123')
+      expect(dev!.revokedAt).toBeNull()
     })
 
     test('getDevice returns null for unknown device', async () => {
@@ -302,7 +302,7 @@ describe('SqliteApprovalStore', () => {
       await store.saveDevice('dev-1', 'pk1')
       await store.revokeDevice('dev-1')
       const dev = await store.getDevice('dev-1')
-      expect(dev!.revoked_at).toBeTruthy()
+      expect(dev!.revokedAt).toBeTruthy()
     })
 
     test('isDeviceRevoked returns false for active device', async () => {
@@ -324,7 +324,7 @@ describe('SqliteApprovalStore', () => {
       await store.saveDevice('dev-1', 'pk1')
       await store.saveDevice('dev-1', 'pk2')
       const dev = await store.getDevice('dev-1')
-      expect(dev!.public_key).toBe('pk2')
+      expect(dev!.publicKey).toBe('pk2')
     })
   })
 

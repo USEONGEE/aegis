@@ -11,20 +11,20 @@ import {
   type ApprovalRequest,
   type PendingApprovalRequest,
   type HistoryEntry,
-  type DeviceRecord,
+  type StoredDevice,
   type JournalInput,
   type CronInput,
   type StoredCron,
-  type SeedRecord,
-  type JournalEntry,
+  type StoredSeed,
+  type StoredJournal,
   type HistoryQueryOpts,
   type JournalQueryOpts,
   type SignedApproval
 } from './approval-store.js'
-import type { PendingApprovalRow, StoredHistoryEntry, CronRow, StoredJournalEntry } from './store-types.js'
+import type { PendingApprovalRow, StoredHistoryEntry, CronRow, StoredJournalEntry, DeviceRow, SeedRow, PolicyRow } from './store-types.js'
 
 interface SeedsFile {
-  seeds: SeedRecord[]
+  seeds: SeedRow[]
   activeSeedId: string | null
 }
 
@@ -95,13 +95,22 @@ export class JsonApprovalStore extends ApprovalStore {
   // --- Active Policy ---
 
   override async loadPolicy (seedId: string, chainId: number): Promise<StoredPolicy | null> {
-    const policies = await this._read<Record<string, StoredPolicy>>('policies.json') || {}
+    const policies = await this._read<Record<string, PolicyRow>>('policies.json') || {}
     const key = `${seedId}:${chainId}`
-    return policies[key] || null
+    const row = policies[key]
+    if (!row) return null
+    return {
+      seedId: row.seed_id,
+      chainId: row.chain_id,
+      policiesJson: row.policies_json,
+      signatureJson: row.signature_json,
+      policyVersion: row.policy_version,
+      updatedAt: row.updated_at
+    }
   }
 
   override async savePolicy (seedId: string, chainId: number, input: PolicyInput): Promise<void> {
-    const policies = await this._read<Record<string, StoredPolicy>>('policies.json') || {}
+    const policies = await this._read<Record<string, PolicyRow>>('policies.json') || {}
     const key = `${seedId}:${chainId}`
     const existing = policies[key]
     const version = existing ? (existing.policy_version || 0) + 1 : 1
@@ -118,11 +127,11 @@ export class JsonApprovalStore extends ApprovalStore {
 
   override async getPolicyVersion (seedId: string, chainId: number): Promise<number> {
     const policy = await this.loadPolicy(seedId, chainId)
-    return policy ? policy.policy_version : 0
+    return policy ? policy.policyVersion : 0
   }
 
   override async listPolicyChains (seedId: string): Promise<string[]> {
-    const policies = await this._read<Record<string, StoredPolicy>>('policies.json') || {}
+    const policies = await this._read<Record<string, PolicyRow>>('policies.json') || {}
     const prefix = `${seedId}:`
     return Object.keys(policies)
       .filter(key => key.startsWith(prefix))
@@ -235,7 +244,7 @@ export class JsonApprovalStore extends ApprovalStore {
   // --- Devices ---
 
   override async saveDevice (deviceId: string, publicKey: string): Promise<void> {
-    const devices = await this._read<Record<string, DeviceRecord>>('devices.json') || {}
+    const devices = await this._read<Record<string, DeviceRow>>('devices.json') || {}
     devices[deviceId] = {
       device_id: deviceId,
       public_key: publicKey,
@@ -246,18 +255,32 @@ export class JsonApprovalStore extends ApprovalStore {
     await this._write('devices.json', devices)
   }
 
-  override async getDevice (deviceId: string): Promise<DeviceRecord | null> {
-    const devices = await this._read<Record<string, DeviceRecord>>('devices.json') || {}
-    return devices[deviceId] || null
+  override async getDevice (deviceId: string): Promise<StoredDevice | null> {
+    const devices = await this._read<Record<string, DeviceRow>>('devices.json') || {}
+    const row = devices[deviceId]
+    if (!row) return null
+    return {
+      deviceId: row.device_id,
+      publicKey: row.public_key,
+      name: row.name,
+      pairedAt: row.paired_at,
+      revokedAt: row.revoked_at
+    }
   }
 
-  override async listDevices (): Promise<DeviceRecord[]> {
-    const devices = await this._read<Record<string, DeviceRecord>>('devices.json') || {}
-    return Object.values(devices)
+  override async listDevices (): Promise<StoredDevice[]> {
+    const devices = await this._read<Record<string, DeviceRow>>('devices.json') || {}
+    return Object.values(devices).map(row => ({
+      deviceId: row.device_id,
+      publicKey: row.public_key,
+      name: row.name,
+      pairedAt: row.paired_at,
+      revokedAt: row.revoked_at
+    }))
   }
 
   override async revokeDevice (deviceId: string): Promise<void> {
-    const devices = await this._read<Record<string, DeviceRecord>>('devices.json') || {}
+    const devices = await this._read<Record<string, DeviceRow>>('devices.json') || {}
     if (devices[deviceId]) {
       devices[deviceId].revoked_at = Date.now()
       await this._write('devices.json', devices)
@@ -265,10 +288,10 @@ export class JsonApprovalStore extends ApprovalStore {
   }
 
   override async isDeviceRevoked (deviceId: string): Promise<boolean> {
-    const devices = await this._read<Record<string, DeviceRecord>>('devices.json') || {}
-    const device = devices[deviceId]
-    if (!device) return false
-    return device.revoked_at !== null
+    const devices = await this._read<Record<string, DeviceRow>>('devices.json') || {}
+    const row = devices[deviceId]
+    if (!row) return false
+    return row.revoked_at !== null
   }
 
   // --- Nonce ---
@@ -339,32 +362,53 @@ export class JsonApprovalStore extends ApprovalStore {
 
   // --- Seeds ---
 
-  override async listSeeds (): Promise<SeedRecord[]> {
+  override async listSeeds (): Promise<StoredSeed[]> {
     const data = await this._read<SeedsFile>('seeds.json') || { seeds: [], activeSeedId: null }
-    return data.seeds
+    return data.seeds.map(row => ({
+      id: row.id,
+      name: row.name,
+      mnemonic: row.mnemonic,
+      createdAt: row.created_at,
+      isActive: row.is_active === 1
+    }))
   }
 
-  override async getSeed (seedId: string): Promise<SeedRecord | null> {
+  override async getSeed (seedId: string): Promise<StoredSeed | null> {
     const data = await this._read<SeedsFile>('seeds.json') || { seeds: [], activeSeedId: null }
-    return data.seeds.find(s => s.id === seedId) || null
+    const row = data.seeds.find(s => s.id === seedId)
+    if (!row) return null
+    return {
+      id: row.id,
+      name: row.name,
+      mnemonic: row.mnemonic,
+      createdAt: row.created_at,
+      isActive: row.is_active === 1
+    }
   }
 
-  override async addSeed (name: string, mnemonic: string): Promise<SeedRecord> {
+  override async addSeed (name: string, mnemonic: string): Promise<StoredSeed> {
     const data = await this._read<SeedsFile>('seeds.json') || { seeds: [], activeSeedId: null }
     const id = randomUUID()
-    const seed: SeedRecord = {
+    const isActiveNum = data.seeds.length === 0 ? 1 : 0
+    const row: SeedRow = {
       id,
       name,
       mnemonic,
       created_at: Date.now(),
-      is_active: data.seeds.length === 0 ? 1 : 0
+      is_active: isActiveNum
     }
-    data.seeds.push(seed)
+    data.seeds.push(row)
     if (data.seeds.length === 1) {
       data.activeSeedId = id
     }
     await this._write('seeds.json', data)
-    return seed
+    return {
+      id: row.id,
+      name: row.name,
+      mnemonic: row.mnemonic,
+      createdAt: row.created_at,
+      isActive: row.is_active === 1
+    }
   }
 
   override async removeSeed (seedId: string): Promise<void> {
@@ -390,15 +434,23 @@ export class JsonApprovalStore extends ApprovalStore {
     await this._write('seeds.json', data)
   }
 
-  override async getActiveSeed (): Promise<SeedRecord | null> {
+  override async getActiveSeed (): Promise<StoredSeed | null> {
     const data = await this._read<SeedsFile>('seeds.json') || { seeds: [], activeSeedId: null }
     if (!data.activeSeedId) return null
-    return data.seeds.find(s => s.id === data.activeSeedId) || null
+    const row = data.seeds.find(s => s.id === data.activeSeedId)
+    if (!row) return null
+    return {
+      id: row.id,
+      name: row.name,
+      mnemonic: row.mnemonic,
+      createdAt: row.created_at,
+      isActive: row.is_active === 1
+    }
   }
 
   // --- Execution Journal ---
 
-  override async getJournalEntry (intentId: string): Promise<JournalEntry | null> {
+  override async getJournalEntry (intentId: string): Promise<StoredJournal | null> {
     const journal = await this._read<StoredJournalEntry[]>('journal.json') || []
     const found = journal.find(j => j.intent_id === intentId)
     if (!found) return null
@@ -441,7 +493,7 @@ export class JsonApprovalStore extends ApprovalStore {
     }
   }
 
-  override async listJournal (opts: JournalQueryOpts = {}): Promise<JournalEntry[]> {
+  override async listJournal (opts: JournalQueryOpts = {}): Promise<StoredJournal[]> {
     const journal = await this._read<StoredJournalEntry[]>('journal.json') || []
     let result = journal
     if (opts.seedId) {

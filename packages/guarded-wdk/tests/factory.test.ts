@@ -2,7 +2,7 @@ import { createGuardedWDK } from '../src/guarded-wdk-factory.js'
 import { SignedApprovalBroker } from '../src/signed-approval-broker.js'
 import { permissionsToDict } from '../src/guarded-middleware.js'
 import { ApprovalStore } from '../src/approval-store.js'
-import type { HistoryEntry, HistoryQueryOpts, ApprovalRequest, SeedRecord } from '../src/approval-store.js'
+import type { HistoryEntry, HistoryQueryOpts, ApprovalRequest, StoredSeed } from '../src/approval-store.js'
 
 // Mock WDK and WalletManager
 class MockWalletManager {

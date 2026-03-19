@@ -216,10 +216,10 @@ export async function handleControlMessage (
         // After revocation, update the broker's trusted approvers list
         const store = wdk?.getApprovalStore?.() || null
         if (store) {
-          const devices: any[] = await store.listDevices()
+          const devices: Array<{ publicKey: string; revokedAt: number | null }> = await store.listDevices()
           const active: string[] = devices
-            .filter((d: any) => d.revoked_at === null || d.revoked_at === undefined)
-            .map((d: any) => d.public_key)
+            .filter(d => d.revokedAt === null || d.revokedAt === undefined)
+            .map(d => d.publicKey)
           broker.setTrustedApprovers(active)
           logger.info({ activeDevices: active.length }, 'Trusted approvers updated after device revocation')
         }

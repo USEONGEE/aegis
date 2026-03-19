@@ -25,16 +25,16 @@ export type {
   StoredPolicy,
   PendingApprovalRequest,
   HistoryEntry,
-  DeviceRecord,
+  StoredDevice,
   CronInput,
   StoredCron,
-  SeedRecord,
+  StoredSeed,
   JournalInput,
-  JournalEntry,
+  StoredJournal,
   HistoryQueryOpts,
   JournalQueryOpts
 } from './approval-store.js'
 export type { VerificationContext } from './approval-verifier.js'
 export type { KeyPair } from './crypto-utils.js'
-export type { EvaluationResult, Rule, PermissionDict, SignTransactionResult } from './guarded-middleware.js'
+export type { EvaluationResult, EvaluationContext, FailedArg, RuleFailure, Rule, PermissionDict, SignTransactionResult } from './guarded-middleware.js'
 export { permissionsToDict } from './guarded-middleware.js'
