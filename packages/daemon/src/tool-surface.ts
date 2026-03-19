@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { intentHash, policyHash } from '@wdk-app/canonical'
+import { intentHash, policyHash, CHAIN_IDS } from '@wdk-app/canonical'
 import type { Logger } from 'pino'
 import type { WDKInstance } from './wdk-host.js'
 import type { RelayClient } from './relay-client.js'
@@ -41,6 +41,8 @@ export interface ToolResult {
   error?: string
   reason?: string
   requestId?: string
+  intentId?: string
+  signedTx?: string
   policyHash?: string
   token?: string
   amount?: string
@@ -230,6 +232,23 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         required: ['cronId']
       }
     }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'signTransaction',
+      description: 'Sign a transaction without broadcasting. Returns signed tx data for later submission.',
+      parameters: {
+        type: 'object',
+        properties: {
+          chain: { type: 'string', description: 'Target chain identifier (e.g. "ethereum")' },
+          to: { type: 'string', description: 'Destination address (0x-prefixed)' },
+          data: { type: 'string', description: 'Calldata hex string (0x-prefixed)' },
+          value: { type: 'string', description: 'Value in wei as decimal string' }
+        },
+        required: ['chain', 'to', 'data', 'value']
+      }
+    }
   }
 ]
 
@@ -249,7 +268,8 @@ export async function executeToolCall (name: string, args: ToolArgs, wdkContext:
     // -----------------------------------------------------------------------
     case 'sendTransaction': {
       const { chain, to, data, value } = args as SendTransactionArgs
-      const hash = intentHash({ chain, to, data, value })
+      const chainId = resolveChainId(chain)
+      const hash = intentHash({ chainId, to, data, value })
       const intentId = randomUUID()
 
       // Deduplicate via journal
@@ -260,7 +280,7 @@ export async function executeToolCall (name: string, args: ToolArgs, wdkContext:
 
       // Track in journal
       if (journal) {
-        journal.track(intentId, { seedId, chain, targetHash: hash })
+        journal.track(intentId, { seedId, chainId, targetHash: hash })
       }
 
       try {
@@ -455,7 +475,8 @@ export async function executeToolCall (name: string, args: ToolArgs, wdkContext:
     case 'policyList': {
       const { chain } = args as ChainArgs
       try {
-        const policy = await store.loadPolicy(seedId, chain)
+        const chainId = resolveChainId(chain)
+        const policy = await store.loadPolicy(seedId, chainId)
         return { policies: policy?.policies || [] }
       } catch (err: any) {
         logger.error({ err, name: 'policyList' }, 'Tool execution error')
@@ -469,7 +490,8 @@ export async function executeToolCall (name: string, args: ToolArgs, wdkContext:
     case 'policyPending': {
       const { chain } = args as ChainArgs
       try {
-        const pending = await store.loadPending(seedId, 'policy', chain)
+        const chainId = resolveChainId(chain)
+        const pending = await store.loadPendingApprovals(seedId, 'policy', chainId)
         return { pending: pending || [] }
       } catch (err: any) {
         logger.error({ err, name: 'policyPending' }, 'Tool execution error')
@@ -483,11 +505,12 @@ export async function executeToolCall (name: string, args: ToolArgs, wdkContext:
     case 'policyRequest': {
       const { chain, reason, policies } = args as PolicyRequestArgs
       try {
+        const chainId = resolveChainId(chain)
         const hash = policyHash(policies as any)
         const requestId = randomUUID()
 
         await broker.createRequest('policy', {
-          chain,
+          chainId,
           targetHash: hash,
           requestId,
           metadata: { seedId, reason, policies }
@@ -506,13 +529,14 @@ export async function executeToolCall (name: string, args: ToolArgs, wdkContext:
     case 'registerCron': {
       const { interval, prompt, chain, sessionId } = args as RegisterCronArgs
       try {
+        const chainId = resolveChainId(chain)
         const cronId = randomUUID()
         await store.saveCron(seedId, {
           id: cronId,
           sessionId,
           interval,
           prompt,
-          chain
+          chainId
         })
         return { cronId, status: 'registered' }
       } catch (err: any) {
@@ -549,6 +573,118 @@ export async function executeToolCall (name: string, args: ToolArgs, wdkContext:
     }
 
     // -----------------------------------------------------------------------
+    // 10. signTransaction
+    // -----------------------------------------------------------------------
+    case 'signTransaction': {
+      const { chain, to, data, value } = args as SendTransactionArgs
+      const chainId = resolveChainId(chain)
+      const hash = intentHash({ chainId, to, data, value })
+      const intentId = randomUUID()
+
+      // Deduplicate via journal
+      if (journal && journal.isDuplicate(hash)) {
+        logger.info({ hash }, 'Duplicate intent detected, skipping.')
+        return { status: 'duplicate', intentHash: hash }
+      }
+
+      // Track in journal
+      if (journal) {
+        journal.track(intentId, { seedId, chainId, targetHash: hash })
+      }
+
+      try {
+        const account = await wdk.getAccount(chain, 0)
+
+        // Race signTransaction against the ApprovalRequested event.
+        const approvalBroker = wdk.getApprovalBroker ? wdk.getApprovalBroker() : null
+
+        let approvalListener: ((evt: any) => void) | undefined
+        const approvalPromise: Promise<any> = approvalBroker
+          ? new Promise((resolve) => {
+            approvalListener = (evt: any) => resolve(evt)
+            wdk.on('ApprovalRequested', approvalListener!)
+          })
+          : new Promise<never>(() => {})
+
+        const signPromise = account.signTransaction({ to, data, value })
+
+        const result = await Promise.race([
+          signPromise.then((res: any) => ({ kind: 'completed' as const, res })),
+          approvalPromise.then((evt: any) => ({ kind: 'approval_requested' as const, evt }))
+        ])
+
+        // Clean up listener
+        if (approvalListener) wdk.off('ApprovalRequested', approvalListener)
+
+        if (result.kind === 'completed') {
+          // AUTO or no-policy path -- tx signed synchronously
+          if (journal) journal.updateStatus(intentId, 'signed')
+          return {
+            status: 'signed',
+            signedTx: result.res?.signedTx || null,
+            intentHash: result.res?.intentHash || hash,
+            requestId: result.res?.requestId || intentId,
+            intentId: result.res?.intentId || intentId
+          }
+        }
+
+        // REQUIRE_APPROVAL -- return immediately, let background sign complete after approval
+        const requestId = result.evt?.requestId || intentId
+        if (journal) journal.updateStatus(intentId, 'pending_approval')
+
+        signPromise
+          .then((signResult: any) => {
+            if (journal) journal.updateStatus(intentId, 'signed')
+            logger.info({ requestId, intentHash: hash }, 'Background sign completed after approval')
+
+            if (wdkContext.relayClient) {
+              wdkContext.relayClient.send('control', {
+                type: 'sign_result',
+                requestId,
+                intentHash: hash,
+                status: 'signed',
+                signedTx: signResult?.signedTx || null
+              })
+            }
+          })
+          .catch((bgErr: Error) => {
+            if (journal) journal.updateStatus(intentId, 'failed')
+            logger.error({ err: bgErr, requestId }, 'Background sign failed after approval')
+
+            if (wdkContext.relayClient) {
+              wdkContext.relayClient.send('control', {
+                type: 'sign_error',
+                requestId,
+                intentHash: hash,
+                error: bgErr.message
+              })
+            }
+          })
+
+        return {
+          status: 'pending_approval',
+          requestId,
+          intentHash: hash,
+          intentId
+        }
+      } catch (err: any) {
+        if (err.name === 'PolicyRejectionError') {
+          if (journal) journal.updateStatus(intentId, 'rejected')
+          return { status: 'rejected', reason: err.message, intentHash: hash }
+        }
+
+        if (err.name === 'ApprovalTimeoutError') {
+          if (journal) journal.updateStatus(intentId, 'failed')
+          return { status: 'approval_timeout', requestId: err.requestId || intentId, intentHash: hash }
+        }
+
+        if (journal) journal.updateStatus(intentId, 'failed')
+        logger.error({ err, name: 'signTransaction' }, 'Tool execution error')
+        return { status: 'error', error: err.message, intentHash: hash }
+      }
+    }
+
+    // -----------------------------------------------------------------------
     // Unknown tool
     // -----------------------------------------------------------------------
     default:
@@ -560,6 +696,21 @@ export async function executeToolCall (name: string, args: ToolArgs, wdkContext:
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/**
+ * Resolve a chain name or numeric string to a chainId number.
+ * Throws if the chain is unknown.
+ */
+function resolveChainId (chain: string): number {
+  // If it's already a numeric string, parse it
+  const asNum = Number(chain)
+  if (!Number.isNaN(asNum) && Number.isInteger(asNum)) return asNum
+
+  // Look up by name
+  const id = (CHAIN_IDS as Record<string, number>)[chain.toLowerCase()]
+  if (id === undefined) throw new Error(`Unknown chain: ${chain}`)
+  return id
+}
 
 /**
  * Encode a basic ERC-20 transfer calldata.

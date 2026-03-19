@@ -5,23 +5,23 @@ import type { Logger } from 'pino'
 // ---------------------------------------------------------------------------
 
 export interface JournalEntry {
-  intent_id: string
-  target_hash: string
+  intentId: string
+  targetHash: string
   status: string
-  seed_id?: string
-  chain?: string
-  tx_hash?: string
+  seedId?: string
+  chainId?: number
+  txHash?: string
 }
 
 export interface TrackMeta {
   seedId: string
-  chain: string
+  chainId: number
   targetHash: string
 }
 
 export interface JournalListOptions {
   status?: string
-  chain?: string
+  chainId?: number
   limit?: number
   seedId?: string
 }
@@ -31,7 +31,7 @@ interface ApprovalStore {
   saveJournalEntry (entry: {
     intentId: string
     seedId: string
-    chain: string
+    chainId: number
     targetHash: string
     status: string
   }): Promise<void>
@@ -42,6 +42,7 @@ interface ApprovalStore {
  * Execution Journal -- tracks intent lifecycle and prevents duplicate execution.
  *
  * Status flow: received -> evaluated -> approved -> broadcasted -> settled | failed
+ *              received -> evaluated -> approved -> signed (for signTransaction)
  *
  * The journal delegates persistence to the ApprovalStore but maintains an
  * in-memory index for fast duplicate detection (keyed by targetHash).
@@ -76,14 +77,14 @@ export class ExecutionJournal {
       let recovered = 0
 
       for (const entry of entries) {
-        const intentId = entry.intent_id
-        const targetHash = entry.target_hash
+        const intentId = entry.intentId
+        const targetHash = entry.targetHash
         const status = entry.status
 
         this._statusIndex.set(intentId, status)
 
         // Only index non-terminal entries for dedup
-        if (status !== 'settled' && status !== 'failed') {
+        if (status !== 'settled' && status !== 'failed' && status !== 'signed') {
           this._hashIndex.set(targetHash, intentId)
           recovered++
         }
@@ -99,7 +100,7 @@ export class ExecutionJournal {
    * Track a new intent. Records it with status 'received'.
    */
   async track (intentId: string, meta: TrackMeta): Promise<void> {
-    const { seedId, chain, targetHash } = meta
+    const { seedId, chainId, targetHash } = meta
 
     this._hashIndex.set(targetHash, intentId)
     this._statusIndex.set(intentId, 'received')
@@ -108,7 +109,7 @@ export class ExecutionJournal {
       await this._store.saveJournalEntry({
         intentId,
         seedId: seedId || this._seedId,
-        chain,
+        chainId,
         targetHash,
         status: 'received'
       })
@@ -124,7 +125,7 @@ export class ExecutionJournal {
     this._statusIndex.set(intentId, status)
 
     // Remove from hash index if terminal
-    if (status === 'settled' || status === 'failed') {
+    if (status === 'settled' || status === 'failed' || status === 'signed') {
       for (const [hash, id] of this._hashIndex) {
         if (id === intentId) {
           this._hashIndex.delete(hash)

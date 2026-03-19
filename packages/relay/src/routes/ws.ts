@@ -126,6 +126,12 @@ export default async function wsRoutes (fastify: FastifyInstance): Promise<void>
         userId = payload.sub
         authenticated = true
 
+        // Step 10: Use client-provided lastStreamId for reconnect cursor
+        const clientLastStreamId: string | undefined = msg.payload?.lastStreamId
+        if (clientLastStreamId && clientLastStreamId !== '$' && clientLastStreamId !== '0') {
+          controlCursor = clientLastStreamId
+        }
+
         const bucket = getBucket(userId)
         if (role === 'daemon') {
           // Only one daemon connection per user
@@ -138,7 +144,7 @@ export default async function wsRoutes (fastify: FastifyInstance): Promise<void>
         }
 
         send(socket, { type: 'authenticated', userId })
-        fastify.log.info({ userId, role }, 'WebSocket authenticated')
+        fastify.log.info({ userId, role, controlCursor }, 'WebSocket authenticated')
 
         // Start forwarding stream messages to this client
         startStreamPolling(userId, role, socket, ac.signal)
@@ -244,12 +250,12 @@ export default async function wsRoutes (fastify: FastifyInstance): Promise<void>
    * ----------------------------------------------------------------*/
 
   async function startStreamPolling (userId: string, role: Role, socket: WebSocket, signal: AbortSignal): Promise<void> {
-    // Poll control channel
-    pollStream(`control:${userId}`, role, socket, userId, signal)
+    // Step 10: Use the per-connection controlCursor for reconnect resume
+    pollStream(`control:${userId}`, role, socket, userId, signal, controlCursor)
   }
 
-  async function pollStream (stream: string, role: Role, socket: WebSocket, userId: string, signal: AbortSignal): Promise<void> {
-    let cursor = '$' // start from new messages only
+  async function pollStream (stream: string, role: Role, socket: WebSocket, userId: string, signal: AbortSignal, initialCursor: string = '$'): Promise<void> {
+    let cursor = initialCursor
 
     while (!signal.aborted) {
       try {

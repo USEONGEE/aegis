@@ -2,6 +2,7 @@ import { processChat } from './tool-call-loop.js'
 import type { WDKContext } from './tool-surface.js'
 import type { OpenClawClient } from './openclaw-client.js'
 import type { RelayClient } from './relay-client.js'
+import type { MessageQueueManager } from './message-queue.js'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -22,15 +23,16 @@ export interface ChatHandlerOptions {
  *
  * Flow:
  *   1. Extract userId, sessionId, text from the message.
- *   2. Run processChat (OpenClaw tool-call loop).
- *   3. Send the final response back through the Relay.
+ *   2. Enqueue into the FIFO MessageQueue (if provided) or run processChat directly.
+ *   3. The queue processor sends the final response back through the Relay.
  */
 export async function handleChatMessage (
   msg: ChatMessage,
   openclawClient: OpenClawClient,
   relayClient: RelayClient,
   wdkContext: WDKContext,
-  opts: ChatHandlerOptions = {}
+  opts: ChatHandlerOptions = {},
+  queueManager?: MessageQueueManager | null
 ): Promise<void> {
   const { logger } = wdkContext
   const { userId, sessionId, text } = msg
@@ -41,6 +43,44 @@ export async function handleChatMessage (
   }
 
   logger.info({ userId, sessionId, textLen: text.length }, 'Processing chat message')
+
+  // If queue manager is provided, enqueue instead of direct processing
+  if (queueManager) {
+    const messageId = queueManager.enqueue(sessionId, {
+      sessionId,
+      source: 'user',
+      userId,
+      text
+    })
+
+    // Notify the app that the message was queued (via control channel)
+    relayClient.send('control', {
+      type: 'message_queued',
+      userId,
+      sessionId,
+      messageId
+    })
+    return
+  }
+
+  // Direct processing (no queue manager)
+  await _processChatDirect(userId, sessionId, text, openclawClient, relayClient, wdkContext, opts)
+}
+
+/**
+ * Direct chat processing (used when no queue manager, or as the queue processor).
+ */
+export async function _processChatDirect (
+  userId: string,
+  sessionId: string,
+  text: string,
+  openclawClient: OpenClawClient,
+  relayClient: RelayClient,
+  wdkContext: WDKContext,
+  opts: ChatHandlerOptions = {},
+  signal?: AbortSignal
+): Promise<void> {
+  const { logger } = wdkContext
 
   // Send typing indicator
   relayClient.send('chat', {
@@ -58,6 +98,7 @@ export async function handleChatMessage (
       openclawClient,
       {
         maxIterations: opts.maxIterations || 10,
+        signal,
         onDelta: (delta: string) => {
           // Stream deltas to the app in real-time
           relayClient.send('chat', {
@@ -85,6 +126,16 @@ export async function handleChatMessage (
       'Chat message processed'
     )
   } catch (err: any) {
+    if (signal?.aborted) {
+      logger.info({ userId, sessionId }, 'Chat processing aborted')
+      relayClient.send('chat', {
+        type: 'cancelled',
+        userId,
+        sessionId
+      })
+      return
+    }
+
     logger.error({ err, userId, sessionId }, 'Failed to process chat message')
 
     // Send error response back to app

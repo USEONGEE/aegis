@@ -1,6 +1,7 @@
 import { processChat } from './tool-call-loop.js'
 import type { WDKContext } from './tool-surface.js'
 import type { OpenClawClient } from './openclaw-client.js'
+import type { MessageQueueManager } from './message-queue.js'
 import type { Logger } from 'pino'
 
 // ---------------------------------------------------------------------------
@@ -13,7 +14,7 @@ export interface CronEntry {
   interval: string
   intervalMs: number
   prompt: string
-  chain: string
+  chainId: number | null
   lastRunAt: number
 }
 
@@ -22,7 +23,7 @@ export interface CronRegistration {
   sessionId: string
   interval: string
   prompt: string
-  chain: string
+  chainId: number | null
 }
 
 export interface CronListItem {
@@ -30,7 +31,7 @@ export interface CronListItem {
   sessionId: string
   interval: string
   prompt: string
-  chain: string
+  chainId: number | null
   lastRunAt: number
 }
 
@@ -42,6 +43,7 @@ interface CronStore {
 
 export interface CronSchedulerOptions {
   tickIntervalMs?: number
+  queueManager?: MessageQueueManager | null
 }
 
 /**
@@ -60,6 +62,7 @@ export class CronScheduler {
   private _openclawClient: OpenClawClient
   private _logger: Logger
   private _tickIntervalMs: number
+  private _queueManager: MessageQueueManager | null
 
   // In-memory cache of active crons
   private _crons: Map<string, CronEntry>
@@ -80,6 +83,7 @@ export class CronScheduler {
     this._openclawClient = openclawClient
     this._logger = logger
     this._tickIntervalMs = opts.tickIntervalMs || 60000
+    this._queueManager = opts.queueManager || null
 
     this._crons = new Map()
     this._timer = null
@@ -102,7 +106,7 @@ export class CronScheduler {
           interval: cron.interval,
           intervalMs: parseInterval(cron.interval),
           prompt: cron.prompt,
-          chain: cron.chain,
+          chainId: cron.chain_id,
           lastRunAt: cron.last_run_at || 0
         })
       }
@@ -135,7 +139,7 @@ export class CronScheduler {
       interval: cron.interval,
       intervalMs: parseInterval(cron.interval),
       prompt: cron.prompt,
-      chain: cron.chain,
+      chainId: cron.chainId,
       lastRunAt: 0
     }
 
@@ -172,21 +176,35 @@ export class CronScheduler {
         // Update last_run_at in store
         await this._store.updateCronLastRun(cronId, now)
 
-        // Run the prompt through OpenClaw
         const userId = `cron:${cronId}`
-        const result = await processChat(
-          userId,
-          cron.sessionId,
-          cron.prompt,
-          this._wdkContext,
-          this._openclawClient,
-          { maxIterations: 10 }
-        )
 
-        this._logger.info(
-          { cronId, iterations: result.iterations, tools: result.toolResults.length },
-          'Cron execution completed'
-        )
+        // Use queue manager if available, otherwise process directly
+        if (this._queueManager) {
+          this._queueManager.enqueue(cron.sessionId, {
+            sessionId: cron.sessionId,
+            source: 'cron',
+            userId,
+            text: cron.prompt,
+            chainId: cron.chainId ?? undefined,
+            cronId
+          })
+          this._logger.info({ cronId }, 'Cron prompt enqueued')
+        } else {
+          // Run the prompt through OpenClaw directly
+          const result = await processChat(
+            userId,
+            cron.sessionId,
+            cron.prompt,
+            this._wdkContext,
+            this._openclawClient,
+            { maxIterations: 10 }
+          )
+
+          this._logger.info(
+            { cronId, iterations: result.iterations, tools: result.toolResults.length },
+            'Cron execution completed'
+          )
+        }
       } catch (err) {
         this._logger.error({ err, cronId }, 'Cron execution failed')
       }
@@ -204,7 +222,7 @@ export class CronScheduler {
         sessionId: cron.sessionId,
         interval: cron.interval,
         prompt: cron.prompt,
-        chain: cron.chain,
+        chainId: cron.chainId,
         lastRunAt: cron.lastRunAt
       })
     }

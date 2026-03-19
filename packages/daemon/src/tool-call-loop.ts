@@ -22,6 +22,7 @@ export interface ProcessChatResult {
 export interface ProcessChatOptions {
   maxIterations?: number
   onDelta?: ((delta: string) => void) | null
+  signal?: AbortSignal
 }
 
 /**
@@ -45,6 +46,7 @@ export async function processChat (
   const { logger } = wdkContext
   const maxIterations = opts.maxIterations || 10
   const onDelta = opts.onDelta || null
+  const signal = opts.signal
 
   // Start with the user message
   const messages: ChatMessage[] = [
@@ -56,6 +58,12 @@ export async function processChat (
   let finalContent: string | null = null
 
   while (iterations < maxIterations) {
+    // Check abort signal before each iteration
+    if (signal?.aborted) {
+      logger.info({ iterations }, 'Tool-call loop aborted by signal')
+      break
+    }
+
     iterations++
 
     logger.debug({ iteration: iterations, messageCount: messages.length }, 'OpenClaw request')

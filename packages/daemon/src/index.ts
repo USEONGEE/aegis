@@ -6,10 +6,14 @@ import { initWDK } from './wdk-host.js'
 import { createOpenClawClient } from './openclaw-client.js'
 import { RelayClient } from './relay-client.js'
 import { handleControlMessage } from './control-handler.js'
+import type { PairingSession } from './control-handler.js'
 import { handleChatMessage } from './chat-handler.js'
 import { ExecutionJournal } from './execution-journal.js'
 import { CronScheduler } from './cron-scheduler.js'
 import { AdminServer } from './admin-server.js'
+import { MessageQueueManager } from './message-queue.js'
+import type { QueuedMessage } from './message-queue.js'
+import { _processChatDirect } from './chat-handler.js'
 import type { WDKContext } from './tool-surface.js'
 
 // ---------------------------------------------------------------------------
@@ -63,17 +67,40 @@ async function main (): Promise<void> {
     relayClient
   }
 
+  // Pairing session state (populated when daemon starts pairing flow)
+  const pairingSession: PairingSession | null = null
+
+  // 6b. Create FIFO message queue manager
+  const queueManager = new MessageQueueManager(
+    async (msg: QueuedMessage, signal: AbortSignal) => {
+      await _processChatDirect(
+        msg.userId,
+        msg.sessionId,
+        msg.text,
+        openclawClient,
+        relayClient,
+        wdkContext,
+        { maxIterations: config.toolCallMaxIterations },
+        signal
+      )
+    }
+  )
+
   relayClient.onMessage((type, payload, raw) => {
     switch (type) {
       case 'control':
-        handleControlMessage(payload, broker!, logger, wdk, relayClient)
+        handleControlMessage(payload, broker!, logger, wdk, relayClient, store, pairingSession, queueManager)
+          .then((result) => {
+            // Forward control result to app via relay (preserving the result's own type)
+            relayClient.send('control', result)
+          })
           .catch((err: Error) => logger.error({ err }, 'Unhandled error in control handler'))
         break
 
       case 'chat':
         handleChatMessage(payload, openclawClient, relayClient, wdkContext, {
           maxIterations: config.toolCallMaxIterations
-        })
+        }, queueManager)
           .catch((err: Error) => logger.error({ err }, 'Unhandled error in chat handler'))
         break
 
@@ -81,6 +108,22 @@ async function main (): Promise<void> {
         logger.debug({ type }, 'Ignoring message on unknown type')
     }
   })
+
+  // Step 07: Forward WDK events to relay for app consumption
+  const RELAY_EVENTS = [
+    'IntentProposed', 'PolicyEvaluated', 'ApprovalRequested', 'ApprovalGranted',
+    'ExecutionBroadcasted', 'ExecutionSettled', 'ExecutionFailed',
+    'PendingPolicyRequested', 'ApprovalVerified', 'ApprovalRejected', 'PolicyApplied', 'DeviceRevoked'
+  ] as const
+
+  if (wdk) {
+    for (const eventName of RELAY_EVENTS) {
+      wdk.on(eventName, (event: unknown) => {
+        relayClient.send('control', { type: 'event_stream', eventName, event })
+      })
+    }
+    logger.info({ eventCount: RELAY_EVENTS.length }, 'WDK event relay registered')
+  }
 
   relayClient.on('connected', () => {
     logger.info('Relay connection established')
@@ -101,7 +144,7 @@ async function main (): Promise<void> {
   if (seedId) {
     cronScheduler = new CronScheduler(
       store, seedId, wdkContext, openclawClient, logger,
-      { tickIntervalMs: config.cronTickIntervalMs }
+      { tickIntervalMs: config.cronTickIntervalMs, queueManager }
     )
     await cronScheduler.start()
   }
@@ -126,6 +169,9 @@ async function main (): Promise<void> {
 
     // Stop cron
     if (cronScheduler) cronScheduler.stop()
+
+    // Dispose message queue
+    queueManager.dispose()
 
     // Disconnect relay
     relayClient.disconnect()

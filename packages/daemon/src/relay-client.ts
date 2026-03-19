@@ -65,6 +65,9 @@ export class RelayClient extends EventEmitter {
   // E2E encryption -- set after pairing via setSessionKey()
   private _sessionKey: Uint8Array | null // 32 bytes, NaCl box shared key
 
+  // Step 10: Track last stream ID for reconnect cursor
+  private _lastStreamId: string
+
   constructor (logger: Logger, opts: RelayClientOptions = {}) {
     super()
     this._logger = logger
@@ -90,6 +93,9 @@ export class RelayClient extends EventEmitter {
 
     // E2E encryption
     this._sessionKey = null
+
+    // Step 10: reconnect cursor
+    this._lastStreamId = '$'
   }
 
   /**
@@ -241,10 +247,10 @@ export class RelayClient extends EventEmitter {
       this._lastPong = Date.now()
       this._logger.info('Connected to Relay')
 
-      // Authenticate
+      // Authenticate — include lastStreamId for reconnect cursor (Step 10)
       this._ws!.send(JSON.stringify({
         type: 'authenticate',
-        payload: { token: this._token }
+        payload: { token: this._token, lastStreamId: this._lastStreamId }
       }))
 
       // Start heartbeat
@@ -266,6 +272,11 @@ export class RelayClient extends EventEmitter {
       if (msg.type === 'pong') {
         this._lastPong = Date.now()
         return
+      }
+
+      // Step 10: Track last stream ID for reconnect cursor
+      if (msg.id) {
+        this._lastStreamId = msg.id
       }
 
       // Dispatch to handler

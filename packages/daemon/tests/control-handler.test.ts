@@ -90,6 +90,13 @@ describe('handleControlMessage', () => {
   // -------------------------------------------------------------------------
 
   test('pairing_confirm: calls store.saveDevice with correct args', async () => {
+    const pairingSession = {
+      pairingToken: 'tok_abc',
+      expectedSAS: '1234',
+      daemonEncryptionPubKey: new Uint8Array(32),
+      daemonEncryptionSecretKey: new Uint8Array(32),
+      createdAt: Date.now()
+    }
     const msg: ControlMessage = {
       type: 'pairing_confirm',
       payload: {
@@ -101,7 +108,7 @@ describe('handleControlMessage', () => {
       }
     }
 
-    const result = await handleControlMessage(msg, broker, logger as any, wdk)
+    const result = await handleControlMessage(msg, broker, logger as any, wdk, undefined, undefined, pairingSession)
 
     expect(result.ok).toBe(true)
     expect(result.type).toBe('pairing_confirm')
@@ -110,15 +117,24 @@ describe('handleControlMessage', () => {
   })
 
   test('pairing_confirm: adds identityPubKey to trusted approvers', async () => {
+    const pairingSession = {
+      pairingToken: 'tok_pair',
+      expectedSAS: '5678',
+      daemonEncryptionPubKey: new Uint8Array(32),
+      daemonEncryptionSecretKey: new Uint8Array(32),
+      createdAt: Date.now()
+    }
     const msg: ControlMessage = {
       type: 'pairing_confirm',
       payload: {
         deviceId: 'dev_002',
-        identityPubKey: '0xnewkey'
+        identityPubKey: '0xnewkey',
+        pairingToken: 'tok_pair',
+        sas: '5678'
       }
     }
 
-    await handleControlMessage(msg, broker, logger as any, wdk)
+    await handleControlMessage(msg, broker, logger as any, wdk, undefined, undefined, pairingSession)
 
     expect(broker.setTrustedApprovers).toHaveBeenCalledWith(['0xnewkey'])
   })
@@ -171,7 +187,7 @@ describe('handleControlMessage', () => {
       type: 'tx',
       requestId: 'req_tx_1',
       signature: '0xsig'
-    }))
+    }), expect.any(Object))
   })
 
   test('tx_approval: returns error when broker.submitApproval throws', async () => {
@@ -211,7 +227,7 @@ describe('handleControlMessage', () => {
     expect(broker.submitApproval).toHaveBeenCalledWith(expect.objectContaining({
       type: 'policy',
       requestId: 'req_pol_1'
-    }))
+    }), expect.any(Object))
   })
 
   test('policy_approval: applies policies to WDK when metadata.policies present', async () => {
@@ -219,7 +235,7 @@ describe('handleControlMessage', () => {
       type: 'policy_approval',
       payload: {
         requestId: 'req_pol_2',
-        chain: 'ethereum',
+        chainId: 1,
         metadata: {
           policies: [{ type: 'auto', maxUsd: 500 }]
         }
@@ -228,7 +244,7 @@ describe('handleControlMessage', () => {
 
     await handleControlMessage(msg, broker, logger as any, wdk)
 
-    expect(wdk.updatePolicies).toHaveBeenCalledWith('ethereum', {
+    expect(wdk.updatePolicies).toHaveBeenCalledWith(1, {
       policies: [{ type: 'auto', maxUsd: 500 }]
     })
   })

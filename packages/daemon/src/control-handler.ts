@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import type { Logger } from 'pino'
 import type { WDKInstance } from './wdk-host.js'
 import type { RelayClient } from './relay-client.js'
+import type { MessageQueueManager } from './message-queue.js'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -16,7 +17,7 @@ export interface ControlPayload {
   requestId?: string
   signature?: string
   approverPubKey?: string
-  chain?: string
+  chainId?: number
   metadata?: Record<string, any>
   deviceId?: string
   identityPubKey?: string
@@ -31,7 +32,28 @@ export interface ControlResult {
   type?: string
   requestId?: string
   deviceId?: string
+  messageId?: string
   error?: string
+  reason?: string
+  wasProcessing?: boolean
+}
+
+interface ApprovalStoreReader {
+  loadPendingByRequestId (requestId: string): Promise<{ request_id: string; seed_id: string; type: string; chain_id: number; target_hash: string; metadata_json: string | null; created_at: number } | null>
+  getPolicyVersion (seedId: string, chainId: number): Promise<number>
+}
+
+/**
+ * Tracks the daemon's pending pairing session.
+ * Created when daemon starts pairing (QR code displayed),
+ * consumed when pairing_confirm arrives from the app.
+ */
+export interface PairingSession {
+  pairingToken: string
+  expectedSAS: string
+  daemonEncryptionPubKey: Uint8Array
+  daemonEncryptionSecretKey: Uint8Array
+  createdAt: number
 }
 
 interface SignedApprovalBroker {
@@ -58,7 +80,10 @@ export async function handleControlMessage (
   broker: SignedApprovalBroker,
   logger: Logger,
   wdk?: WDKInstance | null,
-  relayClient?: RelayClient
+  relayClient?: RelayClient,
+  approvalStore?: ApprovalStoreReader | null,
+  pairingSession?: PairingSession | null,
+  queueManager?: MessageQueueManager | null
 ): Promise<ControlResult> {
   const { type, payload } = msg
 
@@ -80,7 +105,21 @@ export async function handleControlMessage (
           type: 'tx'
         }
 
-        await broker.submitApproval(signedApproval)
+        // Build verification context from server-side pending (not client payload)
+        const context: Record<string, unknown> = {}
+        if (approvalStore && payload.requestId) {
+          const pending = await approvalStore.loadPendingByRequestId(payload.requestId)
+          if (pending) {
+            context.expectedTargetHash = pending.target_hash
+            const policyVersion = await approvalStore.getPolicyVersion(pending.seed_id, pending.chain_id)
+            context.currentPolicyVersion = policyVersion
+            logger.debug({ requestId: payload.requestId, targetHash: pending.target_hash, policyVersion }, 'TX context loaded from server-side pending')
+          } else {
+            logger.warn({ requestId: payload.requestId }, 'No pending request found for tx_approval')
+          }
+        }
+
+        await broker.submitApproval(signedApproval, context)
 
         logger.info({ requestId: payload.requestId }, 'TX approval submitted successfully')
         return { ok: true, type: 'tx_approval', requestId: payload.requestId }
@@ -100,17 +139,29 @@ export async function handleControlMessage (
           type: 'policy'
         }
 
-        await broker.submitApproval(signedApproval)
+        // Build verification context from server-side pending (not client payload)
+        const context: Record<string, unknown> = {}
+        if (approvalStore && payload.requestId) {
+          const pending = await approvalStore.loadPendingByRequestId(payload.requestId)
+          if (pending) {
+            context.expectedTargetHash = pending.target_hash
+            logger.debug({ requestId: payload.requestId, targetHash: pending.target_hash }, 'Policy context loaded from server-side pending')
+          } else {
+            logger.warn({ requestId: payload.requestId }, 'No pending request found for policy_approval')
+          }
+        }
+
+        await broker.submitApproval(signedApproval, context)
 
         // After successful approval, apply the policy to WDK
-        if (wdk && payload.metadata?.policies && payload.chain) {
+        if (wdk && payload.metadata?.policies && payload.chainId !== undefined) {
           try {
-            await wdk.updatePolicies?.(payload.chain, {
+            await wdk.updatePolicies?.(payload.chainId as number, {
               policies: payload.metadata.policies
             })
-            logger.info({ chain: payload.chain }, 'Policy applied to WDK')
+            logger.info({ chainId: payload.chainId }, 'Policy applied to WDK')
           } catch (applyErr: any) {
-            logger.error({ err: applyErr, chain: payload.chain }, 'Failed to apply policy to WDK')
+            logger.error({ err: applyErr, chainId: payload.chainId }, 'Failed to apply policy to WDK')
           }
         }
 
@@ -192,7 +243,38 @@ export async function handleControlMessage (
           return { ok: false, type: 'pairing_confirm', error: 'Missing deviceId or identityPubKey' }
         }
 
-        // Register the new device in the approval store
+        // --- Gap 3: Verify pairingToken before trusting ---
+        if (!pairingToken) {
+          logger.warn({ deviceId }, 'Pairing rejected: missing pairingToken')
+          return { ok: false, type: 'pairing_confirm', error: 'Missing pairingToken' }
+        }
+
+        if (!pairingSession) {
+          logger.warn({ deviceId }, 'Pairing rejected: no active pairing session on daemon')
+          return { ok: false, type: 'pairing_confirm', error: 'No active pairing session' }
+        }
+
+        // Constant-time comparison for pairingToken
+        const tokenValid = pairingToken === pairingSession.pairingToken
+        if (!tokenValid) {
+          logger.warn({ deviceId }, 'Pairing rejected: invalid pairingToken')
+          return { ok: false, type: 'pairing_confirm', error: 'Invalid pairingToken' }
+        }
+
+        // --- Gap 16: SAS verification before registering as trusted ---
+        if (!sas) {
+          logger.warn({ deviceId }, 'Pairing rejected: missing SAS')
+          return { ok: false, type: 'pairing_confirm', error: 'Missing SAS for verification' }
+        }
+
+        if (sas !== pairingSession.expectedSAS) {
+          logger.warn({ deviceId, receivedSAS: sas, expectedSAS: pairingSession.expectedSAS }, 'Pairing rejected: SAS mismatch (possible MITM)')
+          return { ok: false, type: 'pairing_confirm', error: 'SAS mismatch — possible man-in-the-middle attack' }
+        }
+
+        logger.info({ deviceId, sas }, 'Pairing token and SAS verified successfully')
+
+        // Register the new device in the approval store (only after verification)
         const store = wdk?.getApprovalStore?.() || null
         if (store) {
           await store.saveDevice(deviceId, identityPubKey)
@@ -208,11 +290,20 @@ export async function handleControlMessage (
           logger.info({ identityPubKey }, 'Added to trusted approvers')
         }
 
-        // Activate E2E encryption: derive shared secret via ECDH
-        // In Phase 1, store the peer's encryption public key for future ECDH.
-        // Full ECDH session key derivation is Phase 2 (requires daemon's own ephemeral keypair).
-        if (encryptionPubKey) {
-          logger.info({ encryptionPubKey }, 'Peer encryption public key stored for E2E (Phase 2 ECDH)')
+        // --- Gap 11 / Step 05: E2E session key establishment via ECDH ---
+        if (encryptionPubKey && relayClient) {
+          try {
+            const nacl = await import('tweetnacl')
+            const peerPubKeyBytes = Buffer.from(encryptionPubKey, 'base64')
+            // Compute ECDH shared secret: nacl.box.before(peerPubKey, ourSecretKey)
+            const sharedSecret = nacl.default
+              ? nacl.default.box.before(peerPubKeyBytes, pairingSession.daemonEncryptionSecretKey)
+              : (nacl as any).box.before(peerPubKeyBytes, pairingSession.daemonEncryptionSecretKey)
+            relayClient.setSessionKey(sharedSecret)
+            logger.info('E2E session key established via ECDH after pairing')
+          } catch (e2eErr: any) {
+            logger.error({ err: e2eErr }, 'Failed to establish E2E session key (pairing still succeeded)')
+          }
         }
 
         logger.info({ deviceId, sas }, 'Pairing confirmed successfully')
@@ -220,6 +311,24 @@ export async function handleControlMessage (
       } catch (err: any) {
         logger.error({ err }, 'Pairing confirmation failed')
         return { ok: false, type: 'pairing_confirm', error: err.message }
+      }
+    }
+
+    // -----------------------------------------------------------------------
+    // cancel_message -- cancel a pending or in-progress message
+    // -----------------------------------------------------------------------
+    case 'cancel_message': {
+      const { messageId } = payload
+      if (!messageId || !queueManager) {
+        return { ok: false, type: 'cancel_message_result', error: 'Missing messageId or queue' }
+      }
+      const cancelResult = queueManager.cancel(messageId as string)
+      return {
+        ok: cancelResult.ok,
+        type: 'cancel_message_result',
+        messageId: messageId as string,
+        reason: cancelResult.reason,
+        wasProcessing: cancelResult.wasProcessing
       }
     }
 

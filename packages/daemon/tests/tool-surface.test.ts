@@ -25,6 +25,12 @@ function createMockLogger (): MockLogger {
 function createMockWdk (overrides: Record<string, any> = {}): any {
   const account = {
     sendTransaction: jest.fn<() => Promise<{ hash: string; fee: string }>>().mockResolvedValue({ hash: '0xabc123', fee: '0.001' }),
+    signTransaction: jest.fn<() => Promise<{ signedTx: string; intentHash: string; requestId: string; intentId: string }>>().mockResolvedValue({
+      signedTx: '0xsigned_tx_data',
+      intentHash: '0xintent_hash',
+      requestId: 'req_sign_1',
+      intentId: 'intent_sign_1'
+    }),
     getBalance: jest.fn<() => Promise<Array<{ token: string; balance: string }>>>().mockResolvedValue([
       { token: 'ETH', balance: '1.5' },
       { token: 'USDC', balance: '1000' }
@@ -46,7 +52,7 @@ function createMockStore (overrides: Record<string, any> = {}): any {
     loadPolicy: jest.fn<() => Promise<{ policies: Array<{ type: string; maxUsd: number }> }>>().mockResolvedValue({
       policies: [{ type: 'auto', maxUsd: 100 }]
     }),
-    loadPending: jest.fn<() => Promise<Array<{ requestId: string; type: string; status: string }>>>().mockResolvedValue([
+    loadPendingApprovals: jest.fn<() => Promise<Array<{ requestId: string; type: string; status: string }>>>().mockResolvedValue([
       { requestId: 'req_1', type: 'policy', status: 'pending' }
     ]),
     saveCron: jest.fn<() => Promise<undefined>>().mockResolvedValue(undefined),
@@ -91,8 +97,8 @@ function buildContext (overrides: Record<string, any> = {}): WDKContext {
 // ---------------------------------------------------------------------------
 
 describe('TOOL_DEFINITIONS', () => {
-  test('exports exactly 9 tool definitions', () => {
-    expect(TOOL_DEFINITIONS).toHaveLength(9)
+  test('exports exactly 10 tool definitions', () => {
+    expect(TOOL_DEFINITIONS).toHaveLength(10)
   })
 
   test('every tool has a valid function schema', () => {
@@ -235,7 +241,7 @@ describe('executeToolCall', () => {
 
     // Verify broker.createRequest was called
     expect(ctx.broker.createRequest).toHaveBeenCalledWith('policy', expect.objectContaining({
-      chain: 'ethereum',
+      chainId: 1,
       requestId: expect.any(String),
       targetHash: expect.any(String),
       metadata: expect.objectContaining({
@@ -261,7 +267,7 @@ describe('executeToolCall', () => {
     expect(ctx.store.saveCron).toHaveBeenCalledWith('seed_test_001', expect.objectContaining({
       interval: '5m',
       prompt: 'check ETH balance',
-      chain: 'ethereum',
+      chainId: 1,
       sessionId: 'session_001'
     }))
   })
@@ -323,5 +329,62 @@ describe('executeToolCall', () => {
     }, ctx)
 
     expect(result.policies).toEqual([])
+  })
+
+  // 15. signTransaction -- AUTO policy (immediate signing)
+  test('signTransaction returns { status: "signed" } for AUTO policy', async () => {
+    const ctx = buildContext()
+
+    const result = await executeToolCall('signTransaction', {
+      chain: 'ethereum',
+      to: '0x1234567890abcdef1234567890abcdef12345678',
+      data: '0x',
+      value: '1000000000000000000'
+    }, ctx)
+
+    expect(result.status).toBe('signed')
+    expect(result.signedTx).toBe('0xsigned_tx_data')
+    expect(result.intentHash).toBeDefined()
+    expect(result.requestId).toBeDefined()
+    expect(result.intentId).toBeDefined()
+  })
+
+  // 16. signTransaction -- PolicyRejectionError
+  test('signTransaction returns { status: "rejected" } on PolicyRejectionError', async () => {
+    const ctx = buildContext()
+    const policyErr = new Error('Amount exceeds daily limit')
+    policyErr.name = 'PolicyRejectionError'
+
+    const mockAccount = {
+      signTransaction: jest.fn<() => Promise<never>>().mockRejectedValue(policyErr),
+      sendTransaction: jest.fn<() => Promise<never>>().mockRejectedValue(policyErr)
+    }
+    ;(ctx.wdk as any).getAccount.mockResolvedValue(mockAccount)
+
+    const result = await executeToolCall('signTransaction', {
+      chain: 'ethereum',
+      to: '0xdead',
+      data: '0x',
+      value: '999999'
+    }, ctx)
+
+    expect(result.status).toBe('rejected')
+    expect(result.reason).toBe('Amount exceeds daily limit')
+  })
+
+  // 17. signTransaction -- duplicate intent
+  test('signTransaction returns { status: "duplicate" } when journal detects duplicate', async () => {
+    const ctx = buildContext()
+    ctx.journal!.isDuplicate = jest.fn<() => boolean>().mockReturnValue(true)
+
+    const result = await executeToolCall('signTransaction', {
+      chain: 'ethereum',
+      to: '0xdead',
+      data: '0x',
+      value: '0'
+    }, ctx)
+
+    expect(result.status).toBe('duplicate')
+    expect(result.intentHash).toBeDefined()
   })
 })

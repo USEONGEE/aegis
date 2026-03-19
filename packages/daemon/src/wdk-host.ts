@@ -1,5 +1,8 @@
-import { join } from 'node:path'
-import { JsonApprovalStore, SignedApprovalBroker } from '@wdk-app/guarded-wdk'
+import { join, dirname } from 'node:path'
+import { mkdir } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
+import { EventEmitter } from 'node:events'
+import { SqliteApprovalStore, SignedApprovalBroker } from '@wdk-app/guarded-wdk'
 import type { DaemonConfig } from './config.js'
 import type { Logger } from 'pino'
 
@@ -11,13 +14,14 @@ export interface MockAccount {
   chain: string
   index: number
   sendTransaction (tx: Record<string, unknown>): Promise<never>
+  signTransaction (tx: Record<string, unknown>): Promise<{ signedTx: string }>
   getBalance (): Promise<{ balances: unknown[] }>
 }
 
 export interface WDKInstance {
   getAccount (chain: string, index?: number): Promise<any>
   getFeeRates? (): Promise<Record<string, unknown>>
-  updatePolicies? (chain: string, newPolicies: Record<string, unknown>): Promise<void>
+  updatePolicies? (chainId: number, newPolicies: Record<string, unknown>): Promise<void>
   getApprovalBroker? (): SignedApprovalBroker
   getApprovalStore? (): any
   on (event: string, listener: (...args: any[]) => void): void
@@ -29,7 +33,7 @@ export interface WDKInitResult {
   wdk: WDKInstance | null
   account: any | null
   broker: SignedApprovalBroker | null
-  store: InstanceType<typeof JsonApprovalStore>
+  store: InstanceType<typeof SqliteApprovalStore>
   seedId: string | null
 }
 
@@ -43,7 +47,13 @@ export interface WDKInitResult {
  * still load. When the real WDK is unavailable, a mock is returned.
  */
 export async function initWDK (config: DaemonConfig, logger: Logger): Promise<WDKInitResult> {
-  const store = new JsonApprovalStore(config.storePath)
+  // Step 11: Use SqliteApprovalStore as default (WAL mode, queryable)
+  // config.storePath is a directory for JsonStore; SqliteStore needs a file path
+  const dbPath = config.storePath.endsWith('.db')
+    ? config.storePath
+    : join(config.storePath, 'wdk.db')
+  await mkdir(dirname(dbPath), { recursive: true })
+  const store = new SqliteApprovalStore(dbPath)
   await store.init()
 
   // Load active seed
@@ -62,8 +72,26 @@ export async function initWDK (config: DaemonConfig, logger: Logger): Promise<WD
     .filter((d: any) => d.revoked_at === null || d.revoked_at === undefined)
     .map((d: any) => d.public_key)
 
-  // Create broker
-  const broker = new SignedApprovalBroker(trustedApprovers, store)
+  // Step 07: Create shared EventEmitter and pass to broker
+  const emitter = new EventEmitter()
+  const broker = new SignedApprovalBroker(trustedApprovers, store, emitter)
+
+  // Step 08: Restore stored policies on boot
+  const restoredPolicies: Record<string, { policies: unknown[] } & Record<string, unknown>> = {}
+  try {
+    const chains = await store.listPolicyChains(seedId)
+    for (const chainIdStr of chains) {
+      const chainId = Number(chainIdStr)
+      const stored = await store.loadPolicy(seedId, chainId)
+      if (stored) {
+        const policiesArr = stored.policies_json ? JSON.parse(stored.policies_json) : (stored.policies || [])
+        restoredPolicies[chainIdStr] = { policies: policiesArr }
+        logger.info({ seedId, chainId }, 'Restored policy from store')
+      }
+    }
+  } catch (err: any) {
+    logger.warn({ err: err.message }, 'Failed to restore policies from store')
+  }
 
   // Try to create the real guarded WDK; fall back to mock if @tetherto/wdk is absent
   let wdk: WDKInstance
@@ -74,7 +102,7 @@ export async function initWDK (config: DaemonConfig, logger: Logger): Promise<WD
       seed: mnemonic,
       wallets: {},
       protocols: {},
-      policies: {},
+      policies: restoredPolicies,
       approvalBroker: broker,
       approvalStore: store,
       trustedApprovers
@@ -93,7 +121,7 @@ export async function initWDK (config: DaemonConfig, logger: Logger): Promise<WD
     account = null
   }
 
-  logger.info({ seedId, approverCount: trustedApprovers.length }, 'WDK host initialized.')
+  logger.info({ seedId, approverCount: trustedApprovers.length, restoredPolicies: Object.keys(restoredPolicies).length }, 'WDK host initialized.')
 
   return { wdk, account, broker, store, seedId }
 }
@@ -118,6 +146,11 @@ function createMockWDK (broker: SignedApprovalBroker, store: any, seedId: string
         async sendTransaction (tx: Record<string, unknown>): Promise<never> {
           throw new Error('Mock WDK: sendTransaction not available. Install @tetherto/wdk.')
         },
+        async signTransaction (tx: Record<string, unknown>): Promise<{ signedTx: string }> {
+          // Mock: return deterministic hex-encoded signed tx
+          const hash = createHash('sha256').update(JSON.stringify(tx)).digest('hex')
+          return { signedTx: '0x' + hash }
+        },
         async getBalance (): Promise<{ balances: unknown[] }> {
           return { balances: [] }
         }
@@ -126,8 +159,8 @@ function createMockWDK (broker: SignedApprovalBroker, store: any, seedId: string
     async getFeeRates (): Promise<Record<string, unknown>> {
       return {}
     },
-    async updatePolicies (chain: string, newPolicies: Record<string, unknown>): Promise<void> {
-      await store.savePolicy(seedId, chain, newPolicies)
+    async updatePolicies (chainId: number, newPolicies: Record<string, unknown>): Promise<void> {
+      await store.savePolicy(seedId, chainId, newPolicies)
     },
     getApprovalBroker (): SignedApprovalBroker {
       return broker

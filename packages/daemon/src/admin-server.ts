@@ -1,5 +1,6 @@
 import { createServer } from 'node:net'
 import type { Server, Socket } from 'node:net'
+import { chmodSync } from 'node:fs'
 import { unlink } from 'node:fs/promises'
 import type { Logger } from 'pino'
 import type { WDKContext } from './tool-surface.js'
@@ -24,7 +25,7 @@ export interface AdminServerOptions {
 interface AdminRequest {
   command: string
   status?: string
-  chain?: string
+  chainId?: number
   limit?: number
   [key: string]: unknown
 }
@@ -94,6 +95,7 @@ export class AdminServer {
       })
 
       this._server.listen(this._socketPath, () => {
+        chmodSync(this._socketPath, 0o600)
         this._logger.info({ socketPath: this._socketPath }, 'Admin server listening')
         resolve()
       })
@@ -199,7 +201,7 @@ export class AdminServer {
 
         const entries = await this._journal.list({
           status: request.status || undefined,
-          chain: request.chain || undefined,
+          chainId: request.chainId || undefined,
           limit: request.limit || 50
         })
 
