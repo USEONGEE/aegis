@@ -33,13 +33,15 @@
 
 **type-dep-graph**:
 9. 패키지별 타입 의존성 그래프 생성 (DOT + Mermaid + JSON)
-10. guarded-wdk, daemon, relay, manifest 4개 패키지
+10. guarded-wdk, daemon, relay, manifest 4개 패키지 (app은 RN/Expo 특성상 ts-morph 파싱 제약, canonical은 파일 1개라 그래프 불필요 — 비목표에 명시)
 
 **Claude 스킬 2개**:
 11. `/ci` 스킬 — CI 체크 생성/관리 가이드 (HypurrQuant ci-check-creator 포팅)
 12. `/arch` 스킬 — 패키지별 타입 아키텍처 이해 가이드 (HypurrQuant core-type-architecture 포팅)
 
 ### 비목표 (Out of Scope)
+- app 패키지 type-dep-graph (RN/Expo Metro bundler 특성상 ts-morph 파싱 제약)
+- canonical 패키지 type-dep-graph (소스 파일 1개, 그래프 불필요)
 - HypurrQuant의 DEX/pool/swap 관련 체크 (WDK-APP에 해당 없음)
 - React 컴포넌트 관련 체크 (deprecated-spinner 등)
 - wagmi/web3 관련 체크
