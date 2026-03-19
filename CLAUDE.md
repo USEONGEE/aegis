@@ -22,6 +22,18 @@ AI DeFi Agent 서명 엔진 + 제어 인프라.
 - **Codex Session ID**: `/Users/mousebook/Documents/GitHub/WDK-APP/docs/phases/v0.1.9-signer-abstraction`
 - **시작일**: 2026-03-19
 
+### v0.1.10 — Layer 0 Semantic Union 도입
+- **상태**: Step 5 완료 (커밋 대기)
+- **문서**: [docs/phases/v0.1.10-semantic-unions/](docs/phases/v0.1.10-semantic-unions/)
+- **Codex Session ID**: `/Users/mousebook/Documents/GitHub/WDK-APP/docs/phases/v0.1.10-semantic-unions`
+- **시작일**: 2026-03-19
+
+### v0.2.0 — BIP-44 멀티 월렛 아키텍처
+- **상태**: Step 1 - PRD
+- **문서**: [docs/phases/v0.2.0-bip44-wallet/](docs/phases/v0.2.0-bip44-wallet/)
+- **Codex Session ID**: `/Users/mousebook/Documents/GitHub/WDK-APP/docs/phases/v0.2.0-bip44-wallet`
+- **시작일**: 2026-03-19
+
 ## 프로젝트 구조
 
 ```
