@@ -5,7 +5,7 @@ import { unlink } from 'node:fs/promises'
 import type { Logger } from 'pino'
 import type { WDKContext } from './tool-surface.js'
 import type { RelayClient } from './relay-client.js'
-import type { ExecutionJournal } from './execution-journal.js'
+import type { ExecutionJournal, JournalListOptions } from './execution-journal.js'
 import type { CronScheduler } from './cron-scheduler.js'
 
 // ---------------------------------------------------------------------------
@@ -200,7 +200,7 @@ export class AdminServer {
         }
 
         const entries = await this._journal.list({
-          status: request.status || undefined,
+          status: request.status as JournalListOptions['status'],
           chainId: request.chainId || undefined,
           limit: request.limit || 50
         })

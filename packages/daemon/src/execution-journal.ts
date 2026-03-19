@@ -1,4 +1,5 @@
 import type { Logger } from 'pino'
+import type { JournalStatus } from '@wdk-app/guarded-wdk'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -7,7 +8,7 @@ import type { Logger } from 'pino'
 export interface JournalEntry {
   intentId: string
   targetHash: string
-  status: string
+  status: JournalStatus
   seedId?: string
   chainId?: number
   txHash?: string
@@ -20,7 +21,7 @@ export interface TrackMeta {
 }
 
 export interface JournalListOptions {
-  status?: string
+  status?: JournalStatus
   chainId?: number
   limit?: number
   seedId?: string
@@ -33,16 +34,22 @@ interface ApprovalStore {
     seedId: string
     chainId: number
     targetHash: string
-    status: string
+    status: JournalStatus
   }): Promise<void>
-  updateJournalStatus (intentId: string, status: string, txHash?: string): Promise<void>
+  updateJournalStatus (intentId: string, status: JournalStatus, txHash?: string): Promise<void>
 }
 
 /**
  * Execution Journal -- tracks intent lifecycle and prevents duplicate execution.
  *
- * Status flow: received -> evaluated -> approved -> broadcasted -> settled | failed
- *              received -> evaluated -> approved -> signed (for signTransaction)
+ * Possible statuses: received, pending_approval, settled, signed, failed, rejected
+ * Typical flows:
+ *   received -> settled                          (auto-approved tx)
+ *   received -> pending_approval -> settled      (human-approved tx)
+ *   received -> pending_approval -> rejected     (denied)
+ *   received -> signed                           (auto-approved sign)
+ *   received -> pending_approval -> signed       (human-approved sign)
+ *   any -> failed                                (error at any stage)
  *
  * The journal delegates persistence to the ApprovalStore but maintains an
  * in-memory index for fast duplicate detection (keyed by targetHash).
@@ -56,7 +63,7 @@ export class ExecutionJournal {
   private _hashIndex: Map<string, string>
 
   // In-memory index: intentId -> status
-  private _statusIndex: Map<string, string>
+  private _statusIndex: Map<string, JournalStatus>
 
   constructor (store: ApprovalStore, seedId: string, logger: Logger) {
     this._store = store
@@ -121,7 +128,7 @@ export class ExecutionJournal {
   /**
    * Update the status of a tracked intent.
    */
-  async updateStatus (intentId: string, status: string, txHash?: string): Promise<void> {
+  async updateStatus (intentId: string, status: JournalStatus, txHash?: string): Promise<void> {
     this._statusIndex.set(intentId, status)
 
     // Remove from hash index if terminal
@@ -151,7 +158,7 @@ export class ExecutionJournal {
   /**
    * Get the status of an intent.
    */
-  getStatus (intentId: string): string | null {
+  getStatus (intentId: string): JournalStatus | null {
     return this._statusIndex.get(intentId) || null
   }
 
