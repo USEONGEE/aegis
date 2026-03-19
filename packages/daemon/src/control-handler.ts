@@ -19,7 +19,7 @@ export interface ControlPayload {
   approverPubKey?: string
   chainId?: number
   metadata?: Record<string, any>
-  deviceId?: string
+  signerId?: string
   identityPubKey?: string
   encryptionPubKey?: string
   pairingToken?: string
@@ -31,7 +31,7 @@ export interface ControlResult {
   ok: boolean
   type?: string
   requestId?: string
-  deviceId?: string
+  signerId?: string
   messageId?: string
   error?: string
   reason?: string
@@ -73,7 +73,7 @@ interface SignedApprovalBroker {
  *   - tx_approval      -> broker.submitApproval (resolves pending tx)
  *   - policy_approval  -> broker.submitApproval (applies policy)
  *   - policy_reject    -> broker.submitApproval (rejects policy request)
- *   - device_revoke    -> broker.submitApproval (revokes a device)
+ *   - device_revoke    -> broker.submitApproval (revokes a signer)
  */
 export async function handleControlMessage (
   msg: ControlMessage,
@@ -194,7 +194,7 @@ export async function handleControlMessage (
     }
 
     // -----------------------------------------------------------------------
-    // device_revoke -- owner revoked a device
+    // device_revoke -- owner revoked a signer
     // -----------------------------------------------------------------------
     case 'device_revoke': {
       try {
@@ -203,12 +203,12 @@ export async function handleControlMessage (
           type: 'device_revoke'
         }
 
-        // Compute expectedTargetHash = SHA-256(deviceId) for verification.
-        // The deviceId to revoke is in metadata.deviceId.
-        const deviceId = (signedApproval.metadata as Record<string, any>)?.deviceId as string | undefined
+        // Compute expectedTargetHash = SHA-256(signerId) for verification.
+        // The signerId to revoke is in metadata.signerId.
+        const signerId = (signedApproval.metadata as Record<string, any>)?.signerId as string | undefined
         const context: Record<string, unknown> = {}
-        if (deviceId) {
-          context.expectedTargetHash = '0x' + createHash('sha256').update(deviceId).digest('hex')
+        if (signerId) {
+          context.expectedTargetHash = '0x' + createHash('sha256').update(signerId).digest('hex')
         }
 
         await broker.submitApproval(signedApproval, context)
@@ -216,18 +216,18 @@ export async function handleControlMessage (
         // After revocation, update the broker's trusted approvers list
         const store = wdk?.getApprovalStore?.() || null
         if (store) {
-          const devices: Array<{ publicKey: string; revokedAt: number | null }> = await store.listDevices()
-          const active: string[] = devices
+          const signers: Array<{ publicKey: string; revokedAt: number | null }> = await store.listSigners()
+          const active: string[] = signers
             .filter(d => d.revokedAt === null || d.revokedAt === undefined)
             .map(d => d.publicKey)
           broker.setTrustedApprovers(active)
-          logger.info({ activeDevices: active.length }, 'Trusted approvers updated after device revocation')
+          logger.info({ activeSigners: active.length }, 'Trusted approvers updated after signer revocation')
         }
 
-        logger.info({ requestId: payload.requestId }, 'Device revocation submitted successfully')
+        logger.info({ requestId: payload.requestId }, 'Signer revocation submitted successfully')
         return { ok: true, type: 'device_revoke', requestId: payload.requestId }
       } catch (err: any) {
-        logger.error({ err, requestId: payload.requestId }, 'Device revocation verification failed')
+        logger.error({ err, requestId: payload.requestId }, 'Signer revocation verification failed')
         return { ok: false, type: 'device_revoke', requestId: payload.requestId, error: err.message }
       }
     }
@@ -237,48 +237,48 @@ export async function handleControlMessage (
     // -----------------------------------------------------------------------
     case 'pairing_confirm': {
       try {
-        const { deviceId, identityPubKey, encryptionPubKey, pairingToken, sas } = payload
+        const { signerId, identityPubKey, encryptionPubKey, pairingToken, sas } = payload
 
-        if (!deviceId || !identityPubKey) {
-          return { ok: false, type: 'pairing_confirm', error: 'Missing deviceId or identityPubKey' }
+        if (!signerId || !identityPubKey) {
+          return { ok: false, type: 'pairing_confirm', error: 'Missing signerId or identityPubKey' }
         }
 
         // --- Gap 3: Verify pairingToken before trusting ---
         if (!pairingToken) {
-          logger.warn({ deviceId }, 'Pairing rejected: missing pairingToken')
+          logger.warn({ signerId }, 'Pairing rejected: missing pairingToken')
           return { ok: false, type: 'pairing_confirm', error: 'Missing pairingToken' }
         }
 
         if (!pairingSession) {
-          logger.warn({ deviceId }, 'Pairing rejected: no active pairing session on daemon')
+          logger.warn({ signerId }, 'Pairing rejected: no active pairing session on daemon')
           return { ok: false, type: 'pairing_confirm', error: 'No active pairing session' }
         }
 
         // Constant-time comparison for pairingToken
         const tokenValid = pairingToken === pairingSession.pairingToken
         if (!tokenValid) {
-          logger.warn({ deviceId }, 'Pairing rejected: invalid pairingToken')
+          logger.warn({ signerId }, 'Pairing rejected: invalid pairingToken')
           return { ok: false, type: 'pairing_confirm', error: 'Invalid pairingToken' }
         }
 
         // --- Gap 16: SAS verification before registering as trusted ---
         if (!sas) {
-          logger.warn({ deviceId }, 'Pairing rejected: missing SAS')
+          logger.warn({ signerId }, 'Pairing rejected: missing SAS')
           return { ok: false, type: 'pairing_confirm', error: 'Missing SAS for verification' }
         }
 
         if (sas !== pairingSession.expectedSAS) {
-          logger.warn({ deviceId, receivedSAS: sas, expectedSAS: pairingSession.expectedSAS }, 'Pairing rejected: SAS mismatch (possible MITM)')
+          logger.warn({ signerId, receivedSAS: sas, expectedSAS: pairingSession.expectedSAS }, 'Pairing rejected: SAS mismatch (possible MITM)')
           return { ok: false, type: 'pairing_confirm', error: 'SAS mismatch — possible man-in-the-middle attack' }
         }
 
-        logger.info({ deviceId, sas }, 'Pairing token and SAS verified successfully')
+        logger.info({ signerId, sas }, 'Pairing token and SAS verified successfully')
 
-        // Register the new device in the approval store (only after verification)
+        // Register the new signer in the approval store (only after verification)
         const store = wdk?.getApprovalStore?.() || null
         if (store) {
-          await store.saveDevice(deviceId, identityPubKey)
-          logger.info({ deviceId }, 'Paired device registered in store')
+          await store.saveSigner(signerId, identityPubKey)
+          logger.info({ signerId }, 'Signer registered in store')
         }
 
         // Add to trusted approvers so future approvals are accepted
@@ -306,8 +306,8 @@ export async function handleControlMessage (
           }
         }
 
-        logger.info({ deviceId, sas }, 'Pairing confirmed successfully')
-        return { ok: true, type: 'pairing_confirm', deviceId }
+        logger.info({ signerId, sas }, 'Pairing confirmed successfully')
+        return { ok: true, type: 'pairing_confirm', signerId }
       } catch (err: any) {
         logger.error({ err }, 'Pairing confirmation failed')
         return { ok: false, type: 'pairing_confirm', error: err.message }

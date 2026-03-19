@@ -66,9 +66,9 @@ export async function initWDK (config: DaemonConfig, logger: Logger): Promise<WD
   const seedId: string = activeSeed.id
   const mnemonic: string = activeSeed.mnemonic
 
-  // Load trusted approvers (public keys) from paired devices
-  const devices = await store.listDevices()
-  const trustedApprovers: string[] = devices
+  // Load trusted approvers (public keys) from paired signers
+  const signers = await store.listSigners()
+  const trustedApprovers: string[] = signers
     .filter(d => d.revokedAt === null || d.revokedAt === undefined)
     .map(d => d.publicKey)
 

@@ -113,7 +113,7 @@ async function main (): Promise<void> {
   const RELAY_EVENTS = [
     'IntentProposed', 'PolicyEvaluated', 'ApprovalRequested', 'ApprovalGranted',
     'ExecutionBroadcasted', 'ExecutionSettled', 'ExecutionFailed',
-    'PendingPolicyRequested', 'ApprovalVerified', 'ApprovalRejected', 'PolicyApplied', 'DeviceRevoked'
+    'PendingPolicyRequested', 'ApprovalVerified', 'ApprovalRejected', 'PolicyApplied', 'SignerRevoked'
   ] as const
 
   if (wdk) {

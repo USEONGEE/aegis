@@ -48,7 +48,7 @@ interface AdminResponse {
  * Commands:
  *   - status         -> daemon health and connection state
  *   - journal_list   -> list execution journal entries
- *   - device_list    -> list paired devices
+ *   - signer_list    -> list paired signers
  *   - cron_list      -> list registered cron jobs
  *   - seed_list      -> list seeds (mnemonic redacted)
  */
@@ -209,17 +209,17 @@ export class AdminServer {
       }
 
       // -------------------------------------------------------------------
-      // device_list -- paired devices
+      // signer_list -- paired signers
       // -------------------------------------------------------------------
-      case 'device_list': {
-        const devices = await this._store.listDevices()
+      case 'signer_list': {
+        const signers = await this._store.listSigners()
         return {
           ok: true,
           data: {
-            devices: devices.map(d => ({
-              deviceId: d.deviceId,
+            signers: signers.map(d => ({
+              signerId: d.signerId,
               name: d.name,
-              pairedAt: d.pairedAt,
+              registeredAt: d.registeredAt,
               revokedAt: d.revokedAt,
               active: d.revokedAt === null || d.revokedAt === undefined
             }))

@@ -34,8 +34,8 @@ function createMockBroker (overrides: Record<string, any> = {}): any {
 
 function createMockStore (overrides: Record<string, any> = {}): any {
   return {
-    saveDevice: jest.fn<() => Promise<undefined>>().mockResolvedValue(undefined),
-    listDevices: jest.fn<() => Promise<any[]>>().mockResolvedValue([]),
+    saveSigner: jest.fn<() => Promise<undefined>>().mockResolvedValue(undefined),
+    listSigners: jest.fn<() => Promise<any[]>>().mockResolvedValue([]),
     ...overrides
   }
 }
@@ -89,7 +89,7 @@ describe('handleControlMessage', () => {
   // pairing_confirm
   // -------------------------------------------------------------------------
 
-  test('pairing_confirm: calls store.saveDevice with correct args', async () => {
+  test('pairing_confirm: calls store.saveSigner with correct args', async () => {
     const pairingSession = {
       pairingToken: 'tok_abc',
       expectedSAS: '1234',
@@ -100,7 +100,7 @@ describe('handleControlMessage', () => {
     const msg: ControlMessage = {
       type: 'pairing_confirm',
       payload: {
-        deviceId: 'dev_001',
+        signerId: 'dev_001',
         identityPubKey: '0xpubkey123',
         encryptionPubKey: '0xenckey456',
         pairingToken: 'tok_abc',
@@ -112,8 +112,8 @@ describe('handleControlMessage', () => {
 
     expect(result.ok).toBe(true)
     expect(result.type).toBe('pairing_confirm')
-    expect(result.deviceId).toBe('dev_001')
-    expect(store.saveDevice).toHaveBeenCalledWith('dev_001', '0xpubkey123')
+    expect(result.signerId).toBe('dev_001')
+    expect(store.saveSigner).toHaveBeenCalledWith('dev_001', '0xpubkey123')
   })
 
   test('pairing_confirm: adds identityPubKey to trusted approvers', async () => {
@@ -127,7 +127,7 @@ describe('handleControlMessage', () => {
     const msg: ControlMessage = {
       type: 'pairing_confirm',
       payload: {
-        deviceId: 'dev_002',
+        signerId: 'dev_002',
         identityPubKey: '0xnewkey',
         pairingToken: 'tok_pair',
         sas: '5678'
@@ -139,7 +139,7 @@ describe('handleControlMessage', () => {
     expect(broker.setTrustedApprovers).toHaveBeenCalledWith(['0xnewkey'])
   })
 
-  test('pairing_confirm: returns error when deviceId is missing', async () => {
+  test('pairing_confirm: returns error when signerId is missing', async () => {
     const msg: ControlMessage = {
       type: 'pairing_confirm',
       payload: { identityPubKey: '0xkey' }
@@ -149,19 +149,19 @@ describe('handleControlMessage', () => {
 
     expect(result.ok).toBe(false)
     expect(result.type).toBe('pairing_confirm')
-    expect(result.error).toBe('Missing deviceId or identityPubKey')
+    expect(result.error).toBe('Missing signerId or identityPubKey')
   })
 
   test('pairing_confirm: returns error when identityPubKey is missing', async () => {
     const msg: ControlMessage = {
       type: 'pairing_confirm',
-      payload: { deviceId: 'dev_003' }
+      payload: { signerId: 'dev_003' }
     }
 
     const result = await handleControlMessage(msg, broker, logger as any, wdk)
 
     expect(result.ok).toBe(false)
-    expect(result.error).toBe('Missing deviceId or identityPubKey')
+    expect(result.error).toBe('Missing signerId or identityPubKey')
   })
 
   // -------------------------------------------------------------------------
@@ -291,10 +291,10 @@ describe('handleControlMessage', () => {
   // -------------------------------------------------------------------------
 
   test('device_revoke: calls broker.submitApproval with expectedTargetHash', async () => {
-    const deviceId = 'device_to_revoke'
-    const expectedHash = '0x' + createHash('sha256').update(deviceId).digest('hex')
+    const signerId = 'device_to_revoke'
+    const expectedHash = '0x' + createHash('sha256').update(signerId).digest('hex')
 
-    store.listDevices.mockResolvedValue([
+    store.listSigners.mockResolvedValue([
       { publicKey: '0xactive1', revokedAt: null },
       { publicKey: '0xrevoked', revokedAt: new Date() }
     ])
@@ -303,7 +303,7 @@ describe('handleControlMessage', () => {
       type: 'device_revoke',
       payload: {
         requestId: 'req_rev_1',
-        metadata: { deviceId }
+        metadata: { signerId }
       }
     }
 
@@ -314,14 +314,14 @@ describe('handleControlMessage', () => {
     expect(broker.submitApproval).toHaveBeenCalledWith(
       expect.objectContaining({
         type: 'device_revoke',
-        metadata: { deviceId }
+        metadata: { signerId }
       }),
       { expectedTargetHash: expectedHash }
     )
   })
 
-  test('device_revoke: updates trusted approvers to only active devices', async () => {
-    store.listDevices.mockResolvedValue([
+  test('device_revoke: updates trusted approvers to only active signers', async () => {
+    store.listSigners.mockResolvedValue([
       { publicKey: '0xactive1', revokedAt: null },
       { publicKey: '0xactive2', revokedAt: null },
       { publicKey: '0xrevoked', revokedAt: new Date() }
@@ -331,7 +331,7 @@ describe('handleControlMessage', () => {
       type: 'device_revoke',
       payload: {
         requestId: 'req_rev_2',
-        metadata: { deviceId: 'dev_x' }
+        metadata: { signerId: 'dev_x' }
       }
     }
 
@@ -347,7 +347,7 @@ describe('handleControlMessage', () => {
       type: 'device_revoke',
       payload: {
         requestId: 'req_rev_3',
-        metadata: { deviceId: 'dev_y' }
+        metadata: { signerId: 'dev_y' }
       }
     }
 
