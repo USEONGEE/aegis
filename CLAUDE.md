@@ -4,11 +4,17 @@ AI DeFi Agent 서명 엔진 + 제어 인프라.
 
 ## 현재 페이즈
 
-- **버전**: v0.1.6 완료
-- **기능**: Layer 0 타입 정리 (@internal 누수 제거, No Optional 적용)
-- **상태**: Complete
-- **문서**: [docs/archive/v0.1.6-layer0-type-cleanup/](docs/archive/v0.1.6-layer0-type-cleanup/)
-- **완료일**: 2026-03-19
+### v0.1.7 — Store 타입 네이밍 통일
+- **상태**: Step 1 - PRD
+- **문서**: [docs/phases/v0.1.7-store-naming/](docs/phases/v0.1.7-store-naming/)
+- **Codex Session ID**: `/Users/mousebook/Documents/GitHub/WDK-APP/docs/phases/v0.1.7-store-naming`
+- **시작일**: 2026-03-19
+
+### v0.1.8 — EvaluationResult 정책 컨텍스트 추가
+- **상태**: Step 1 - PRD
+- **문서**: [docs/phases/v0.1.8-evaluation-context/](docs/phases/v0.1.8-evaluation-context/)
+- **Codex Session ID**: `/Users/mousebook/Documents/GitHub/WDK-APP/docs/phases/v0.1.8-evaluation-context`
+- **시작일**: 2026-03-19
 
 ## 프로젝트 구조
 
