@@ -49,13 +49,13 @@ function createMockWdk (overrides: Record<string, any> = {}): any {
 
 function createMockStore (overrides: Record<string, any> = {}): any {
   return {
-    loadPolicy: jest.fn<() => Promise<{ policies_json: string; signature_json: string; seed_id: string; chain_id: number; policy_version: number; updated_at: number }>>().mockResolvedValue({
-      policies_json: JSON.stringify([{ type: 'auto', maxUsd: 100 }]),
-      signature_json: '{}',
-      seed_id: 'test-seed',
-      chain_id: 1,
-      policy_version: 1,
-      updated_at: Date.now()
+    loadPolicy: jest.fn<() => Promise<{ policiesJson: string; signatureJson: string; seedId: string; chainId: number; policyVersion: number; updatedAt: number }>>().mockResolvedValue({
+      policiesJson: JSON.stringify([{ type: 'auto', maxUsd: 100 }]),
+      signatureJson: '{}',
+      seedId: 'test-seed',
+      chainId: 1,
+      policyVersion: 1,
+      updatedAt: Date.now()
     }),
     loadPendingApprovals: jest.fn<() => Promise<Array<{ requestId: string; type: string; status: string }>>>().mockResolvedValue([
       { requestId: 'req_1', type: 'policy', status: 'pending' }
@@ -134,6 +134,7 @@ describe('executeToolCall', () => {
     expect(result.fee).toBe('0.001')
     expect(result.intentHash).toBeDefined()
     expect(result.intentHash!.startsWith('0x')).toBe(true)
+    expect(result).not.toHaveProperty('context')
   })
 
   // 2. sendTransaction -- duplicate intent
@@ -172,6 +173,7 @@ describe('executeToolCall', () => {
 
     expect(result.status).toBe('rejected')
     expect(result.reason).toBe('Amount exceeds daily limit')
+    expect(result).toHaveProperty('context')
   })
 
   // 4. transfer -- AUTO policy
@@ -309,6 +311,7 @@ describe('executeToolCall', () => {
     expect(result.status).toBe('error')
     expect(result.error).toBe('Unknown tool: nonExistentTool')
     expect(ctx.logger.warn).toHaveBeenCalled()
+    expect(result).not.toHaveProperty('context')
   })
 
   // 13. getBalance error propagation
@@ -352,6 +355,7 @@ describe('executeToolCall', () => {
     expect(result.intentHash).toBeDefined()
     expect(result.requestId).toBeDefined()
     expect(result.intentId).toBeDefined()
+    expect(result).not.toHaveProperty('context')
   })
 
   // 16. signTransaction -- PolicyRejectionError
@@ -375,6 +379,7 @@ describe('executeToolCall', () => {
 
     expect(result.status).toBe('rejected')
     expect(result.reason).toBe('Amount exceeds daily limit')
+    expect(result).toHaveProperty('context')
   })
 
   // 17. signTransaction -- duplicate intent
@@ -391,5 +396,62 @@ describe('executeToolCall', () => {
 
     expect(result.status).toBe('duplicate')
     expect(result.intentHash).toBeDefined()
+  })
+
+  // 18. sendTransaction -- PolicyRejectionError includes context
+  test('sendTransaction rejected returns context from PolicyRejectionError', async () => {
+    const ctx = buildContext()
+    const mockContext = {
+      target: '0xdead',
+      selector: '0xdeadbeef',
+      effectiveRules: [{ order: 0, decision: 'REJECT' }],
+      ruleFailures: [{ rule: { order: 0, decision: 'REJECT' }, failedArgs: [] }]
+    }
+    const policyErr = new Error('no matching permission') as any
+    policyErr.name = 'PolicyRejectionError'
+    policyErr.context = mockContext
+
+    const mockAccount = {
+      sendTransaction: jest.fn<() => Promise<never>>().mockRejectedValue(policyErr)
+    }
+    ;(ctx.wdk as any).getAccount.mockResolvedValue(mockAccount)
+
+    const result = await executeToolCall('sendTransaction', {
+      chain: 'ethereum',
+      to: '0xdead',
+      data: '0xdeadbeef',
+      value: '0'
+    }, ctx)
+
+    expect(result.status).toBe('rejected')
+    expect(result.context).toEqual(expect.objectContaining({
+      target: expect.any(String),
+      selector: expect.any(String),
+      effectiveRules: expect.any(Array),
+      ruleFailures: expect.any(Array)
+    }))
+  })
+
+  // 19. sendTransaction -- ApprovalTimeoutError (no context)
+  test('sendTransaction returns { status: "approval_timeout" } without context', async () => {
+    const ctx = buildContext()
+    const timeoutErr = new Error('Approval timed out')
+    timeoutErr.name = 'ApprovalTimeoutError'
+    ;(timeoutErr as any).requestId = 'req_timeout'
+
+    const mockAccount = {
+      sendTransaction: jest.fn<() => Promise<never>>().mockRejectedValue(timeoutErr)
+    }
+    ;(ctx.wdk as any).getAccount.mockResolvedValue(mockAccount)
+
+    const result = await executeToolCall('sendTransaction', {
+      chain: 'ethereum',
+      to: '0xdead',
+      data: '0x',
+      value: '0'
+    }, ctx)
+
+    expect(result.status).toBe('approval_timeout')
+    expect(result).not.toHaveProperty('context')
   })
 })

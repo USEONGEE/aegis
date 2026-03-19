@@ -6,9 +6,11 @@ export class ForbiddenError extends Error {
 }
 
 export class PolicyRejectionError extends Error {
-  constructor (reason?: string) {
+  context: unknown
+  constructor (reason: string, context: unknown) {
     super(reason || 'Policy rejected the transaction.')
     this.name = 'PolicyRejectionError'
+    this.context = context
   }
 }
 

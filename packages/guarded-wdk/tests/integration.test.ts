@@ -188,8 +188,9 @@ describe('Integration: Guarded Middleware', () => {
   test('AUTO repay: small amount executes immediately', async () => {
     await applyMiddleware()
     const events: string[] = []
+    let policyContext: unknown = undefined
     emitter.on('IntentProposed', (e: { type: string }) => events.push(e.type))
-    emitter.on('PolicyEvaluated', (e: { type: string }) => events.push(e.type))
+    emitter.on('PolicyEvaluated', (e: { type: string; context: unknown }) => { events.push(e.type); policyContext = e.context })
     emitter.on('ExecutionBroadcasted', (e: { type: string }) => events.push(e.type))
     emitter.on('ExecutionSettled', (e: { type: string }) => events.push(e.type))
 
@@ -200,6 +201,7 @@ describe('Integration: Guarded Middleware', () => {
     expect(events).toContain('IntentProposed')
     expect(events).toContain('PolicyEvaluated')
     expect(events).toContain('ExecutionBroadcasted')
+    expect(policyContext).toBeNull()
 
     // Wait for settlement polling
     await new Promise(resolve => setTimeout(resolve, 100))
@@ -208,8 +210,8 @@ describe('Integration: Guarded Middleware', () => {
 
   test('REQUIRE_APPROVAL repay: waits for signed approval then executes', async () => {
     await applyMiddleware()
-    const events: Array<{ type: string; requestId?: string }> = []
-    emitter.on('ApprovalRequested', (e: { type: string; requestId: string }) => events.push(e))
+    const events: Array<{ type: string; requestId?: string; context?: unknown }> = []
+    emitter.on('ApprovalRequested', (e: { type: string; requestId: string; context?: unknown }) => events.push(e))
     emitter.on('ApprovalGranted', (e: { type: string }) => events.push(e))
     emitter.on('ExecutionBroadcasted', (e: { type: string }) => events.push(e))
 
@@ -257,6 +259,9 @@ describe('Integration: Guarded Middleware', () => {
     expect(eventTypes).toContain('ApprovalRequested')
     expect(eventTypes).toContain('ApprovalGranted')
     expect(eventTypes).toContain('ExecutionBroadcasted')
+    const approvalEvt = events.find(e => e.type === 'ApprovalRequested')
+    expect(approvalEvt?.context).toBeDefined()
+    expect(approvalEvt?.context).not.toBeNull()
   })
 
   test('REJECT: unknown target throws PolicyRejectionError', async () => {
@@ -373,8 +378,8 @@ describe('Integration: Guarded Middleware', () => {
 
   test('signTransaction: REQUIRE_APPROVAL waits for signed approval', async () => {
     await applyMiddleware()
-    const events: Array<{ type: string; requestId?: string }> = []
-    emitter.on('ApprovalRequested', (e: { type: string; requestId: string }) => events.push(e))
+    const events: Array<{ type: string; requestId?: string; context?: unknown }> = []
+    emitter.on('ApprovalRequested', (e: { type: string; requestId: string; context?: unknown }) => events.push(e))
     emitter.on('TransactionSigned', (e: { type: string }) => events.push(e))
 
     const tx = makeRepayTx(5000)
@@ -408,6 +413,9 @@ describe('Integration: Guarded Middleware', () => {
     const eventTypes = events.map(e => e.type)
     expect(eventTypes).toContain('ApprovalRequested')
     expect(eventTypes).toContain('TransactionSigned')
+    const signApprovalEvt = events.find(e => e.type === 'ApprovalRequested')
+    expect(signApprovalEvt?.context).toBeDefined()
+    expect(signApprovalEvt?.context).not.toBeNull()
   })
 
   test('updatePolicies snapshot: old policy preserved for in-flight', async () => {

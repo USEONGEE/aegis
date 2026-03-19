@@ -51,6 +51,7 @@ export interface ToolResult {
   policies?: unknown[]
   pending?: unknown[]
   crons?: unknown[]
+  context?: unknown
 }
 
 interface SendTransactionArgs {
@@ -355,12 +356,13 @@ export async function executeToolCall (name: string, args: ToolArgs, wdkContext:
         return {
           status: 'pending_approval',
           requestId,
-          intentHash: hash
+          intentHash: hash,
+          context: result.evt?.context ?? null
         }
       } catch (err: any) {
         if (err.name === 'PolicyRejectionError') {
           if (journal) journal.updateStatus(intentId, 'rejected')
-          return { status: 'rejected', reason: err.message, intentHash: hash }
+          return { status: 'rejected', reason: err.message, intentHash: hash, context: err.context ?? null }
         }
 
         if (err.name === 'ApprovalTimeoutError') {
@@ -444,10 +446,10 @@ export async function executeToolCall (name: string, args: ToolArgs, wdkContext:
             }
           })
 
-        return { status: 'pending_approval', requestId, token, amount }
+        return { status: 'pending_approval', requestId, token, amount, context: result.evt?.context ?? null }
       } catch (err: any) {
         if (err.name === 'PolicyRejectionError') {
-          return { status: 'rejected', reason: err.message }
+          return { status: 'rejected', reason: err.message, context: err.context ?? null }
         }
         logger.error({ err, name: 'transfer' }, 'Tool execution error')
         return { status: 'error', error: err.message }
@@ -477,7 +479,7 @@ export async function executeToolCall (name: string, args: ToolArgs, wdkContext:
       try {
         const chainId = resolveChainId(chain)
         const policy = await store.loadPolicy(seedId, chainId)
-        return { policies: policy ? JSON.parse(policy.policies_json) : [] }
+        return { policies: policy ? JSON.parse(policy.policiesJson) : [] }
       } catch (err: any) {
         logger.error({ err, name: 'policyList' }, 'Tool execution error')
         return { status: 'error', error: err.message }
@@ -663,12 +665,13 @@ export async function executeToolCall (name: string, args: ToolArgs, wdkContext:
           status: 'pending_approval',
           requestId,
           intentHash: hash,
-          intentId
+          intentId,
+          context: result.evt?.context ?? null
         }
       } catch (err: any) {
         if (err.name === 'PolicyRejectionError') {
           if (journal) journal.updateStatus(intentId, 'rejected')
-          return { status: 'rejected', reason: err.message, intentHash: hash }
+          return { status: 'rejected', reason: err.message, intentHash: hash, context: err.context ?? null }
         }
 
         if (err.name === 'ApprovalTimeoutError') {

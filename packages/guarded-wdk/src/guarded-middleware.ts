@@ -87,10 +87,30 @@ interface GuardedAccount {
   [key: string]: unknown
 }
 
+export interface FailedArg {
+  argIndex: string
+  condition: string
+  expected: string | string[]
+  actual: string
+}
+
+export interface RuleFailure {
+  rule: Rule
+  failedArgs: FailedArg[]
+}
+
+export interface EvaluationContext {
+  target: string
+  selector: string
+  effectiveRules: Rule[]
+  ruleFailures: RuleFailure[]
+}
+
 export interface EvaluationResult {
   decision: Decision
   matchedPermission: Rule | null
   reason: string
+  context: EvaluationContext | null
 }
 
 interface MiddlewareConfig {
@@ -190,20 +210,26 @@ function extractArg (data: string, index: number): string | null {
   return '0x' + hex
 }
 
-function matchArgs (data: string, argConditions: Record<string, ArgCondition>): boolean {
+function matchArgs (data: string, argConditions: Record<string, ArgCondition>): FailedArg[] {
+  const failures: FailedArg[] = []
   for (const [indexStr, cond] of Object.entries(argConditions)) {
     const index = parseInt(indexStr, 10)
     const actual = extractArg(data, index)
-    if (actual === null) return false
-    if (!matchCondition(cond.condition, actual, cond.value)) return false
+    if (actual === null) {
+      failures.push({ argIndex: indexStr, condition: cond.condition, expected: cond.value, actual: 'null' })
+      continue
+    }
+    if (!matchCondition(cond.condition, actual, cond.value)) {
+      failures.push({ argIndex: indexStr, condition: cond.condition, expected: cond.value, actual })
+    }
   }
-  return true
+  return failures
 }
 
 export function evaluatePolicy (chainPolicies: ChainPolicies, chainId: number, tx: Transaction): EvaluationResult {
   const config = chainPolicies[chainId]
   if (!config || !config.policies) {
-    return { decision: 'REJECT', matchedPermission: null, reason: 'no policies for chain' }
+    return { decision: 'REJECT', matchedPermission: null, reason: 'no policies for chain', context: null }
   }
 
   const { policies } = config
@@ -212,28 +238,28 @@ export function evaluatePolicy (chainPolicies: ChainPolicies, chainId: number, t
     if (policy.type === 'timestamp') {
       const now = Date.now() / 1000
       if (policy.validAfter && now < policy.validAfter) {
-        return { decision: 'REJECT', matchedPermission: null, reason: 'too early' }
+        return { decision: 'REJECT', matchedPermission: null, reason: 'too early', context: null }
       }
       if (policy.validUntil && now > policy.validUntil) {
-        return { decision: 'REJECT', matchedPermission: null, reason: 'expired' }
+        return { decision: 'REJECT', matchedPermission: null, reason: 'expired', context: null }
       }
     }
   }
 
   const callPolicy = (policies as Policy[]).find((p): p is CallPolicy => p.type === 'call')
   if (!callPolicy) {
-    return { decision: 'REJECT', matchedPermission: null, reason: 'no call policy' }
+    return { decision: 'REJECT', matchedPermission: null, reason: 'no call policy', context: null }
   }
 
   const txTo = tx.to?.toLowerCase?.()
   const txSelector = tx.data?.slice?.(0, 10)
 
   if (!txTo) {
-    return { decision: 'REJECT', matchedPermission: null, reason: 'missing tx.to' }
+    return { decision: 'REJECT', matchedPermission: null, reason: 'missing tx.to', context: null }
   }
 
   if (!tx.data || tx.data.length < 10) {
-    return { decision: 'REJECT', matchedPermission: null, reason: 'missing or invalid tx.data' }
+    return { decision: 'REJECT', matchedPermission: null, reason: 'missing or invalid tx.data', context: null }
   }
 
   // Collect candidates from matching buckets
@@ -257,14 +283,36 @@ export function evaluatePolicy (chainPolicies: ChainPolicies, chainId: number, t
   // Sort by original order to preserve Permission[] semantics
   candidates.sort((a, b) => a.order - b.order)
 
-  // Match in order
+  // Match in order, collecting failures for context
+  const ruleFailures: RuleFailure[] = []
   for (const rule of candidates) {
-    if (rule.args && !matchArgs(tx.data, rule.args)) continue
-    if (rule.valueLimit !== undefined && BigInt(tx.value || 0) > BigInt(rule.valueLimit)) continue
-    return { decision: rule.decision, matchedPermission: rule, reason: 'matched' }
+    const failures = rule.args ? matchArgs(tx.data, rule.args) : []
+    if (failures.length > 0) {
+      ruleFailures.push({ rule, failedArgs: failures })
+      continue
+    }
+    if (rule.valueLimit !== undefined && BigInt(tx.value || 0) > BigInt(rule.valueLimit)) {
+      ruleFailures.push({ rule, failedArgs: [] })
+      continue
+    }
+    return {
+      decision: rule.decision,
+      matchedPermission: rule,
+      reason: 'matched',
+      context: rule.decision === 'REQUIRE_APPROVAL'
+        ? { target: txTo, selector: txSelector!, effectiveRules: candidates, ruleFailures }
+        : null
+    }
   }
 
-  return { decision: 'REJECT', matchedPermission: null, reason: 'no matching permission' }
+  return {
+    decision: 'REJECT',
+    matchedPermission: null,
+    reason: 'no matching permission',
+    context: candidates.length > 0
+      ? { target: txTo, selector: txSelector!, effectiveRules: candidates, ruleFailures }
+      : null
+  }
 }
 
 async function pollReceipt (account: GuardedAccount, hash: string, emitter: EventEmitter, requestId: string): Promise<void> {
@@ -320,7 +368,7 @@ export function createGuardedMiddleware ({ policiesRef, approvalBroker, emitter,
         timestamp: Date.now()
       })
 
-      const { decision, matchedPermission, reason } = evaluatePolicy(policies, chainId, tx)
+      const { decision, matchedPermission, reason, context } = evaluatePolicy(policies, chainId, tx)
 
       emitter.emit('PolicyEvaluated', {
         type: 'PolicyEvaluated',
@@ -328,11 +376,12 @@ export function createGuardedMiddleware ({ policiesRef, approvalBroker, emitter,
         decision,
         matchedPermission,
         reason,
+        context,
         timestamp: Date.now()
       })
 
       if (decision === 'REJECT') {
-        throw new PolicyRejectionError(reason)
+        throw new PolicyRejectionError(reason, context)
       }
 
       if (decision === 'REQUIRE_APPROVAL') {
@@ -349,6 +398,7 @@ export function createGuardedMiddleware ({ policiesRef, approvalBroker, emitter,
           target: tx.to,
           selector: tx.data?.slice?.(0, 10),
           targetHash,
+          context,
           timestamp: Date.now()
         })
 
@@ -424,7 +474,7 @@ export function createGuardedMiddleware ({ policiesRef, approvalBroker, emitter,
         timestamp: Date.now()
       })
 
-      const { decision, matchedPermission, reason } = evaluatePolicy(policies, chainId, mockTx)
+      const { decision, matchedPermission, reason, context } = evaluatePolicy(policies, chainId, mockTx)
 
       emitter.emit('PolicyEvaluated', {
         type: 'PolicyEvaluated',
@@ -432,11 +482,12 @@ export function createGuardedMiddleware ({ policiesRef, approvalBroker, emitter,
         decision,
         matchedPermission,
         reason,
+        context,
         timestamp: Date.now()
       })
 
       if (decision === 'REJECT') {
-        throw new PolicyRejectionError(reason)
+        throw new PolicyRejectionError(reason, context)
       }
 
       if (decision === 'REQUIRE_APPROVAL') {
@@ -453,6 +504,7 @@ export function createGuardedMiddleware ({ policiesRef, approvalBroker, emitter,
           target: mockTx.to,
           selector: mockTx.data?.slice?.(0, 10),
           targetHash,
+          context,
           timestamp: Date.now()
         })
 
@@ -515,7 +567,7 @@ export function createGuardedMiddleware ({ policiesRef, approvalBroker, emitter,
         timestamp: Date.now()
       })
 
-      const { decision, matchedPermission, reason } = evaluatePolicy(policies, chainId, tx)
+      const { decision, matchedPermission, reason, context } = evaluatePolicy(policies, chainId, tx)
 
       emitter.emit('PolicyEvaluated', {
         type: 'PolicyEvaluated',
@@ -523,11 +575,12 @@ export function createGuardedMiddleware ({ policiesRef, approvalBroker, emitter,
         decision,
         matchedPermission,
         reason,
+        context,
         timestamp: Date.now()
       })
 
       if (decision === 'REJECT') {
-        throw new PolicyRejectionError(reason)
+        throw new PolicyRejectionError(reason, context)
       }
 
       const targetHash = intentHash({
@@ -544,6 +597,7 @@ export function createGuardedMiddleware ({ policiesRef, approvalBroker, emitter,
           target: tx.to,
           selector: tx.data?.slice?.(0, 10),
           targetHash,
+          context,
           timestamp: Date.now()
         })
 
