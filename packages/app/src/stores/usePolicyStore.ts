@@ -8,7 +8,7 @@ import { create } from 'zustand';
 
 export interface Policy {
   id: string;
-  chain: string;
+  chainId: number;
   target: string;
   selector: string;
   decision: 'AUTO' | 'REQUIRE_APPROVAL' | 'REJECT';
@@ -17,7 +17,7 @@ export interface Policy {
 }
 
 export interface PolicyGroup {
-  chain: string;
+  chainId: number;
   policies: Policy[];
   policyVersion: number;
   updatedAt: number;
@@ -25,7 +25,7 @@ export interface PolicyGroup {
 
 export interface PendingPolicyRequest {
   requestId: string;
-  chain: string;
+  chainId: number;
   reason: string;
   policies: Policy[];
   requestedBy: string;        // 'ai' or 'owner'
@@ -45,7 +45,7 @@ interface PolicyState {
   setLoading: (loading: boolean) => void;
 
   /** Get active policies for a specific chain */
-  getChainPolicies: (chain: string) => PolicyGroup | undefined;
+  getChainPolicies: (chainId: number) => PolicyGroup | undefined;
 }
 
 export const usePolicyStore = create<PolicyState>((set, get) => ({
@@ -72,6 +72,6 @@ export const usePolicyStore = create<PolicyState>((set, get) => ({
   setLoading: (isLoading) =>
     set({ isLoading }),
 
-  getChainPolicies: (chain) =>
-    get().activePolicies.find((pg) => pg.chain === chain),
+  getChainPolicies: (chainId) =>
+    get().activePolicies.find((pg) => pg.chainId === chainId),
 }));

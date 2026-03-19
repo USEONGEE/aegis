@@ -54,11 +54,25 @@ export function SettingsScreen() {
     })();
   }, [identity]);
 
-  // Listen for device updates from daemon
+  // Step 09: Listen for event_stream device events + fetch device list via chat
   useEffect(() => {
     const handler = (message: RelayMessage) => {
       if (message.channel !== 'control') return;
-      const data = message.payload as { type?: string; devices?: PairedDevice[] };
+      const data = message.payload as {
+        type?: string;
+        eventName?: string;
+        event?: Record<string, unknown>;
+        devices?: PairedDevice[];
+      };
+
+      // Handle event_stream DeviceRevoked events
+      if (data.type === 'event_stream' && data.eventName === 'DeviceRevoked') {
+        // Refresh device list via chat on device revocation
+        fetchDeviceListViaChat();
+        return;
+      }
+
+      // Backward compat: direct device_list control messages
       if (data.type === 'device_list' && data.devices) {
         setDevices(data.devices);
       }
@@ -66,13 +80,53 @@ export function SettingsScreen() {
 
     relay.addMessageHandler(handler);
 
-    const connHandler = (isConnected: boolean) => setConnected(isConnected);
+    const connHandler = (isConnected: boolean) => {
+      setConnected(isConnected);
+      // Fetch device list on connect
+      if (isConnected) fetchDeviceListViaChat();
+    };
     relay.addConnectionHandler(connHandler);
 
     return () => {
       relay.removeMessageHandler(handler);
       relay.removeConnectionHandler(connHandler);
     };
+  }, [relay]);
+
+  // Fetch device list via chat (Step 09: no dedicated control message)
+  const fetchDeviceListViaChat = useCallback(async () => {
+    try {
+      const sessionId = `device_list_${Date.now()}`;
+      await relay.sendChat(sessionId, {
+        role: 'user',
+        content: 'List my paired devices.',
+      });
+
+      const responseHandler = (message: RelayMessage) => {
+        if (message.channel !== 'chat' || message.sessionId !== sessionId) return;
+        const data = message.payload as {
+          role?: string;
+          toolResults?: Array<{
+            name?: string;
+            result?: { devices?: PairedDevice[] };
+          }>;
+        };
+        if (data.role === 'assistant' && data.toolResults) {
+          for (const tr of data.toolResults) {
+            if (tr.result?.devices) {
+              setDevices(tr.result.devices);
+            }
+          }
+          relay.removeMessageHandler(responseHandler);
+        }
+      };
+      relay.addMessageHandler(responseHandler);
+
+      // Auto-cleanup after timeout
+      setTimeout(() => relay.removeMessageHandler(responseHandler), 30_000);
+    } catch {
+      // Will retry on reconnect
+    }
   }, [relay]);
 
   // Generate identity key
@@ -150,7 +204,7 @@ export function SettingsScreen() {
                 const builder = new SignedApprovalBuilder(keyPair, deviceId ?? undefined);
                 const signedApproval = builder.forDeviceRevoke({
                   targetDeviceId: device.deviceId,
-                  chain: 'ethereum', // default chain for device ops
+                  chainId: 1, // ethereum mainnet
                 });
                 await relay.sendApproval(signedApproval);
                 showToast('Device revoke request sent', 'info');

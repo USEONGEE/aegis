@@ -84,7 +84,7 @@ function PendingContent({
       <Text style={styles.sectionTitle}>Review Transaction</Text>
 
       <InfoRow label="Type" value={request.type} />
-      <InfoRow label="Chain" value={request.chain} />
+      <InfoRow label="Chain" value={String(request.chainId)} />
       <InfoRow label="Request ID" value={request.requestId} />
       {request.metadata.to && (
         <InfoRow label="To" value={truncateAddr(request.metadata.to)} mono />

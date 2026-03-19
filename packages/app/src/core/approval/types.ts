@@ -13,7 +13,7 @@ export type ApprovalType = 'tx' | 'policy' | 'policy_reject' | 'device_revoke';
  * intentHash = SHA-256(canonical { chain, to, data, value })
  */
 export interface UnsignedIntent {
-  chain: string;
+  chainId: number;
   to: string;
   data: string;
   value: string;
@@ -34,7 +34,7 @@ export interface SignedApproval {
   deviceId: string;             // signing device
 
   // Context
-  chain: string;                // cross-chain replay prevention
+  chainId: number;              // cross-chain replay prevention
   requestId: string;            // pending policy ID or intent ID
   policyVersion: number;        // tx approval: current policy version binding
 
@@ -52,7 +52,7 @@ export interface SignedApproval {
 export interface ApprovalRequest {
   requestId: string;
   type: ApprovalType;
-  chain: string;
+  chainId: number;
   targetHash: string;
 
   // Display metadata
@@ -86,7 +86,7 @@ export interface SignedApprovalPayload {
   targetHash: string;
   approver: string;
   deviceId: string;
-  chain: string;
+  chainId: number;
   requestId: string;
   policyVersion: number;
   expiresAt: number;

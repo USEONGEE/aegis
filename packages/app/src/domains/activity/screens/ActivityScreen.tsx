@@ -101,8 +101,8 @@ function EventCard({ event }: { event: ActivityEvent }) {
       <View style={styles.eventContent}>
         <View style={styles.eventHeader}>
           <Text style={[styles.eventType, { color }]}>{icon} {event.type}</Text>
-          {event.chain && (
-            <Text style={styles.eventChain}>{event.chain}</Text>
+          {event.chainId && (
+            <Text style={styles.eventChain}>{event.chainId}</Text>
           )}
         </View>
         <Text style={styles.eventSummary}>{event.summary}</Text>

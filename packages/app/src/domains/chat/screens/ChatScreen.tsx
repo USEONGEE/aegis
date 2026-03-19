@@ -22,6 +22,11 @@ import { RelayClient } from '../../../core/relay/RelayClient';
 export function ChatScreen() {
   const { messages, addMessage, isLoading, setLoading, currentSessionId, setSessionId } = useChatStore();
   const [inputText, setInputText] = useState('');
+  const [isTyping, setIsTyping] = useState(false);
+  const [streamError, setStreamError] = useState<string | null>(null);
+  const [pendingMessageId, setPendingMessageId] = useState<string | null>(null);
+  const streamBufferRef = useRef<string>('');
+  const streamMsgIdRef = useRef<string | null>(null);
   const flatListRef = useRef<FlatList>(null);
   const relay = RelayClient.getInstance();
 
@@ -36,23 +41,112 @@ export function ChatScreen() {
   // Subscribe to incoming chat messages from Relay
   useEffect(() => {
     const handler = (message: { channel: string; payload: unknown; timestamp: number }) => {
-      if (message.channel !== 'chat') return;
-
       const data = message.payload as {
+        type?: string;
         role?: string;
         content?: string;
+        delta?: string;
         sessionId?: string;
+        error?: string;
+        messageId?: string;
       };
 
-      if (data.content && data.sessionId === currentSessionId) {
-        addMessage({
-          id: `msg_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-          role: (data.role as 'assistant') ?? 'assistant',
-          content: data.content,
-          timestamp: message.timestamp,
-          sessionId: currentSessionId!,
-        });
-        setLoading(false);
+      // Control channel: handle message_queued and cancel_message_result
+      if (message.channel === 'control') {
+        switch (data.type) {
+          case 'message_queued': {
+            if (data.sessionId === currentSessionId && data.messageId) {
+              setPendingMessageId(data.messageId);
+            }
+            return;
+          }
+          case 'cancel_message_result': {
+            setPendingMessageId(null);
+            setIsTyping(false);
+            setLoading(false);
+            streamBufferRef.current = '';
+            streamMsgIdRef.current = null;
+            return;
+          }
+        }
+        return;
+      }
+
+      // Chat channel: handle streaming message types
+      if (message.channel !== 'chat') return;
+      if (data.sessionId !== currentSessionId) return;
+
+      switch (data.type) {
+        case 'typing': {
+          setIsTyping(true);
+          setStreamError(null);
+          return;
+        }
+
+        case 'stream': {
+          setIsTyping(false);
+          if (data.delta) {
+            streamBufferRef.current += data.delta;
+            // Create or update the streaming message
+            if (!streamMsgIdRef.current) {
+              streamMsgIdRef.current = `msg_stream_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+            }
+            addMessage({
+              id: streamMsgIdRef.current,
+              role: 'assistant',
+              content: streamBufferRef.current,
+              timestamp: message.timestamp,
+              sessionId: currentSessionId!,
+            });
+          }
+          return;
+        }
+
+        case 'error': {
+          setIsTyping(false);
+          setLoading(false);
+          setPendingMessageId(null);
+          streamBufferRef.current = '';
+          streamMsgIdRef.current = null;
+          const errorText = data.error || 'Unknown error';
+          setStreamError(errorText);
+          addMessage({
+            id: `msg_${Date.now()}_err`,
+            role: 'system',
+            content: `Error: ${errorText}`,
+            timestamp: message.timestamp,
+            sessionId: currentSessionId!,
+          });
+          return;
+        }
+
+        case 'done': {
+          // Stream complete — finalize
+          setIsTyping(false);
+          setLoading(false);
+          setPendingMessageId(null);
+          streamBufferRef.current = '';
+          streamMsgIdRef.current = null;
+          return;
+        }
+
+        default: {
+          // Legacy: complete message (no type field)
+          if (data.content) {
+            setIsTyping(false);
+            setLoading(false);
+            streamBufferRef.current = '';
+            streamMsgIdRef.current = null;
+            addMessage({
+              id: `msg_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+              role: (data.role as 'assistant') ?? 'assistant',
+              content: data.content,
+              timestamp: message.timestamp,
+              sessionId: currentSessionId!,
+            });
+          }
+          return;
+        }
       }
     };
 
@@ -93,6 +187,20 @@ export function ChatScreen() {
       setLoading(false);
     }
   }, [inputText, currentSessionId, addMessage, setLoading, relay]);
+
+  const cancelPendingMessage = useCallback(async () => {
+    if (!pendingMessageId) return;
+    try {
+      await relay.cancelMessage(pendingMessageId);
+    } catch {
+      // Cancel best-effort; clear state regardless
+    }
+    setPendingMessageId(null);
+    setIsTyping(false);
+    setLoading(false);
+    streamBufferRef.current = '';
+    streamMsgIdRef.current = null;
+  }, [pendingMessageId, relay, setLoading]);
 
   const renderMessage = useCallback(({ item }: { item: ChatMessage }) => {
     const isUser = item.role === 'user';
@@ -155,10 +263,26 @@ export function ChatScreen() {
         />
       )}
 
-      {/* Loading indicator */}
-      {isLoading && (
+      {/* Loading / typing indicator with cancel */}
+      {(isLoading || isTyping) && (
         <View style={styles.loadingBar}>
-          <Text style={styles.loadingText}>AI is thinking...</Text>
+          <Text style={styles.loadingText}>
+            {isTyping ? 'AI is typing...' : 'AI is thinking...'}
+          </Text>
+          {pendingMessageId && (
+            <Pressable style={styles.cancelButton} onPress={cancelPendingMessage}>
+              <Text style={styles.cancelButtonText}>Cancel</Text>
+            </Pressable>
+          )}
+        </View>
+      )}
+
+      {/* Stream error */}
+      {streamError && (
+        <View style={styles.loadingBar}>
+          <Text style={[styles.loadingText, { color: '#ef4444' }]}>
+            {streamError}
+          </Text>
         </View>
       )}
 
@@ -282,6 +406,9 @@ const styles = StyleSheet.create({
     textAlign: 'right',
   },
   loadingBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     paddingHorizontal: 16,
     paddingVertical: 8,
   },
@@ -289,6 +416,19 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#6b7280',
     fontStyle: 'italic',
+  },
+  cancelButton: {
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    borderRadius: 12,
+    backgroundColor: '#1a1a1a',
+    borderWidth: 1,
+    borderColor: '#374151',
+  },
+  cancelButtonText: {
+    fontSize: 12,
+    color: '#ef4444',
+    fontWeight: '600',
   },
   inputContainer: {
     flexDirection: 'row',

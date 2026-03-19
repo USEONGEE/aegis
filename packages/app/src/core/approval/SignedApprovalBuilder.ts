@@ -88,7 +88,8 @@ function jsSha256(data: Uint8Array): string {
  * envelope format, signed with the device's Ed25519 identity key.
  *
  * The canonical signing payload is: JSON.stringify(sortedKeys(all fields except sig))
- * The sig field is: Ed25519.sign(payload, secretKey) → hex string
+ * The sig field is: Ed25519.sign(SHA-256(canonicalJSON), secretKey) → hex string
+ * This matches the verifier in approval-verifier.ts (computeApprovalHash).
  *
  * Nonce management: monotonically increasing per-device counter.
  * Stored in-memory; on app restart, fetched from daemon's last known nonce + 1.
@@ -116,7 +117,7 @@ export class SignedApprovalBuilder {
    */
   forTx(params: {
     targetHash: string;
-    chain: string;
+    chainId: number;
     requestId: string;
     policyVersion?: number;
     expiresInSeconds?: number;
@@ -132,7 +133,7 @@ export class SignedApprovalBuilder {
    */
   forPolicy(params: {
     targetHash: string;
-    chain: string;
+    chainId: number;
     requestId: string;
     expiresInSeconds?: number;
   }): SignedApproval {
@@ -148,7 +149,7 @@ export class SignedApprovalBuilder {
    */
   forPolicyReject(params: {
     targetHash: string;
-    chain: string;
+    chainId: number;
     requestId: string;
     expiresInSeconds?: number;
   }): SignedApproval {
@@ -165,7 +166,7 @@ export class SignedApprovalBuilder {
    */
   forDeviceRevoke(params: {
     targetDeviceId: string;
-    chain: string;
+    chainId: number;
     expiresInSeconds?: number;
   }): SignedApproval {
     // targetHash for device revoke = SHA-256(deviceId)
@@ -175,7 +176,7 @@ export class SignedApprovalBuilder {
     const approval = this.build({
       type: 'device_revoke',
       targetHash,
-      chain: params.chain,
+      chainId: params.chainId,
       requestId: `revoke_${params.targetDeviceId}`,
       policyVersion: 0,
       expiresInSeconds: params.expiresInSeconds,
@@ -195,7 +196,7 @@ export class SignedApprovalBuilder {
   private build(params: {
     type: ApprovalType;
     targetHash: string;
-    chain: string;
+    chainId: number;
     requestId: string;
     policyVersion?: number;
     expiresInSeconds?: number;
@@ -213,7 +214,7 @@ export class SignedApprovalBuilder {
       targetHash: params.targetHash,
       approver,
       deviceId: this.deviceId,
-      chain: params.chain,
+      chainId: params.chainId,
       requestId: params.requestId,
       policyVersion: params.policyVersion ?? 0,
       expiresAt,
@@ -226,10 +227,13 @@ export class SignedApprovalBuilder {
       sortedPayload[key] = (payload as unknown as Record<string, unknown>)[key];
     }
     const canonicalJSON = JSON.stringify(sortedPayload);
-    const messageBytes = new TextEncoder().encode(canonicalJSON);
 
-    // Ed25519 detached signature
-    const signature = nacl.sign.detached(messageBytes, this.keyPair.secretKey);
+    // SHA-256 hash of canonical JSON before signing (matches approval-verifier's computeApprovalHash)
+    const hashHex = jsSha256(new TextEncoder().encode(canonicalJSON));
+    const hashBytes = new Uint8Array(hashHex.match(/.{2}/g)!.map(b => parseInt(b, 16)));
+
+    // Ed25519 detached signature over the SHA-256 hash (not raw JSON)
+    const signature = nacl.sign.detached(hashBytes, this.keyPair.secretKey);
     const sigHex = '0x' + Array.from(signature)
       .map(b => b.toString(16).padStart(2, '0'))
       .join('');

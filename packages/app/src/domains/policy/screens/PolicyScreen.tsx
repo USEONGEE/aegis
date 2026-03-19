@@ -28,7 +28,7 @@ export function PolicyScreen() {
         await requestApproval({
           requestId: pending.requestId,
           type: 'policy',
-          chain: pending.chain,
+          chainId: pending.chainId,
           targetHash: '', // Will be computed from policies
           metadata: {
             reason: pending.reason,
@@ -52,7 +52,7 @@ export function PolicyScreen() {
         await requestApproval({
           requestId: pending.requestId,
           type: 'policy_reject',
-          chain: pending.chain,
+          chainId: pending.chainId,
           targetHash: '',
           metadata: {
             reason: `Rejected: ${pending.reason}`,
@@ -106,7 +106,7 @@ export function PolicyScreen() {
       ) : (
         <FlatList
           data={activePolicies}
-          keyExtractor={(item) => item.chain}
+          keyExtractor={(item) => String(item.chainId)}
           renderItem={({ item }) => <PolicyGroupCard group={item} />}
           contentContainerStyle={styles.listContent}
         />
@@ -131,7 +131,7 @@ function PendingPolicyCard({
   return (
     <View style={[styles.card, styles.pendingCard]}>
       <View style={styles.cardHeader}>
-        <Text style={styles.chainBadge}>{pending.chain}</Text>
+        <Text style={styles.chainBadge}>{pending.chainId}</Text>
         <Text style={styles.requestedBy}>
           Requested by: {pending.requestedBy}
         </Text>
@@ -177,7 +177,7 @@ function PolicyGroupCard({ group }: { group: PolicyGroup }) {
   return (
     <View style={styles.card}>
       <View style={styles.cardHeader}>
-        <Text style={styles.chainBadge}>{group.chain}</Text>
+        <Text style={styles.chainBadge}>{group.chainId}</Text>
         <Text style={styles.versionText}>v{group.policyVersion}</Text>
       </View>
       <Text style={styles.updatedAt}>

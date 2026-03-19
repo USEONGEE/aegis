@@ -21,7 +21,7 @@ export type ActivityEventType =
 export interface ActivityEvent {
   id: string;
   type: ActivityEventType;
-  chain?: string;
+  chainId?: number;
   summary: string;
   details?: Record<string, unknown>;
   timestamp: number;

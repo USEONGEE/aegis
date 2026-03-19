@@ -146,6 +146,15 @@ export class E2ECrypto {
   }
 
   /**
+   * Get the ECDH shared key (32 bytes, NaCl box.before output).
+   * Used as symmetric session key for E2E encryption.
+   * Returns null if setRemotePublicKey has not been called.
+   */
+  getSharedKey(): Uint8Array | null {
+    return this.sharedKey;
+  }
+
+  /**
    * Clear the shared key (on disconnect / re-pair).
    */
   reset(): void {

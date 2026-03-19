@@ -24,14 +24,14 @@ interface TokenBalance {
   name: string;
   balance: string;
   usdValue: string;
-  chain: string;
+  chainId: number;
   contractAddress?: string;
 }
 
 interface DeFiPosition {
   protocol: string;
   type: string;           // 'lending', 'lp', 'perp', etc.
-  chain: string;
+  chainId: number;
   description: string;
   valueUSD: string;
   healthFactor?: string;
@@ -46,12 +46,43 @@ export function DashboardScreen() {
 
   const relay = RelayClient.getInstance();
 
-  // Listen for balance/position updates from daemon
+  // Step 09: Subscribe to event_stream events for real-time balance/position updates
   useEffect(() => {
     const handler = (message: { channel: string; payload: unknown }) => {
       if (message.channel !== 'control') return;
-      const data = message.payload as { type?: string; balances?: TokenBalance[]; positions?: DeFiPosition[] };
+      const data = message.payload as {
+        type?: string;
+        eventName?: string;
+        event?: Record<string, unknown>;
+        balances?: TokenBalance[];
+        positions?: DeFiPosition[];
+      };
 
+      // Handle event_stream from daemon (ExecutionSettled / ExecutionBroadcasted carry balance updates)
+      if (data.type === 'event_stream') {
+        if (
+          (data.eventName === 'ExecutionSettled' || data.eventName === 'ExecutionBroadcasted') &&
+          data.event
+        ) {
+          // Extract balances/positions from event payload if available
+          const eventBalances = data.event.balances as TokenBalance[] | undefined;
+          const eventPositions = data.event.positions as DeFiPosition[] | undefined;
+          if (eventBalances) {
+            setBalances(eventBalances);
+            const total = eventBalances.reduce(
+              (sum, b) => sum + parseFloat(b.usdValue || '0'),
+              0,
+            );
+            setTotalUSD(total.toFixed(2));
+          }
+          if (eventPositions) {
+            setPositions(eventPositions);
+          }
+        }
+        return;
+      }
+
+      // Also handle direct balance_update / position_update for backward compat
       if (data.type === 'balance_update' && data.balances) {
         setBalances(data.balances);
         const total = data.balances.reduce(
@@ -77,17 +108,51 @@ export function DashboardScreen() {
     };
   }, [relay]);
 
+  // Step 09: Manual refresh via chat — ask AI to fetch balances
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
     try {
-      await relay.sendControl({
-        type: 'request_balances',
-        payload: {},
+      const sessionId = `dashboard_refresh_${Date.now()}`;
+      await relay.sendChat(sessionId, {
+        role: 'user',
+        content: 'Show my current wallet balances and DeFi positions.',
       });
+
+      // Listen for the chat response with balance data
+      const responseHandler = (message: { channel: string; payload: unknown; sessionId?: string }) => {
+        if (message.channel !== 'chat' || message.sessionId !== sessionId) return;
+        const data = message.payload as {
+          role?: string;
+          content?: string;
+          toolResults?: Array<{
+            name?: string;
+            result?: { balances?: TokenBalance[]; positions?: DeFiPosition[] };
+          }>;
+        };
+        if (data.role === 'assistant' && data.toolResults) {
+          for (const tr of data.toolResults) {
+            if (tr.result?.balances) {
+              setBalances(tr.result.balances);
+              const total = tr.result.balances.reduce(
+                (sum, b) => sum + parseFloat(b.usdValue || '0'),
+                0,
+              );
+              setTotalUSD(total.toFixed(2));
+            }
+            if (tr.result?.positions) {
+              setPositions(tr.result.positions);
+            }
+          }
+          relay.removeMessageHandler(responseHandler);
+        }
+      };
+      relay.addMessageHandler(responseHandler);
+
+      // Auto-cleanup after timeout
+      setTimeout(() => relay.removeMessageHandler(responseHandler), 30_000);
     } catch {
       // Will retry on reconnect
     }
-    // Stop refresh spinner after a short delay
     setTimeout(() => setRefreshing(false), 1000);
   }, [relay]);
 
@@ -116,7 +181,7 @@ export function DashboardScreen() {
       ) : (
         <FlatList
           data={balances}
-          keyExtractor={(item) => `${item.chain}-${item.symbol}-${item.contractAddress ?? 'native'}`}
+          keyExtractor={(item) => `${item.chainId}-${item.symbol}-${item.contractAddress ?? 'native'}`}
           renderItem={({ item }) => <BalanceRow token={item} />}
           scrollEnabled={false}
           style={styles.list}
@@ -154,7 +219,7 @@ function BalanceRow({ token }: { token: TokenBalance }) {
     <View style={styles.row}>
       <View style={styles.tokenInfo}>
         <Text style={styles.tokenSymbol}>{token.symbol}</Text>
-        <Text style={styles.tokenChain}>{token.chain}</Text>
+        <Text style={styles.tokenChain}>{token.chainId}</Text>
       </View>
       <View style={styles.tokenValues}>
         <Text style={styles.tokenBalance}>{token.balance}</Text>
@@ -172,7 +237,7 @@ function PositionRow({ position }: { position: DeFiPosition }) {
       <View style={styles.tokenInfo}>
         <Text style={styles.tokenSymbol}>{position.protocol}</Text>
         <Text style={styles.tokenChain}>
-          {position.type} on {position.chain}
+          {position.type} on {position.chainId}
         </Text>
       </View>
       <View style={styles.tokenValues}>

@@ -91,7 +91,7 @@ function ApprovalCard({
         <View style={styles.typeBadge}>
           <Text style={styles.typeBadgeText}>{approval.type.toUpperCase()}</Text>
         </View>
-        <Text style={styles.chainText}>{approval.chain}</Text>
+        <Text style={styles.chainText}>{approval.chainId}</Text>
         {!isExpired && (
           <Text style={styles.timerText}>{formatTimeLeft(timeLeft)}</Text>
         )}

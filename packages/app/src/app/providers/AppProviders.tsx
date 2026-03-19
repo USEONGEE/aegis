@@ -19,8 +19,10 @@ import { RelayClient } from '../../core/relay/RelayClient';
 async function approvalExecutor(request: {
   type: string;
   targetHash: string;
-  chain: string;
+  chainId: number;
   requestId: string;
+  policyVersion?: number;
+  targetDeviceId?: string;
 }): Promise<{ txHash: `0x${string}` }> {
   const identity = IdentityKeyManager.getInstance();
   const keyPair = await identity.load();
@@ -30,11 +32,45 @@ async function approvalExecutor(request: {
   }
 
   const builder = new SignedApprovalBuilder(keyPair);
-  const signedApproval = builder.forTx({
-    targetHash: request.targetHash,
-    chain: request.chain,
-    requestId: request.requestId,
-  });
+
+  // Gap 10: branch on request.type to use the correct builder method
+  let signedApproval;
+  switch (request.type) {
+    case 'tx':
+      signedApproval = builder.forTx({
+        targetHash: request.targetHash,
+        chainId: request.chainId,
+        requestId: request.requestId,
+        policyVersion: request.policyVersion,
+      });
+      break;
+
+    case 'policy':
+      signedApproval = builder.forPolicy({
+        targetHash: request.targetHash,
+        chainId: request.chainId,
+        requestId: request.requestId,
+      });
+      break;
+
+    case 'policy_reject':
+      signedApproval = builder.forPolicyReject({
+        targetHash: request.targetHash,
+        chainId: request.chainId,
+        requestId: request.requestId,
+      });
+      break;
+
+    case 'device_revoke':
+      signedApproval = builder.forDeviceRevoke({
+        targetDeviceId: request.targetDeviceId ?? request.requestId,
+        chainId: request.chainId,
+      });
+      break;
+
+    default:
+      throw new Error(`Unknown approval type: ${request.type}`);
+  }
 
   const relay = RelayClient.getInstance();
   const result = await relay.sendApproval(signedApproval);

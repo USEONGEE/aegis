@@ -367,6 +367,16 @@ export class RelayClient {
   }
 
   /**
+   * Cancel a queued or in-progress message via control channel.
+   */
+  async cancelMessage(messageId: string): Promise<void> {
+    await this.sendControl({
+      type: 'cancel_message',
+      payload: { messageId },
+    });
+  }
+
+  /**
    * REST: authenticate with Relay.
    */
   async restAuth(relayUrl: string, userId: string, password: string): Promise<string> {

@@ -131,6 +131,19 @@ export class PairingService {
         },
       });
 
+      // Step 05 / Gap 11: Establish E2E session key via ECDH shared secret
+      // The ECDH shared key was already computed when we called setRemotePublicKeyBase64
+      // (which calls nacl.box.before internally). Use it as the session key.
+      if (this.e2eCrypto.isEstablished()) {
+        // nacl.box.before() produces a precomputed shared key (32 bytes)
+        // which we use as the symmetric session key for NaCl secretbox.
+        // Both sides compute the same shared key from the ECDH exchange.
+        const sharedKey = this.e2eCrypto.getSharedKey();
+        if (sharedKey) {
+          relay.setSessionKey(sharedKey);
+        }
+      }
+
       this.status = 'complete';
 
       return {
