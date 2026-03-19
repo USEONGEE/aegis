@@ -11,7 +11,7 @@ export interface SignedApproval {
   chainId: number
   targetHash: string
   approver: string
-  deviceId: string
+  signerId: string
   policyVersion: number
   expiresAt: number
   nonce: number
@@ -55,7 +55,7 @@ export interface HistoryEntry {
   chainId?: number | null
   targetHash: string
   approver: string
-  deviceId: string
+  signerId: string
   action: string
   signedApproval?: SignedApproval
   timestamp: number
@@ -63,11 +63,11 @@ export interface HistoryEntry {
 
 // StoredHistoryEntry moved to store-types.ts (@internal)
 
-export interface StoredDevice {
-  deviceId: string
+export interface StoredSigner {
+  signerId: string
   publicKey: string
   name: string | null
-  pairedAt: number
+  registeredAt: number
   revokedAt: number | null
 }
 
@@ -159,18 +159,18 @@ export abstract class ApprovalStore {
   async appendHistory (_entry: HistoryEntry): Promise<void> { throw new Error('Not implemented') }
   async getHistory (_opts: HistoryQueryOpts): Promise<HistoryEntry[]> { throw new Error('Not implemented') }
 
-  // --- Devices ---
+  // --- Signers ---
 
-  async saveDevice (_deviceId: string, _publicKey: string): Promise<void> { throw new Error('Not implemented') }
-  async getDevice (_deviceId: string): Promise<StoredDevice | null> { throw new Error('Not implemented') }
-  async listDevices (): Promise<StoredDevice[]> { throw new Error('Not implemented') }
-  async revokeDevice (_deviceId: string): Promise<void> { throw new Error('Not implemented') }
-  async isDeviceRevoked (_deviceId: string): Promise<boolean> { throw new Error('Not implemented') }
+  async saveSigner (_signerId: string, _publicKey: string): Promise<void> { throw new Error('Not implemented') }
+  async getSigner (_signerId: string): Promise<StoredSigner | null> { throw new Error('Not implemented') }
+  async listSigners (): Promise<StoredSigner[]> { throw new Error('Not implemented') }
+  async revokeSigner (_signerId: string): Promise<void> { throw new Error('Not implemented') }
+  async isSignerRevoked (_signerId: string): Promise<boolean> { throw new Error('Not implemented') }
 
   // --- Nonce ---
 
-  async getLastNonce (_approver: string, _deviceId: string): Promise<number> { throw new Error('Not implemented') }
-  async updateNonce (_approver: string, _deviceId: string, _nonce: number): Promise<void> { throw new Error('Not implemented') }
+  async getLastNonce (_approver: string, _signerId: string): Promise<number> { throw new Error('Not implemented') }
+  async updateNonce (_approver: string, _signerId: string, _nonce: number): Promise<void> { throw new Error('Not implemented') }
 
   // --- Cron ---
 

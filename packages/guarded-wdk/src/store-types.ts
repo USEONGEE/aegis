@@ -22,7 +22,7 @@ export interface StoredHistoryEntry {
   chain_id: number | null
   target_hash: string
   approver: string
-  device_id: string
+  signer_id: string
   action: string
   signed_approval_json: string | null
   timestamp: number
@@ -54,11 +54,11 @@ export interface StoredJournalEntry {
 }
 
 /** @internal */
-export interface DeviceRow {
-  device_id: string
+export interface SignerRow {
+  signer_id: string
   public_key: string
   name: string | null
-  paired_at: number
+  registered_at: number
   revoked_at: number | null
 }
 

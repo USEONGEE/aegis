@@ -3,7 +3,7 @@ import { canonicalJSON } from '@wdk-app/canonical'
 import { createHash } from 'node:crypto'
 import {
   UntrustedApproverError,
-  DeviceRevokedError,
+  SignerRevokedError,
   SignatureError,
   ApprovalExpiredError,
   ReplayError
@@ -35,17 +35,17 @@ export async function verifyApproval (
   store: ApprovalStore,
   context: VerificationContext = {}
 ): Promise<void> {
-  const { type, targetHash, approver, deviceId, policyVersion, expiresAt, nonce, sig } = signedApproval
+  const { type, targetHash, approver, signerId, policyVersion, expiresAt, nonce, sig } = signedApproval
 
   // Step 1: approver in trustedApprovers?
   if (!trustedApprovers.includes(approver)) {
     throw new UntrustedApproverError(approver)
   }
 
-  // Step 2: deviceId not revoked?
-  const revoked = await store.isDeviceRevoked(deviceId)
+  // Step 2: signerId not revoked?
+  const revoked = await store.isSignerRevoked(signerId)
   if (revoked) {
-    throw new DeviceRevokedError(deviceId)
+    throw new SignerRevokedError(signerId)
   }
 
   // Step 3: Ed25519 signature verification
@@ -61,8 +61,8 @@ export async function verifyApproval (
     throw new ApprovalExpiredError(expiresAt)
   }
 
-  // Step 5: nonce replay check (per-approver-per-device)
-  const lastNonce = await store.getLastNonce(approver, deviceId)
+  // Step 5: nonce replay check (per-approver-per-signer)
+  const lastNonce = await store.getLastNonce(approver, signerId)
   if (nonce <= lastNonce) {
     throw new ReplayError(nonce, lastNonce)
   }
@@ -89,8 +89,8 @@ export async function verifyApproval (
       break
 
     case 'device_revoke': {
-      // targetHash should be SHA-256 of the deviceId being revoked.
-      // context.expectedTargetHash is SHA-256(deviceId) computed by the caller.
+      // targetHash should be SHA-256 of the signerId being revoked.
+      // context.expectedTargetHash is SHA-256(signerId) computed by the caller.
       if (context.expectedTargetHash && targetHash !== context.expectedTargetHash) {
         throw new SignatureError(`device_revoke targetHash mismatch: expected ${context.expectedTargetHash}, got ${targetHash}`)
       }
@@ -102,5 +102,5 @@ export async function verifyApproval (
   }
 
   // All 6 steps passed -- update nonce
-  await store.updateNonce(approver, deviceId, nonce)
+  await store.updateNonce(approver, signerId, nonce)
 }

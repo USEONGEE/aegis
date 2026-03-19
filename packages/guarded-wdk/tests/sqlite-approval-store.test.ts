@@ -245,7 +245,7 @@ describe('SqliteApprovalStore', () => {
         chainId: 1,
         targetHash: '0xabc',
         approver: '0xpub',
-        deviceId: 'dev-1',
+        signerId: 'dev-1',
         action: 'approved',
         timestamp: 1000
       })
@@ -257,9 +257,9 @@ describe('SqliteApprovalStore', () => {
 
     test('getHistory filters by seedId, type, chain', async () => {
       const s2 = await store.addSeed('second', 'm2')
-      await store.appendHistory({ seedId, type: 'tx', chainId: 1, targetHash: '0x1', approver: 'a', deviceId: 'd', action: 'approved', timestamp: Date.now() })
-      await store.appendHistory({ seedId, type: 'policy', chainId: 1, targetHash: '0x2', approver: 'a', deviceId: 'd', action: 'approved', timestamp: Date.now() })
-      await store.appendHistory({ seedId: s2.id, type: 'tx', chainId: 900, targetHash: '0x3', approver: 'a', deviceId: 'd', action: 'rejected', timestamp: Date.now() })
+      await store.appendHistory({ seedId, type: 'tx', chainId: 1, targetHash: '0x1', approver: 'a', signerId: 'd', action: 'approved', timestamp: Date.now() })
+      await store.appendHistory({ seedId, type: 'policy', chainId: 1, targetHash: '0x2', approver: 'a', signerId: 'd', action: 'approved', timestamp: Date.now() })
+      await store.appendHistory({ seedId: s2.id, type: 'tx', chainId: 900, targetHash: '0x3', approver: 'a', signerId: 'd', action: 'rejected', timestamp: Date.now() })
 
       const s1Tx = await store.getHistory({ seedId, type: 'tx' })
       expect(s1Tx).toHaveLength(1)
@@ -268,62 +268,62 @@ describe('SqliteApprovalStore', () => {
 
     test('getHistory respects limit', async () => {
       for (let i = 0; i < 5; i++) {
-        await store.appendHistory({ seedId, type: 'tx', chainId: 1, targetHash: `0x${i}`, approver: 'a', deviceId: 'd', action: 'approved', timestamp: Date.now() })
+        await store.appendHistory({ seedId, type: 'tx', chainId: 1, targetHash: `0x${i}`, approver: 'a', signerId: 'd', action: 'approved', timestamp: Date.now() })
       }
       const limited = await store.getHistory({ limit: 2 })
       expect(limited).toHaveLength(2)
     })
   })
 
-  // --- Devices ---
+  // --- Signers ---
 
-  describe('devices', () => {
-    test('saveDevice + getDevice round-trips', async () => {
-      await store.saveDevice('dev-1', '0xpubkey123')
-      const dev = await store.getDevice('dev-1')
-      expect(dev!.deviceId).toBe('dev-1')
+  describe('signers', () => {
+    test('saveSigner + getSigner round-trips', async () => {
+      await store.saveSigner('dev-1', '0xpubkey123')
+      const dev = await store.getSigner('dev-1')
+      expect(dev!.signerId).toBe('dev-1')
       expect(dev!.publicKey).toBe('0xpubkey123')
       expect(dev!.revokedAt).toBeNull()
     })
 
-    test('getDevice returns null for unknown device', async () => {
-      const dev = await store.getDevice('nonexistent')
+    test('getSigner returns null for unknown signer', async () => {
+      const dev = await store.getSigner('nonexistent')
       expect(dev).toBeNull()
     })
 
-    test('listDevices returns all devices', async () => {
-      await store.saveDevice('dev-1', 'pk1')
-      await store.saveDevice('dev-2', 'pk2')
-      const devices = await store.listDevices()
-      expect(devices).toHaveLength(2)
+    test('listSigners returns all signers', async () => {
+      await store.saveSigner('dev-1', 'pk1')
+      await store.saveSigner('dev-2', 'pk2')
+      const signers = await store.listSigners()
+      expect(signers).toHaveLength(2)
     })
 
-    test('revokeDevice sets revoked_at', async () => {
-      await store.saveDevice('dev-1', 'pk1')
-      await store.revokeDevice('dev-1')
-      const dev = await store.getDevice('dev-1')
+    test('revokeSigner sets revoked_at', async () => {
+      await store.saveSigner('dev-1', 'pk1')
+      await store.revokeSigner('dev-1')
+      const dev = await store.getSigner('dev-1')
       expect(dev!.revokedAt).toBeTruthy()
     })
 
-    test('isDeviceRevoked returns false for active device', async () => {
-      await store.saveDevice('dev-1', 'pk1')
-      expect(await store.isDeviceRevoked('dev-1')).toBe(false)
+    test('isSignerRevoked returns false for active signer', async () => {
+      await store.saveSigner('dev-1', 'pk1')
+      expect(await store.isSignerRevoked('dev-1')).toBe(false)
     })
 
-    test('isDeviceRevoked returns true for revoked device', async () => {
-      await store.saveDevice('dev-1', 'pk1')
-      await store.revokeDevice('dev-1')
-      expect(await store.isDeviceRevoked('dev-1')).toBe(true)
+    test('isSignerRevoked returns true for revoked signer', async () => {
+      await store.saveSigner('dev-1', 'pk1')
+      await store.revokeSigner('dev-1')
+      expect(await store.isSignerRevoked('dev-1')).toBe(true)
     })
 
-    test('isDeviceRevoked returns false for unknown device', async () => {
-      expect(await store.isDeviceRevoked('nonexistent')).toBe(false)
+    test('isSignerRevoked returns false for unknown signer', async () => {
+      expect(await store.isSignerRevoked('nonexistent')).toBe(false)
     })
 
-    test('saveDevice updates existing device', async () => {
-      await store.saveDevice('dev-1', 'pk1')
-      await store.saveDevice('dev-1', 'pk2')
-      const dev = await store.getDevice('dev-1')
+    test('saveSigner updates existing signer', async () => {
+      await store.saveSigner('dev-1', 'pk1')
+      await store.saveSigner('dev-1', 'pk2')
+      const dev = await store.getSigner('dev-1')
       expect(dev!.publicKey).toBe('pk2')
     })
   })
@@ -342,7 +342,7 @@ describe('SqliteApprovalStore', () => {
       expect(nonce).toBe(5)
     })
 
-    test('nonce is scoped per approver+device', async () => {
+    test('nonce is scoped per approver+signer', async () => {
       await store.updateNonce('a1', 'd1', 10)
       await store.updateNonce('a1', 'd2', 20)
       await store.updateNonce('a2', 'd1', 30)

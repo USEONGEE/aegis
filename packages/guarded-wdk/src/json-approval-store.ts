@@ -11,7 +11,7 @@ import {
   type ApprovalRequest,
   type PendingApprovalRequest,
   type HistoryEntry,
-  type StoredDevice,
+  type StoredSigner,
   type JournalInput,
   type CronInput,
   type StoredCron,
@@ -21,7 +21,7 @@ import {
   type JournalQueryOpts,
   type SignedApproval
 } from './approval-store.js'
-import type { PendingApprovalRow, StoredHistoryEntry, CronRow, StoredJournalEntry, DeviceRow, SeedRow, PolicyRow } from './store-types.js'
+import type { PendingApprovalRow, StoredHistoryEntry, CronRow, StoredJournalEntry, SignerRow, SeedRow, PolicyRow } from './store-types.js'
 
 interface SeedsFile {
   seeds: SeedRow[]
@@ -74,7 +74,7 @@ export class JsonApprovalStore extends ApprovalStore {
       'policies.json': {},
       'pending.json': [],
       'history.json': [],
-      'devices.json': {},
+      'signers.json': {},
       'nonces.json': {},
       'crons.json': [],
       'seeds.json': { seeds: [], activeSeedId: null },
@@ -205,7 +205,7 @@ export class JsonApprovalStore extends ApprovalStore {
       chain_id: entry.chainId ?? null,
       target_hash: entry.targetHash,
       approver: entry.approver,
-      device_id: entry.deviceId,
+      signer_id: entry.signerId,
       action: entry.action,
       signed_approval_json: entry.signedApproval ? JSON.stringify(entry.signedApproval) : null,
       timestamp: entry.timestamp
@@ -234,77 +234,77 @@ export class JsonApprovalStore extends ApprovalStore {
       chainId: h.chain_id,
       targetHash: h.target_hash,
       approver: h.approver,
-      deviceId: h.device_id,
+      signerId: h.signer_id,
       action: h.action,
       signedApproval: h.signed_approval_json ? JSON.parse(h.signed_approval_json) as SignedApproval : undefined,
       timestamp: h.timestamp
     }))
   }
 
-  // --- Devices ---
+  // --- Signers ---
 
-  override async saveDevice (deviceId: string, publicKey: string): Promise<void> {
-    const devices = await this._read<Record<string, DeviceRow>>('devices.json') || {}
-    devices[deviceId] = {
-      device_id: deviceId,
+  override async saveSigner (signerId: string, publicKey: string): Promise<void> {
+    const signers = await this._read<Record<string, SignerRow>>('signers.json') || {}
+    signers[signerId] = {
+      signer_id: signerId,
       public_key: publicKey,
       name: null,
-      paired_at: Date.now(),
+      registered_at: Date.now(),
       revoked_at: null
     }
-    await this._write('devices.json', devices)
+    await this._write('signers.json', signers)
   }
 
-  override async getDevice (deviceId: string): Promise<StoredDevice | null> {
-    const devices = await this._read<Record<string, DeviceRow>>('devices.json') || {}
-    const row = devices[deviceId]
+  override async getSigner (signerId: string): Promise<StoredSigner | null> {
+    const signers = await this._read<Record<string, SignerRow>>('signers.json') || {}
+    const row = signers[signerId]
     if (!row) return null
     return {
-      deviceId: row.device_id,
+      signerId: row.signer_id,
       publicKey: row.public_key,
       name: row.name,
-      pairedAt: row.paired_at,
+      registeredAt: row.registered_at,
       revokedAt: row.revoked_at
     }
   }
 
-  override async listDevices (): Promise<StoredDevice[]> {
-    const devices = await this._read<Record<string, DeviceRow>>('devices.json') || {}
-    return Object.values(devices).map(row => ({
-      deviceId: row.device_id,
+  override async listSigners (): Promise<StoredSigner[]> {
+    const signers = await this._read<Record<string, SignerRow>>('signers.json') || {}
+    return Object.values(signers).map(row => ({
+      signerId: row.signer_id,
       publicKey: row.public_key,
       name: row.name,
-      pairedAt: row.paired_at,
+      registeredAt: row.registered_at,
       revokedAt: row.revoked_at
     }))
   }
 
-  override async revokeDevice (deviceId: string): Promise<void> {
-    const devices = await this._read<Record<string, DeviceRow>>('devices.json') || {}
-    if (devices[deviceId]) {
-      devices[deviceId].revoked_at = Date.now()
-      await this._write('devices.json', devices)
+  override async revokeSigner (signerId: string): Promise<void> {
+    const signers = await this._read<Record<string, SignerRow>>('signers.json') || {}
+    if (signers[signerId]) {
+      signers[signerId].revoked_at = Date.now()
+      await this._write('signers.json', signers)
     }
   }
 
-  override async isDeviceRevoked (deviceId: string): Promise<boolean> {
-    const devices = await this._read<Record<string, DeviceRow>>('devices.json') || {}
-    const row = devices[deviceId]
+  override async isSignerRevoked (signerId: string): Promise<boolean> {
+    const signers = await this._read<Record<string, SignerRow>>('signers.json') || {}
+    const row = signers[signerId]
     if (!row) return false
     return row.revoked_at !== null
   }
 
   // --- Nonce ---
 
-  override async getLastNonce (approver: string, deviceId: string): Promise<number> {
+  override async getLastNonce (approver: string, signerId: string): Promise<number> {
     const nonces = await this._read<Record<string, number>>('nonces.json') || {}
-    const key = `${approver}:${deviceId}`
+    const key = `${approver}:${signerId}`
     return nonces[key] || 0
   }
 
-  override async updateNonce (approver: string, deviceId: string, nonce: number): Promise<void> {
+  override async updateNonce (approver: string, signerId: string, nonce: number): Promise<void> {
     const nonces = await this._read<Record<string, number>>('nonces.json') || {}
-    const key = `${approver}:${deviceId}`
+    const key = `${approver}:${signerId}`
     nonces[key] = nonce
     await this._write('nonces.json', nonces)
   }

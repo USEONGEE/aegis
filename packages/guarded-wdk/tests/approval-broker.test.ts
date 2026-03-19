@@ -12,7 +12,7 @@ class MockApprovalStore extends ApprovalStore {
   _policies: Record<string, unknown> = {}
   _pending: Array<ApprovalRequest & Record<string, unknown>> = []
   _history: HistoryEntry[] = []
-  _devices: Record<string, { revoked: boolean }> = {}
+  _signers: Record<string, { revoked: boolean }> = {}
   _nonces: Record<string, number> = {}
 
   constructor () {
@@ -29,10 +29,10 @@ class MockApprovalStore extends ApprovalStore {
   override async removePendingApproval (requestId: string) { this._pending = this._pending.filter(p => p.requestId !== requestId) }
   override async appendHistory (entry: HistoryEntry) { this._history.push(entry) }
   override async getHistory (_opts?: HistoryQueryOpts) { return this._history as HistoryEntry[] }
-  override async isDeviceRevoked (deviceId: string) { return this._devices[deviceId]?.revoked === true }
-  override async revokeDevice (deviceId: string) { this._devices[deviceId] = { revoked: true } }
-  override async getLastNonce (approver: string, deviceId: string) { return this._nonces[`${approver}:${deviceId}`] || 0 }
-  override async updateNonce (approver: string, deviceId: string, nonce: number) { this._nonces[`${approver}:${deviceId}`] = nonce }
+  override async isSignerRevoked (signerId: string) { return this._signers[signerId]?.revoked === true }
+  override async revokeSigner (signerId: string) { this._signers[signerId] = { revoked: true } }
+  override async getLastNonce (approver: string, signerId: string) { return this._nonces[`${approver}:${signerId}`] || 0 }
+  override async updateNonce (approver: string, signerId: string, nonce: number) { this._nonces[`${approver}:${signerId}`] = nonce }
 }
 
 function makeSignedApproval (keyPair: KeyPair, overrides: Record<string, unknown> = {}) {
@@ -42,7 +42,7 @@ function makeSignedApproval (keyPair: KeyPair, overrides: Record<string, unknown
     chainId: 1,
     targetHash: '0xabc123',
     approver: keyPair.publicKey,
-    deviceId: 'device-1',
+    signerId: 'signer-1',
     policyVersion: 0,
     expiresAt: Math.floor(Date.now() / 1000) + 300,
     nonce: 1,

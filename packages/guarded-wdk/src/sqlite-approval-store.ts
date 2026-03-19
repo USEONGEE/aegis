@@ -10,7 +10,7 @@ import {
   type ApprovalRequest,
   type PendingApprovalRequest,
   type HistoryEntry,
-  type StoredDevice,
+  type StoredSigner,
   type JournalInput,
   type CronInput,
   type StoredCron,
@@ -20,7 +20,7 @@ import {
   type JournalQueryOpts,
   type SignedApproval
 } from './approval-store.js'
-import type { PendingApprovalRow, StoredHistoryEntry, CronRow, StoredJournalEntry, DeviceRow, SeedRow, PolicyRow } from './store-types.js'
+import type { PendingApprovalRow, StoredHistoryEntry, CronRow, StoredJournalEntry, SignerRow, SeedRow, PolicyRow } from './store-types.js'
 
 /**
  * SQLite-backed implementation of ApprovalStore.
@@ -91,25 +91,25 @@ export class SqliteApprovalStore extends ApprovalStore {
         chain_id INTEGER,
         target_hash TEXT NOT NULL,
         approver TEXT NOT NULL,
-        device_id TEXT NOT NULL,
+        signer_id TEXT NOT NULL,
         action TEXT NOT NULL,
         signed_approval_json TEXT,
         timestamp INTEGER NOT NULL
       );
 
-      CREATE TABLE IF NOT EXISTS devices (
-        device_id TEXT PRIMARY KEY,
+      CREATE TABLE IF NOT EXISTS signers (
+        signer_id TEXT PRIMARY KEY,
         public_key TEXT NOT NULL,
         name TEXT,
-        paired_at INTEGER NOT NULL,
+        registered_at INTEGER NOT NULL,
         revoked_at INTEGER
       );
 
       CREATE TABLE IF NOT EXISTS nonces (
         approver TEXT NOT NULL,
-        device_id TEXT NOT NULL,
+        signer_id TEXT NOT NULL,
         last_nonce INTEGER NOT NULL DEFAULT 0,
-        PRIMARY KEY (approver, device_id)
+        PRIMARY KEY (approver, signer_id)
       );
 
       CREATE TABLE IF NOT EXISTS crons (
@@ -250,7 +250,7 @@ export class SqliteApprovalStore extends ApprovalStore {
 
   override async appendHistory (entry: HistoryEntry): Promise<void> {
     this._db!.prepare(`
-      INSERT INTO approval_history (seed_id, type, chain_id, target_hash, approver, device_id, action, signed_approval_json, timestamp)
+      INSERT INTO approval_history (seed_id, type, chain_id, target_hash, approver, signer_id, action, signed_approval_json, timestamp)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       entry.seedId,
@@ -258,7 +258,7 @@ export class SqliteApprovalStore extends ApprovalStore {
       entry.chainId ?? null,
       entry.targetHash,
       entry.approver,
-      entry.deviceId,
+      entry.signerId,
       entry.action,
       entry.signedApproval ? JSON.stringify(entry.signedApproval) : null,
       entry.timestamp
@@ -280,73 +280,73 @@ export class SqliteApprovalStore extends ApprovalStore {
       chainId: h.chain_id,
       targetHash: h.target_hash,
       approver: h.approver,
-      deviceId: h.device_id,
+      signerId: h.signer_id,
       action: h.action,
       signedApproval: h.signed_approval_json ? JSON.parse(h.signed_approval_json) as SignedApproval : undefined,
       timestamp: h.timestamp
     }))
   }
 
-  // --- Devices ---
+  // --- Signers ---
 
-  override async saveDevice (deviceId: string, publicKey: string): Promise<void> {
+  override async saveSigner (signerId: string, publicKey: string): Promise<void> {
     this._db!.prepare(`
-      INSERT INTO devices (device_id, public_key, paired_at)
+      INSERT INTO signers (signer_id, public_key, registered_at)
       VALUES (?, ?, ?)
-      ON CONFLICT (device_id) DO UPDATE SET
+      ON CONFLICT (signer_id) DO UPDATE SET
         public_key = excluded.public_key,
-        paired_at = excluded.paired_at
-    `).run(deviceId, publicKey, Date.now())
+        registered_at = excluded.registered_at
+    `).run(signerId, publicKey, Date.now())
   }
 
-  override async getDevice (deviceId: string): Promise<StoredDevice | null> {
-    const row = this._db!.prepare('SELECT * FROM devices WHERE device_id = ?').get(deviceId) as DeviceRow | undefined
+  override async getSigner (signerId: string): Promise<StoredSigner | null> {
+    const row = this._db!.prepare('SELECT * FROM signers WHERE signer_id = ?').get(signerId) as SignerRow | undefined
     if (!row) return null
     return {
-      deviceId: row.device_id,
+      signerId: row.signer_id,
       publicKey: row.public_key,
       name: row.name,
-      pairedAt: row.paired_at,
+      registeredAt: row.registered_at,
       revokedAt: row.revoked_at
     }
   }
 
-  override async listDevices (): Promise<StoredDevice[]> {
-    const rows = this._db!.prepare('SELECT * FROM devices').all() as DeviceRow[]
+  override async listSigners (): Promise<StoredSigner[]> {
+    const rows = this._db!.prepare('SELECT * FROM signers').all() as SignerRow[]
     return rows.map(row => ({
-      deviceId: row.device_id,
+      signerId: row.signer_id,
       publicKey: row.public_key,
       name: row.name,
-      pairedAt: row.paired_at,
+      registeredAt: row.registered_at,
       revokedAt: row.revoked_at
     }))
   }
 
-  override async revokeDevice (deviceId: string): Promise<void> {
-    this._db!.prepare('UPDATE devices SET revoked_at = ? WHERE device_id = ?').run(Date.now(), deviceId)
+  override async revokeSigner (signerId: string): Promise<void> {
+    this._db!.prepare('UPDATE signers SET revoked_at = ? WHERE signer_id = ?').run(Date.now(), signerId)
   }
 
-  override async isDeviceRevoked (deviceId: string): Promise<boolean> {
-    const row = this._db!.prepare('SELECT revoked_at FROM devices WHERE device_id = ?').get(deviceId) as { revoked_at: number | null } | undefined
+  override async isSignerRevoked (signerId: string): Promise<boolean> {
+    const row = this._db!.prepare('SELECT revoked_at FROM signers WHERE signer_id = ?').get(signerId) as { revoked_at: number | null } | undefined
     if (!row) return false
     return row.revoked_at !== null
   }
 
   // --- Nonce ---
 
-  override async getLastNonce (approver: string, deviceId: string): Promise<number> {
+  override async getLastNonce (approver: string, signerId: string): Promise<number> {
     const row = this._db!.prepare(
-      'SELECT last_nonce FROM nonces WHERE approver = ? AND device_id = ?'
-    ).get(approver, deviceId) as { last_nonce: number } | undefined
+      'SELECT last_nonce FROM nonces WHERE approver = ? AND signer_id = ?'
+    ).get(approver, signerId) as { last_nonce: number } | undefined
     return row ? row.last_nonce : 0
   }
 
-  override async updateNonce (approver: string, deviceId: string, nonce: number): Promise<void> {
+  override async updateNonce (approver: string, signerId: string, nonce: number): Promise<void> {
     this._db!.prepare(`
-      INSERT INTO nonces (approver, device_id, last_nonce)
+      INSERT INTO nonces (approver, signer_id, last_nonce)
       VALUES (?, ?, ?)
-      ON CONFLICT (approver, device_id) DO UPDATE SET last_nonce = excluded.last_nonce
-    `).run(approver, deviceId, nonce)
+      ON CONFLICT (approver, signer_id) DO UPDATE SET last_nonce = excluded.last_nonce
+    `).run(approver, signerId, nonce)
   }
 
   // --- Cron ---

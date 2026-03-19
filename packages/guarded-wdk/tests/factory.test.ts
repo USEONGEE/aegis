@@ -47,7 +47,7 @@ class MockApprovalStore extends ApprovalStore {
   _policies: Record<string, unknown> = {}
   _pending: Array<ApprovalRequest & Record<string, unknown>> = []
   _history: HistoryEntry[] = []
-  _devices: Record<string, { revoked: boolean }> = {}
+  _signers: Record<string, { revoked: boolean }> = {}
   _nonces: Record<string, number> = {}
 
   constructor () {
@@ -64,10 +64,10 @@ class MockApprovalStore extends ApprovalStore {
   override async removePending (requestId: string) { this._pending = this._pending.filter(p => p.requestId !== requestId) }
   override async appendHistory (entry: HistoryEntry) { this._history.push(entry) }
   override async getHistory (_opts?: HistoryQueryOpts) { return this._history as HistoryEntry[] }
-  override async isDeviceRevoked (_deviceId: string) { return false }
-  override async revokeDevice (deviceId: string) { this._devices[deviceId] = { revoked: true } }
-  override async getLastNonce (approver: string, deviceId: string) { return this._nonces[`${approver}:${deviceId}`] || 0 }
-  override async updateNonce (approver: string, deviceId: string, nonce: number) { this._nonces[`${approver}:${deviceId}`] = nonce }
+  override async isSignerRevoked (_signerId: string) { return false }
+  override async revokeSigner (signerId: string) { this._signers[signerId] = { revoked: true } }
+  override async getLastNonce (approver: string, signerId: string) { return this._nonces[`${approver}:${signerId}`] || 0 }
+  override async updateNonce (approver: string, signerId: string, nonce: number) { this._nonces[`${approver}:${signerId}`] = nonce }
 }
 
 const validPolicies = {

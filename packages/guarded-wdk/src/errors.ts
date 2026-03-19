@@ -35,10 +35,10 @@ export class UntrustedApproverError extends Error {
   }
 }
 
-export class DeviceRevokedError extends Error {
-  constructor (deviceId: string) {
-    super(`Device has been revoked: ${deviceId}`)
-    this.name = 'DeviceRevokedError'
+export class SignerRevokedError extends Error {
+  constructor (signerId: string) {
+    super(`Signer has been revoked: ${signerId}`)
+    this.name = 'SignerRevokedError'
   }
 }
 

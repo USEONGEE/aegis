@@ -145,16 +145,16 @@ export class SignedApprovalBroker {
       }
 
       case 'device_revoke': {
-        // Extract deviceId from metadata -- no fallback to requestId
-        const deviceId = (signedApproval.metadata as Record<string, unknown> | undefined)?.deviceId as string | undefined
-        if (!deviceId) {
-          throw new Error('device_revoke requires metadata.deviceId')
+        // Extract signerId from metadata -- no fallback to requestId
+        const signerId = (signedApproval.metadata as Record<string, unknown> | undefined)?.signerId as string | undefined
+        if (!signerId) {
+          throw new Error('device_revoke requires metadata.signerId')
         }
-        await this._store.revokeDevice(deviceId)
+        await this._store.revokeSigner(signerId)
         if (this._emitter) {
-          this._emitter.emit('DeviceRevoked', {
-            type: 'DeviceRevoked',
-            deviceId,
+          this._emitter.emit('SignerRevoked', {
+            type: 'SignerRevoked',
+            signerId,
             timestamp: Date.now()
           })
         }
@@ -170,7 +170,7 @@ export class SignedApprovalBroker {
       chainId: signedApproval.chainId,
       targetHash: signedApproval.targetHash,
       approver: signedApproval.approver,
-      deviceId: signedApproval.deviceId,
+      signerId: signedApproval.signerId,
       action: type === 'policy_reject' ? 'rejected' : 'approved',
       timestamp: Date.now()
     })

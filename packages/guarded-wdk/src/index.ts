@@ -11,7 +11,7 @@ export {
   ApprovalTimeoutError,
   SignatureError,
   UntrustedApproverError,
-  DeviceRevokedError,
+  SignerRevokedError,
   ApprovalExpiredError,
   ReplayError
 } from './errors.js'
@@ -25,7 +25,7 @@ export type {
   StoredPolicy,
   PendingApprovalRequest,
   HistoryEntry,
-  StoredDevice,
+  StoredSigner,
   CronInput,
   StoredCron,
   StoredSeed,
