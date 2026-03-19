@@ -26,3 +26,4 @@ CLAUDE.md
 dist/
 build/
 *.tsbuildinfo
+docs/type-dep-graph/

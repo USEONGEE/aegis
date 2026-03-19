@@ -14,13 +14,19 @@
     "test:canonical": "npm test --workspace=packages/canonical",
     "test:guarded-wdk": "npm test --workspace=packages/guarded-wdk",
     "test:manifest": "npm test --workspace=packages/manifest",
-    "test:daemon": "npm test --workspace=packages/daemon"
+    "test:daemon": "npm test --workspace=packages/daemon",
+    "check": "npx tsx scripts/check/index.ts",
+    "check:single": "npx tsx scripts/check/index.ts --check=",
+    "type-graph": "npx tsx scripts/type-dep-graph/index.ts",
+    "type-graph:json": "npx tsx scripts/type-dep-graph/index.ts --json"
   },
   "devDependencies": {
     "@babel/preset-typescript": "^7.28.5",
     "@jest/globals": "^29.7.0",
     "jest": "^29.7.0",
     "ts-jest": "^29.4.6",
+    "ts-morph": "^25.0.1",
+    "tsx": "^4.21.0",
     "typescript": "^5.9.3"
   }
 }
