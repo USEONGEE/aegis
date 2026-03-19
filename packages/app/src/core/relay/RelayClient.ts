@@ -12,6 +12,9 @@
  * Only metadata (userId, messageId, timestamp, channel) is plaintext.
  */
 
+import nacl from 'tweetnacl';
+import { encodeBase64, decodeBase64, encodeUTF8 } from 'tweetnacl-util';
+
 export type RelayChannel = 'control' | 'chat';
 
 export interface RelayMessage {
@@ -95,13 +98,9 @@ export class RelayClient {
     if (!this.sessionKey) {
       throw new Error('E2E session key not established');
     }
-    // Import nacl dynamically to avoid top-level import issues in RN
-    const nacl = require('tweetnacl');
     const nonce = nacl.randomBytes(nacl.secretbox.nonceLength);
     const messageBytes = new TextEncoder().encode(plaintext);
     const ciphertext = nacl.secretbox(messageBytes, nonce, this.sessionKey);
-    // Use base64 encoding
-    const { encodeBase64 } = require('tweetnacl-util');
     return {
       nonce: encodeBase64(nonce),
       ciphertext: encodeBase64(ciphertext),
@@ -115,8 +114,6 @@ export class RelayClient {
     if (!this.sessionKey) {
       throw new Error('E2E session key not established');
     }
-    const nacl = require('tweetnacl');
-    const { decodeBase64, encodeUTF8 } = require('tweetnacl-util');
     const nonce = decodeBase64(encrypted.nonce);
     const ciphertext = decodeBase64(encrypted.ciphertext);
     const plaintext = nacl.secretbox.open(ciphertext, nonce, this.sessionKey);

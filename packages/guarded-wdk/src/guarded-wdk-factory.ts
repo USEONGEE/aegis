@@ -1,6 +1,7 @@
 import { EventEmitter } from 'node:events'
 import WDK from '@tetherto/wdk'
 import { createGuardedMiddleware, validatePolicies } from './guarded-middleware.js'
+import type { Policy, ChainPolicies } from './guarded-middleware.js'
 import { SignedApprovalBroker } from './signed-approval-broker.js'
 import type { ApprovalStore } from './approval-store.js'
 
@@ -59,8 +60,7 @@ export async function createGuardedWDK (config: GuardedWDKConfig): Promise<Guard
     trustedApprovers
   } = config
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const wdk = new WDK(seed) as any
+  const wdk = new WDK(seed) as InstanceType<typeof WDK> & Record<string, (...args: unknown[]) => unknown>
   const emitter = new EventEmitter()
 
   // Create or use provided approval broker
@@ -97,8 +97,7 @@ export async function createGuardedWDK (config: GuardedWDKConfig): Promise<Guard
 
   for (const policyConfig of Object.values(policiesStore)) {
     if (policyConfig.policies) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      validatePolicies(policyConfig.policies as any)
+      validatePolicies(policyConfig.policies as Policy[])
     }
   }
 
@@ -114,8 +113,7 @@ export async function createGuardedWDK (config: GuardedWDKConfig): Promise<Guard
 
   for (const chain of Object.keys(wallets || {})) {
     wdk.registerMiddleware(chain, createGuardedMiddleware({
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      policiesRef: () => policiesStore as any,
+      policiesRef: () => policiesStore as ChainPolicies,
       approvalBroker,
       emitter,
       chain
@@ -146,14 +144,13 @@ export async function createGuardedWDK (config: GuardedWDKConfig): Promise<Guard
       if (!Array.isArray(newPolicies.policies)) {
         throw new Error("newPolicies must have a 'policies' array.")
       }
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      validatePolicies(newPolicies.policies as any)
+      validatePolicies(newPolicies.policies as Policy[])
       policiesStore = {
         ...policiesStore,
         [chain]: deepCopy(newPolicies) as Record<string, unknown>
       }
       if (approvalStore) {
-        await approvalStore.savePolicy(seed, chain, newPolicies as unknown as import('./approval-store.js').SignedPolicy)
+        await approvalStore.savePolicy(seed, chain, newPolicies as import('./approval-store.js').SignedPolicy)
       }
     },
 

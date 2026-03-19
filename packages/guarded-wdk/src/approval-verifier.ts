@@ -20,7 +20,7 @@ export interface VerificationContext {
  */
 function computeApprovalHash (approval: SignedApproval): Buffer {
   const { sig: _sig, ...fields } = approval
-  const json = canonicalJSON(fields as unknown as Parameters<typeof canonicalJSON>[0])
+  const json = canonicalJSON(fields as Parameters<typeof canonicalJSON>[0])
   return createHash('sha256').update(json).digest()
 }
 

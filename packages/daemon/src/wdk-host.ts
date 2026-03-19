@@ -1,6 +1,5 @@
 import { join } from 'node:path'
-import { JsonApprovalStore } from '@wdk-app/guarded-wdk/src/json-approval-store.js'
-import { SignedApprovalBroker } from '@wdk-app/guarded-wdk/src/signed-approval-broker.js'
+import { JsonApprovalStore, SignedApprovalBroker } from '@wdk-app/guarded-wdk'
 import type { DaemonConfig } from './config.js'
 import type { Logger } from 'pino'
 

@@ -139,8 +139,8 @@ async function main (): Promise<void> {
     }
 
     // Dispose store
-    if (store && (store as any).dispose) {
-      await (store as any).dispose()
+    if (store && store.dispose) {
+      await store.dispose()
     }
 
     logger.info('Daemon stopped.')

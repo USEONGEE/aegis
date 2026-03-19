@@ -124,8 +124,7 @@ function validatePolicy (policy: Policy): void {
   }
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function validatePolicies (policies: Policy[] | any[]): void {
+export function validatePolicies (policies: Policy[]): void {
   if (!Array.isArray(policies)) {
     throw new Error('Policies must be an array.')
   }
@@ -167,8 +166,7 @@ function matchArgs (data: string, argConditions: Record<string, ArgCondition>): 
   return true
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function evaluatePolicy (chainPolicies: ChainPolicies | Record<string, any>, chain: string, tx: Transaction): EvaluationResult {
+export function evaluatePolicy (chainPolicies: ChainPolicies, chain: string, tx: Transaction): EvaluationResult {
   const config = chainPolicies[chain]
   if (!config || !config.policies) {
     return { decision: 'REJECT', matchedPermission: null, reason: 'no policies for chain' }

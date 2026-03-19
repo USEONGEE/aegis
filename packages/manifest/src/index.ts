@@ -12,3 +12,6 @@ export type {
   UserConfig,
   PolicyPermission
 } from './types.js'
+
+// Examples
+export { aaveV3Manifest } from './examples/aave-v3.js'
