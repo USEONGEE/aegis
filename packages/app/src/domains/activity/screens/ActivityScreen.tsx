@@ -20,7 +20,7 @@ import {
  * Events come from daemon's Guarded WDK via Relay in real-time:
  * - IntentProposed, PolicyEvaluated, ApprovalRequested, ...
  * - ExecutionBroadcasted, ExecutionSettled, ExecutionFailed, ...
- * - PendingPolicyRequested, PolicyApplied, DeviceRevoked
+ * - PendingPolicyRequested, PolicyApplied, SignerRevoked
  */
 
 const FILTER_OPTIONS: { label: string; value: ActivityFilter }[] = [
@@ -31,7 +31,7 @@ const FILTER_OPTIONS: { label: string; value: ActivityFilter }[] = [
   { label: 'Executed', value: 'ExecutionBroadcasted' },
   { label: 'Settled', value: 'ExecutionSettled' },
   { label: 'Failed', value: 'ExecutionFailed' },
-  { label: 'Device', value: 'DeviceRevoked' },
+  { label: 'Signer', value: 'SignerRevoked' },
 ];
 
 export function ActivityScreen() {
@@ -142,7 +142,7 @@ function getEventIcon(type: ActivityEventType): string {
     case 'ExecutionFailed': return '!';
     case 'PendingPolicyRequested': return '@';
     case 'PolicyApplied': return '=';
-    case 'DeviceRevoked': return 'x';
+    case 'SignerRevoked': return 'x';
     default: return '.';
   }
 }
@@ -159,7 +159,7 @@ function getEventColor(type: ActivityEventType): string {
     case 'ExecutionFailed': return '#ef4444';
     case 'PendingPolicyRequested': return '#f59e0b';
     case 'PolicyApplied': return '#22c55e';
-    case 'DeviceRevoked': return '#ef4444';
+    case 'SignerRevoked': return '#ef4444';
     default: return '#6b7280';
   }
 }

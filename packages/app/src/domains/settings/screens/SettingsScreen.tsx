@@ -14,27 +14,27 @@ import { SignedApprovalBuilder } from '../../../core/approval/SignedApprovalBuil
 import { useToast } from '../../../shared/ui/ToastProvider';
 
 /**
- * SettingsScreen — Device management + pairing.
+ * SettingsScreen — Signer management + pairing.
  *
  * Features:
  * - Identity key info (public key hex)
- * - Paired devices list with revoke option
+ * - Paired signers list with revoke option
  * - Pairing button (scan QR from daemon)
  * - Connection status
  */
 
-interface PairedDevice {
-  deviceId: string;
+interface PairedSigner {
+  signerId: string;
   name?: string;
   type: 'app' | 'daemon';
-  pairedAt: number;
+  registeredAt: number;
   isRevoked: boolean;
 }
 
 export function SettingsScreen() {
   const [publicKeyHex, setPublicKeyHex] = useState<string | null>(null);
   const [deviceId, setDeviceId] = useState<string | null>(null);
-  const [devices, setDevices] = useState<PairedDevice[]>([]);
+  const [signers, setSigners] = useState<PairedSigner[]>([]);
   const [pairingSAS, setPairingSAS] = useState<string | null>(null);
   const [pairingConfirm, setPairingConfirm] = useState<(() => Promise<void>) | null>(null);
   const [connected, setConnected] = useState(false);
@@ -54,7 +54,7 @@ export function SettingsScreen() {
     })();
   }, [identity]);
 
-  // Step 09: Listen for event_stream device events + fetch device list via chat
+  // Step 09: Listen for event_stream signer events + fetch signer list via chat
   useEffect(() => {
     const handler = (message: RelayMessage) => {
       if (message.channel !== 'control') return;
@@ -62,19 +62,19 @@ export function SettingsScreen() {
         type?: string;
         eventName?: string;
         event?: Record<string, unknown>;
-        devices?: PairedDevice[];
+        signers?: PairedSigner[];
       };
 
-      // Handle event_stream DeviceRevoked events
-      if (data.type === 'event_stream' && data.eventName === 'DeviceRevoked') {
-        // Refresh device list via chat on device revocation
-        fetchDeviceListViaChat();
+      // Handle event_stream SignerRevoked events
+      if (data.type === 'event_stream' && data.eventName === 'SignerRevoked') {
+        // Refresh signer list via chat on signer revocation
+        fetchSignerListViaChat();
         return;
       }
 
-      // Backward compat: direct device_list control messages
-      if (data.type === 'device_list' && data.devices) {
-        setDevices(data.devices);
+      // Backward compat: direct signer_list control messages
+      if (data.type === 'signer_list' && data.signers) {
+        setSigners(data.signers);
       }
     };
 
@@ -82,8 +82,8 @@ export function SettingsScreen() {
 
     const connHandler = (isConnected: boolean) => {
       setConnected(isConnected);
-      // Fetch device list on connect
-      if (isConnected) fetchDeviceListViaChat();
+      // Fetch signer list on connect
+      if (isConnected) fetchSignerListViaChat();
     };
     relay.addConnectionHandler(connHandler);
 
@@ -93,13 +93,13 @@ export function SettingsScreen() {
     };
   }, [relay]);
 
-  // Fetch device list via chat (Step 09: no dedicated control message)
-  const fetchDeviceListViaChat = useCallback(async () => {
+  // Fetch signer list via chat (Step 09: no dedicated control message)
+  const fetchSignerListViaChat = useCallback(async () => {
     try {
-      const sessionId = `device_list_${Date.now()}`;
+      const sessionId = `signer_list_${Date.now()}`;
       await relay.sendChat(sessionId, {
         role: 'user',
-        content: 'List my paired devices.',
+        content: 'List my paired signers.',
       });
 
       const responseHandler = (message: RelayMessage) => {
@@ -108,13 +108,13 @@ export function SettingsScreen() {
           role?: string;
           toolResults?: Array<{
             name?: string;
-            result?: { devices?: PairedDevice[] };
+            result?: { signers?: PairedSigner[] };
           }>;
         };
         if (data.role === 'assistant' && data.toolResults) {
           for (const tr of data.toolResults) {
-            if (tr.result?.devices) {
-              setDevices(tr.result.devices);
+            if (tr.result?.signers) {
+              setSigners(tr.result.signers);
             }
           }
           relay.removeMessageHandler(responseHandler);
@@ -173,7 +173,7 @@ export function SettingsScreen() {
       setPairingConfirm(() => async () => {
         const result = await confirmPairing();
         if (result.success) {
-          showToast(`Paired! Device: ${result.deviceId}`, 'success');
+          showToast(`Paired! Signer registered: ${result.deviceId}`, 'success');
           setPairingSAS(null);
           setPairingConfirm(null);
         }
@@ -183,12 +183,12 @@ export function SettingsScreen() {
     }
   }, [showToast]);
 
-  // Revoke a device — builds a proper SignedApproval via SignedApprovalBuilder
+  // Revoke a signer — builds a proper SignedApproval via SignedApprovalBuilder
   const handleRevoke = useCallback(
-    (device: PairedDevice) => {
+    (signer: PairedSigner) => {
       Alert.alert(
-        'Revoke Device',
-        `Revoke "${device.name ?? device.deviceId}"? This device will no longer be able to sign approvals.`,
+        'Revoke Signer',
+        `Revoke "${signer.name ?? signer.signerId}"? This signer will no longer be able to sign approvals.`,
         [
           { text: 'Cancel', style: 'cancel' },
           {
@@ -203,13 +203,13 @@ export function SettingsScreen() {
                 }
                 const builder = new SignedApprovalBuilder(keyPair, deviceId ?? undefined);
                 const signedApproval = builder.forDeviceRevoke({
-                  targetDeviceId: device.deviceId,
+                  targetSignerId: signer.signerId,
                   chainId: 1, // ethereum mainnet
                 });
                 await relay.sendApproval(signedApproval);
-                showToast('Device revoke request sent', 'info');
+                showToast('Signer revoke request sent', 'info');
               } catch (e) {
-                showToast('Failed to revoke device', 'error');
+                showToast('Failed to revoke signer', 'error');
               }
             },
           },
@@ -313,29 +313,29 @@ export function SettingsScreen() {
         )}
       </View>
 
-      {/* Devices Section */}
-      <Text style={styles.sectionHeader}>Paired Devices</Text>
+      {/* Signers Section */}
+      <Text style={styles.sectionHeader}>Paired Signers</Text>
       <View style={styles.card}>
-        {devices.length === 0 ? (
-          <Text style={styles.emptyText}>No paired devices</Text>
+        {signers.length === 0 ? (
+          <Text style={styles.emptyText}>No paired signers</Text>
         ) : (
-          devices.map((device) => (
-            <View key={device.deviceId} style={styles.deviceRow}>
+          signers.map((signer) => (
+            <View key={signer.signerId} style={styles.deviceRow}>
               <View style={styles.deviceInfo}>
                 <Text style={styles.deviceName}>
-                  {device.name ?? device.deviceId}
+                  {signer.name ?? signer.signerId}
                 </Text>
                 <Text style={styles.deviceMeta}>
-                  {device.type} | {new Date(device.pairedAt).toLocaleDateString()}
+                  {signer.type} | {new Date(signer.registeredAt).toLocaleDateString()}
                 </Text>
-                {device.isRevoked && (
+                {signer.isRevoked && (
                   <Text style={styles.revokedBadge}>REVOKED</Text>
                 )}
               </View>
-              {!device.isRevoked && device.deviceId !== deviceId && (
+              {!signer.isRevoked && signer.signerId !== deviceId && (
                 <Pressable
                   style={styles.revokeButton}
-                  onPress={() => handleRevoke(device)}
+                  onPress={() => handleRevoke(signer)}
                 >
                   <Text style={styles.revokeButtonText}>Revoke</Text>
                 </Pressable>

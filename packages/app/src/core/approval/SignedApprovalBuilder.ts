@@ -99,16 +99,16 @@ const DEFAULT_EXPIRY_SECONDS = 300; // 5 minutes
 
 export class SignedApprovalBuilder {
   private keyPair: IdentityKeyPair;
-  private deviceId: string;
+  private signerId: string;
   private nonce: number;
 
   constructor(
     keyPair: IdentityKeyPair,
-    deviceId?: string,
+    signerId?: string,
     initialNonce?: number,
   ) {
     this.keyPair = keyPair;
-    this.deviceId = deviceId ?? 'device_unknown';
+    this.signerId = signerId ?? 'signer_unknown';
     this.nonce = initialNonce ?? 0;
   }
 
@@ -165,29 +165,29 @@ export class SignedApprovalBuilder {
    * targetHash = SHA-256(deviceId), matching the verifier in guarded-wdk.
    */
   forDeviceRevoke(params: {
-    targetDeviceId: string;
+    targetSignerId: string;
     chainId: number;
     expiresInSeconds?: number;
   }): SignedApproval {
-    // targetHash for device revoke = SHA-256(deviceId)
-    // Must match: createHash('sha256').update(deviceId).digest('hex') in approval-verifier
-    const targetHash = sha256Hex(params.targetDeviceId);
+    // targetHash for device revoke = SHA-256(signerId)
+    // Must match: createHash('sha256').update(signerId).digest('hex') in approval-verifier
+    const targetHash = sha256Hex(params.targetSignerId);
 
     const approval = this.build({
       type: 'device_revoke',
       targetHash,
       chainId: params.chainId,
-      requestId: `revoke_${params.targetDeviceId}`,
+      requestId: `revoke_${params.targetSignerId}`,
       policyVersion: 0,
       expiresInSeconds: params.expiresInSeconds,
     });
 
-    // Attach metadata.deviceId so the daemon's control-handler can verify
-    // the targetHash against the revoked device ID.
+    // Attach metadata.signerId so the daemon's control-handler can verify
+    // the targetHash against the revoked signer ID.
     return {
       ...approval,
-      metadata: { deviceId: params.targetDeviceId },
-    } as SignedApproval & { metadata: { deviceId: string } };
+      metadata: { signerId: params.targetSignerId },
+    } as SignedApproval & { metadata: { signerId: string } };
   }
 
   /**
@@ -213,7 +213,7 @@ export class SignedApprovalBuilder {
       type: params.type,
       targetHash: params.targetHash,
       approver,
-      deviceId: this.deviceId,
+      signerId: this.signerId,
       chainId: params.chainId,
       requestId: params.requestId,
       policyVersion: params.policyVersion ?? 0,
@@ -259,9 +259,9 @@ export class SignedApprovalBuilder {
   }
 
   /**
-   * Update device ID (after pairing).
+   * Update signer ID (after pairing).
    */
-  setDeviceId(deviceId: string): void {
-    this.deviceId = deviceId;
+  setSignerId(signerId: string): void {
+    this.signerId = signerId;
   }
 }

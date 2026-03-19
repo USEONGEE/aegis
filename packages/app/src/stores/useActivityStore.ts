@@ -16,7 +16,7 @@ export type ActivityEventType =
   | 'ExecutionFailed'
   | 'PendingPolicyRequested'
   | 'PolicyApplied'
-  | 'DeviceRevoked';
+  | 'SignerRevoked';
 
 export interface ActivityEvent {
   id: string;

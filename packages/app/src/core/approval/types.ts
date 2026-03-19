@@ -31,7 +31,7 @@ export interface SignedApproval {
 
   // Who
   approver: string;             // identity public key (hex)
-  deviceId: string;             // signing device
+  signerId: string;             // signing signer
 
   // Context
   chainId: number;              // cross-chain replay prevention
@@ -40,7 +40,7 @@ export interface SignedApproval {
 
   // When
   expiresAt: number;            // unix timestamp
-  nonce: number;                // per-approver + per-device scope
+  nonce: number;                // per-approver + per-signer scope
 
   // Signature
   sig: string;                  // Ed25519 sign(all fields except sig), hex
@@ -69,8 +69,8 @@ export interface ApprovalRequest {
     policies?: unknown[];
 
     // For device revoke
-    deviceId?: string;
-    deviceName?: string;
+    signerId?: string;
+    signerName?: string;
   };
 
   policyVersion: number;
@@ -85,7 +85,7 @@ export interface SignedApprovalPayload {
   type: ApprovalType;
   targetHash: string;
   approver: string;
-  deviceId: string;
+  signerId: string;
   chainId: number;
   requestId: string;
   policyVersion: number;

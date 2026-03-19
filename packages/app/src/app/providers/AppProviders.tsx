@@ -22,7 +22,7 @@ async function approvalExecutor(request: {
   chainId: number;
   requestId: string;
   policyVersion?: number;
-  targetDeviceId?: string;
+  targetSignerId?: string;
 }): Promise<{ txHash: `0x${string}` }> {
   const identity = IdentityKeyManager.getInstance();
   const keyPair = await identity.load();
@@ -63,7 +63,7 @@ async function approvalExecutor(request: {
 
     case 'device_revoke':
       signedApproval = builder.forDeviceRevoke({
-        targetDeviceId: request.targetDeviceId ?? request.requestId,
+        targetSignerId: request.targetSignerId ?? request.requestId,
         chainId: request.chainId,
       });
       break;
