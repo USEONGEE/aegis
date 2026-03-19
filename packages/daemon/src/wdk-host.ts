@@ -84,7 +84,7 @@ export async function initWDK (config: DaemonConfig, logger: Logger): Promise<WD
       const chainId = Number(chainIdStr)
       const stored = await store.loadPolicy(seedId, chainId)
       if (stored) {
-        const policiesArr = stored.policies_json ? JSON.parse(stored.policies_json) : (stored.policies || [])
+        const policiesArr = JSON.parse(stored.policies_json)
         restoredPolicies[chainIdStr] = { policies: policiesArr }
         logger.info({ seedId, chainId }, 'Restored policy from store')
       }
@@ -160,7 +160,10 @@ function createMockWDK (broker: SignedApprovalBroker, store: any, seedId: string
       return {}
     },
     async updatePolicies (chainId: number, newPolicies: Record<string, unknown>): Promise<void> {
-      await store.savePolicy(seedId, chainId, newPolicies)
+      await store.savePolicy(seedId, chainId, {
+        policies: (newPolicies as Record<string, unknown>).policies as unknown[] || [],
+        signature: (newPolicies as Record<string, unknown>).signature as Record<string, unknown> || {}
+      })
     },
     getApprovalBroker (): SignedApprovalBroker {
       return broker

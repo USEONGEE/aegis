@@ -4,20 +4,23 @@ import Database from 'better-sqlite3'
 import type BetterSqlite3 from 'better-sqlite3'
 import {
   ApprovalStore,
-  type SignedPolicy,
+  type PolicyInput,
   type StoredPolicy,
+  type ApprovalType,
   type ApprovalRequest,
   type PendingApprovalRequest,
   type HistoryEntry,
   type DeviceRecord,
+  type JournalInput,
   type CronInput,
+  type StoredCron,
   type SeedRecord,
   type JournalEntry,
   type HistoryQueryOpts,
   type JournalQueryOpts,
   type SignedApproval
 } from './approval-store.js'
-import type { PendingRequest, StoredHistoryEntry, CronRecord, StoredJournalEntry } from './store-types.js'
+import type { PendingApprovalRow, StoredHistoryEntry, CronRow, StoredJournalEntry } from './store-types.js'
 
 /**
  * SQLite-backed implementation of ApprovalStore.
@@ -143,7 +146,7 @@ export class SqliteApprovalStore extends ApprovalStore {
     return row || null
   }
 
-  override async savePolicy (seedId: string, chainId: number, signedPolicy: SignedPolicy): Promise<void> {
+  override async savePolicy (seedId: string, chainId: number, input: PolicyInput): Promise<void> {
     const existing = await this.loadPolicy(seedId, chainId)
     const version = existing ? existing.policy_version + 1 : 1
     const now = Date.now()
@@ -159,8 +162,8 @@ export class SqliteApprovalStore extends ApprovalStore {
     `).run(
       seedId,
       chainId,
-      signedPolicy.policies_json || JSON.stringify(signedPolicy.policies || {}),
-      signedPolicy.signature_json || JSON.stringify(signedPolicy.signature || {}),
+      JSON.stringify(input.policies),
+      JSON.stringify(input.signature),
       version,
       now
     )
@@ -188,11 +191,11 @@ export class SqliteApprovalStore extends ApprovalStore {
     if (seedId) { sql += ' AND seed_id = ?'; params.push(seedId) }
     if (type) { sql += ' AND type = ?'; params.push(type) }
     if (chainId !== null && chainId !== undefined) { sql += ' AND chain_id = ?'; params.push(chainId) }
-    const rows = this._db!.prepare(sql).all(...params) as PendingRequest[]
+    const rows = this._db!.prepare(sql).all(...params) as PendingApprovalRow[]
     return rows.map(p => ({
       requestId: p.request_id,
       seedId: p.seed_id,
-      type: p.type,
+      type: p.type as ApprovalType,
       chainId: p.chain_id,
       targetHash: p.target_hash,
       metadata: p.metadata_json ? JSON.parse(p.metadata_json) as Record<string, unknown> : undefined,
@@ -200,11 +203,20 @@ export class SqliteApprovalStore extends ApprovalStore {
     }))
   }
 
-  override async loadPendingByRequestId (requestId: string): Promise<PendingRequest | null> {
+  override async loadPendingByRequestId (requestId: string): Promise<PendingApprovalRequest | null> {
     const row = this._db!.prepare(
       'SELECT * FROM pending_requests WHERE request_id = ?'
-    ).get(requestId) as PendingRequest | undefined
-    return row || null
+    ).get(requestId) as PendingApprovalRow | undefined
+    if (!row) return null
+    return {
+      requestId: row.request_id,
+      seedId: row.seed_id,
+      type: row.type as ApprovalType,
+      chainId: row.chain_id,
+      targetHash: row.target_hash,
+      metadata: row.metadata_json ? JSON.parse(row.metadata_json) as Record<string, unknown> : undefined,
+      createdAt: row.created_at
+    }
   }
 
   override async savePendingApproval (seedId: string, request: ApprovalRequest): Promise<void> {
@@ -317,27 +329,38 @@ export class SqliteApprovalStore extends ApprovalStore {
 
   // --- Cron ---
 
-  override async listCrons (seedId?: string): Promise<CronRecord[]> {
-    if (seedId) {
-      return this._db!.prepare('SELECT * FROM crons WHERE seed_id = ?').all(seedId) as CronRecord[]
-    }
-    return this._db!.prepare('SELECT * FROM crons').all() as CronRecord[]
+  override async listCrons (seedId?: string): Promise<StoredCron[]> {
+    const rows = seedId
+      ? this._db!.prepare('SELECT * FROM crons WHERE seed_id = ?').all(seedId) as CronRow[]
+      : this._db!.prepare('SELECT * FROM crons').all() as CronRow[]
+    return rows.map(c => ({
+      id: c.id,
+      seedId: c.seed_id,
+      sessionId: c.session_id,
+      interval: c.interval,
+      prompt: c.prompt,
+      chainId: c.chain_id,
+      createdAt: c.created_at,
+      lastRunAt: c.last_run_at,
+      isActive: c.is_active === 1
+    }))
   }
 
-  override async saveCron (seedId: string, cron: CronInput): Promise<void> {
-    const id = cron.id || randomUUID()
+  override async saveCron (seedId: string, cron: CronInput): Promise<string> {
+    const id = randomUUID()
     this._db!.prepare(`
       INSERT INTO crons (id, seed_id, session_id, interval, prompt, chain_id, created_at, is_active)
       VALUES (?, ?, ?, ?, ?, ?, ?, 1)
     `).run(
       id,
       seedId,
-      cron.sessionId || '',
+      cron.sessionId,
       cron.interval,
       cron.prompt,
-      cron.chainId ?? null,
-      cron.createdAt || Date.now()
+      cron.chainId,
+      Date.now()
     )
+    return id
   }
 
   override async removeCron (cronId: string): Promise<void> {
@@ -432,7 +455,7 @@ export class SqliteApprovalStore extends ApprovalStore {
     }
   }
 
-  override async saveJournalEntry (entry: JournalEntry): Promise<void> {
+  override async saveJournalEntry (entry: JournalInput): Promise<void> {
     const now = Date.now()
     this._db!.prepare(`
       INSERT INTO execution_journal (intent_id, seed_id, chain_id, target_hash, status, tx_hash, created_at, updated_at)
@@ -443,9 +466,9 @@ export class SqliteApprovalStore extends ApprovalStore {
       entry.chainId,
       entry.targetHash,
       entry.status,
-      entry.txHash ?? null,
-      entry.createdAt || now,
-      entry.updatedAt || now
+      null,
+      now,
+      now
     )
   }
 

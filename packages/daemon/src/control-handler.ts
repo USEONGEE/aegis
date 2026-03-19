@@ -39,7 +39,7 @@ export interface ControlResult {
 }
 
 interface ApprovalStoreReader {
-  loadPendingByRequestId (requestId: string): Promise<{ request_id: string; seed_id: string; type: string; chain_id: number; target_hash: string; metadata_json: string | null; created_at: number } | null>
+  loadPendingByRequestId (requestId: string): Promise<{ requestId: string; seedId: string; type: string; chainId: number; targetHash: string; metadata?: Record<string, unknown>; createdAt: number } | null>
   getPolicyVersion (seedId: string, chainId: number): Promise<number>
 }
 
@@ -110,10 +110,10 @@ export async function handleControlMessage (
         if (approvalStore && payload.requestId) {
           const pending = await approvalStore.loadPendingByRequestId(payload.requestId)
           if (pending) {
-            context.expectedTargetHash = pending.target_hash
-            const policyVersion = await approvalStore.getPolicyVersion(pending.seed_id, pending.chain_id)
+            context.expectedTargetHash = pending.targetHash
+            const policyVersion = await approvalStore.getPolicyVersion(pending.seedId, pending.chainId)
             context.currentPolicyVersion = policyVersion
-            logger.debug({ requestId: payload.requestId, targetHash: pending.target_hash, policyVersion }, 'TX context loaded from server-side pending')
+            logger.debug({ requestId: payload.requestId, targetHash: pending.targetHash, policyVersion }, 'TX context loaded from server-side pending')
           } else {
             logger.warn({ requestId: payload.requestId }, 'No pending request found for tx_approval')
           }
@@ -144,8 +144,8 @@ export async function handleControlMessage (
         if (approvalStore && payload.requestId) {
           const pending = await approvalStore.loadPendingByRequestId(payload.requestId)
           if (pending) {
-            context.expectedTargetHash = pending.target_hash
-            logger.debug({ requestId: payload.requestId, targetHash: pending.target_hash }, 'Policy context loaded from server-side pending')
+            context.expectedTargetHash = pending.targetHash
+            logger.debug({ requestId: payload.requestId, targetHash: pending.targetHash }, 'Policy context loaded from server-side pending')
           } else {
             logger.warn({ requestId: payload.requestId }, 'No pending request found for policy_approval')
           }

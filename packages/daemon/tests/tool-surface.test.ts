@@ -49,13 +49,18 @@ function createMockWdk (overrides: Record<string, any> = {}): any {
 
 function createMockStore (overrides: Record<string, any> = {}): any {
   return {
-    loadPolicy: jest.fn<() => Promise<{ policies: Array<{ type: string; maxUsd: number }> }>>().mockResolvedValue({
-      policies: [{ type: 'auto', maxUsd: 100 }]
+    loadPolicy: jest.fn<() => Promise<{ policies_json: string; signature_json: string; seed_id: string; chain_id: number; policy_version: number; updated_at: number }>>().mockResolvedValue({
+      policies_json: JSON.stringify([{ type: 'auto', maxUsd: 100 }]),
+      signature_json: '{}',
+      seed_id: 'test-seed',
+      chain_id: 1,
+      policy_version: 1,
+      updated_at: Date.now()
     }),
     loadPendingApprovals: jest.fn<() => Promise<Array<{ requestId: string; type: string; status: string }>>>().mockResolvedValue([
       { requestId: 'req_1', type: 'policy', status: 'pending' }
     ]),
-    saveCron: jest.fn<() => Promise<undefined>>().mockResolvedValue(undefined),
+    saveCron: jest.fn<() => Promise<string>>().mockResolvedValue('mock-cron-id'),
     listCrons: jest.fn<() => Promise<Array<{ id: string; interval: string; prompt: string }>>>().mockResolvedValue([
       { id: 'cron_1', interval: '5m', prompt: 'check balance' }
     ]),
@@ -263,7 +268,7 @@ describe('executeToolCall', () => {
     }, ctx)
 
     expect(result.status).toBe('registered')
-    expect(result.cronId).toBeDefined()
+    expect(result.cronId).toBe('mock-cron-id')
     expect(ctx.store.saveCron).toHaveBeenCalledWith('seed_test_001', expect.objectContaining({
       interval: '5m',
       prompt: 'check ETH balance',

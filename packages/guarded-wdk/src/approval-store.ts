@@ -1,5 +1,5 @@
 // Internal store row types (not part of public API)
-import type { PendingRequest, CronRecord } from './store-types.js'
+import type { PendingApprovalRow, CronRow } from './store-types.js'
 
 // --- Domain interfaces ---
 
@@ -28,32 +28,25 @@ export interface ApprovalRequest {
   createdAt: number
 }
 
-export interface SignedPolicy {
-  policies_json?: string
-  signature_json?: string
-  policies?: unknown[]
-  signature?: Record<string, unknown>
-  [key: string]: unknown
+export interface PolicyInput {
+  policies: unknown[]
+  signature: Record<string, unknown>
 }
 
-export interface StoredPolicy extends SignedPolicy {
+export interface StoredPolicy {
   seed_id: string
   chain_id: number
+  policies_json: string
+  signature_json: string
   policy_version: number
   updated_at: number
 }
 
-export interface PendingApprovalRequest {
-  requestId: string
+export interface PendingApprovalRequest extends ApprovalRequest {
   seedId: string
-  type: string
-  chainId: number
-  targetHash: string
-  metadata?: Record<string, unknown>
-  createdAt: number
 }
 
-// PendingRequest: see store-types.ts (@internal)
+// PendingApprovalRow: see store-types.ts (@internal)
 
 export interface HistoryEntry {
   seedId: string
@@ -78,15 +71,25 @@ export interface DeviceRecord {
   revoked_at: number | null
 }
 
-// CronRecord: see store-types.ts (@internal)
+// CronRow: see store-types.ts (@internal)
 
 export interface CronInput {
-  id?: string
-  sessionId?: string
+  sessionId: string
   interval: string
   prompt: string
-  chainId?: number | null
-  createdAt?: number
+  chainId: number | null
+}
+
+export interface StoredCron {
+  id: string
+  seedId: string
+  sessionId: string
+  interval: string
+  prompt: string
+  chainId: number | null
+  createdAt: number
+  lastRunAt: number | null
+  isActive: boolean
 }
 
 export interface SeedRecord {
@@ -97,15 +100,23 @@ export interface SeedRecord {
   is_active: number
 }
 
-export interface JournalEntry {
-  intentId?: string
-  seedId?: string
+export interface JournalInput {
+  intentId: string
+  seedId: string
   chainId: number
-  targetHash?: string
+  targetHash: string
   status: string
-  txHash?: string | null
-  createdAt?: number
-  updatedAt?: number
+}
+
+export interface JournalEntry {
+  intentId: string
+  seedId: string
+  chainId: number
+  targetHash: string
+  status: string
+  txHash: string | null
+  createdAt: number
+  updatedAt: number
 }
 
 // StoredJournalEntry moved to store-types.ts (@internal)
@@ -132,14 +143,14 @@ export abstract class ApprovalStore {
   // --- Active Policy ---
 
   async loadPolicy (_seedId: string, _chainId: number): Promise<StoredPolicy | null> { throw new Error('Not implemented') }
-  async savePolicy (_seedId: string, _chainId: number, _signedPolicy: SignedPolicy): Promise<void> { throw new Error('Not implemented') }
+  async savePolicy (_seedId: string, _chainId: number, _input: PolicyInput): Promise<void> { throw new Error('Not implemented') }
   async getPolicyVersion (_seedId: string, _chainId: number): Promise<number> { throw new Error('Not implemented') }
   async listPolicyChains (_seedId: string): Promise<string[]> { throw new Error('Not implemented') }
 
   // --- Pending Requests ---
 
   async loadPendingApprovals (_seedId: string | null, _type: string | null, _chainId: number | null): Promise<PendingApprovalRequest[]> { throw new Error('Not implemented') }
-  async loadPendingByRequestId (_requestId: string): Promise<PendingRequest | null> { throw new Error('Not implemented') }
+  async loadPendingByRequestId (_requestId: string): Promise<PendingApprovalRequest | null> { throw new Error('Not implemented') }
   async savePendingApproval (_seedId: string, _request: ApprovalRequest): Promise<void> { throw new Error('Not implemented') }
   async removePendingApproval (_requestId: string): Promise<void> { throw new Error('Not implemented') }
 
@@ -163,8 +174,8 @@ export abstract class ApprovalStore {
 
   // --- Cron ---
 
-  async listCrons (_seedId?: string): Promise<CronRecord[]> { throw new Error('Not implemented') }
-  async saveCron (_seedId: string, _cron: CronInput): Promise<void> { throw new Error('Not implemented') }
+  async listCrons (_seedId?: string): Promise<StoredCron[]> { throw new Error('Not implemented') }
+  async saveCron (_seedId: string, _cron: CronInput): Promise<string> { throw new Error('Not implemented') }
   async removeCron (_cronId: string): Promise<void> { throw new Error('Not implemented') }
   async updateCronLastRun (_cronId: string, _timestamp: number): Promise<void> { throw new Error('Not implemented') }
 
@@ -180,7 +191,7 @@ export abstract class ApprovalStore {
   // --- Execution Journal ---
 
   async getJournalEntry (_intentId: string): Promise<JournalEntry | null> { throw new Error('Not implemented') }
-  async saveJournalEntry (_entry: JournalEntry): Promise<void> { throw new Error('Not implemented') }
+  async saveJournalEntry (_entry: JournalInput): Promise<void> { throw new Error('Not implemented') }
   async updateJournalStatus (_intentId: string, _status: string, _txHash?: string): Promise<void> { throw new Error('Not implemented') }
   async listJournal (_opts: JournalQueryOpts): Promise<JournalEntry[]> { throw new Error('Not implemented') }
 

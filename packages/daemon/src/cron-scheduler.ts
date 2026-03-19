@@ -36,7 +36,7 @@ export interface CronListItem {
 }
 
 interface CronStore {
-  listCrons (seedId: string): Promise<any[]>
+  listCrons (seedId: string): Promise<Array<{ id: string; seedId: string; sessionId: string; interval: string; prompt: string; chainId: number | null; createdAt: number; lastRunAt: number | null; isActive: boolean }>>
   removeCron (cronId: string): Promise<void>
   updateCronLastRun (cronId: string, timestamp: number): Promise<void>
 }
@@ -99,15 +99,15 @@ export class CronScheduler {
     // Load existing crons from store
     const crons = await this._store.listCrons(this._seedId)
     for (const cron of crons) {
-      if (cron.is_active) {
+      if (cron.isActive) {
         this._crons.set(cron.id, {
           id: cron.id,
-          sessionId: cron.session_id,
+          sessionId: cron.sessionId,
           interval: cron.interval,
           intervalMs: parseInterval(cron.interval),
           prompt: cron.prompt,
-          chainId: cron.chain_id,
-          lastRunAt: cron.last_run_at || 0
+          chainId: cron.chainId,
+          lastRunAt: cron.lastRunAt || 0
         })
       }
     }

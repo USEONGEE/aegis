@@ -93,8 +93,8 @@ export async function createGuardedWDK (config: GuardedWDKConfig): Promise<Guard
   if (approvalStore) {
     for (const chainKey of Object.keys(wallets || {})) {
       const stored = await approvalStore.loadPolicy(seed, Number(chainKey))
-      if (stored && stored.policies) {
-        policiesStore[chainKey] = deepCopy(stored) as Record<string, unknown>
+      if (stored && stored.policies_json) {
+        policiesStore[chainKey] = deepCopy({ ...stored, policies: JSON.parse(stored.policies_json) }) as Record<string, unknown>
       }
     }
   }
@@ -153,7 +153,10 @@ export async function createGuardedWDK (config: GuardedWDKConfig): Promise<Guard
       // Write-through: persist to store first, then update memory cache.
       // If store write fails, memory is not updated (consistent state).
       if (approvalStore) {
-        await approvalStore.savePolicy(seed, chainId, newPolicies as import('./approval-store.js').SignedPolicy)
+        await approvalStore.savePolicy(seed, chainId, {
+          policies: newPolicies.policies,
+          signature: (newPolicies as Record<string, unknown>).signature as Record<string, unknown> || {}
+        })
       }
       policiesStore = {
         ...policiesStore,

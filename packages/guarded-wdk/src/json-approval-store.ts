@@ -5,20 +5,23 @@ import { join } from 'node:path'
 import { homedir } from 'node:os'
 import {
   ApprovalStore,
-  type SignedPolicy,
+  type PolicyInput,
   type StoredPolicy,
+  type ApprovalType,
   type ApprovalRequest,
   type PendingApprovalRequest,
   type HistoryEntry,
   type DeviceRecord,
+  type JournalInput,
   type CronInput,
+  type StoredCron,
   type SeedRecord,
   type JournalEntry,
   type HistoryQueryOpts,
   type JournalQueryOpts,
   type SignedApproval
 } from './approval-store.js'
-import type { PendingRequest, StoredHistoryEntry, CronRecord, StoredJournalEntry } from './store-types.js'
+import type { PendingApprovalRow, StoredHistoryEntry, CronRow, StoredJournalEntry } from './store-types.js'
 
 interface SeedsFile {
   seeds: SeedRecord[]
@@ -97,7 +100,7 @@ export class JsonApprovalStore extends ApprovalStore {
     return policies[key] || null
   }
 
-  override async savePolicy (seedId: string, chainId: number, signedPolicy: SignedPolicy): Promise<void> {
+  override async savePolicy (seedId: string, chainId: number, input: PolicyInput): Promise<void> {
     const policies = await this._read<Record<string, StoredPolicy>>('policies.json') || {}
     const key = `${seedId}:${chainId}`
     const existing = policies[key]
@@ -105,7 +108,8 @@ export class JsonApprovalStore extends ApprovalStore {
     policies[key] = {
       seed_id: seedId,
       chain_id: chainId,
-      ...signedPolicy,
+      policies_json: JSON.stringify(input.policies),
+      signature_json: JSON.stringify(input.signature),
       policy_version: version,
       updated_at: Date.now()
     }
@@ -128,7 +132,7 @@ export class JsonApprovalStore extends ApprovalStore {
   // --- Pending Requests ---
 
   override async loadPendingApprovals (seedId: string | null, type: string | null, chainId: number | null): Promise<PendingApprovalRequest[]> {
-    const pending = await this._read<PendingRequest[]>('pending.json') || []
+    const pending = await this._read<PendingApprovalRow[]>('pending.json') || []
     return pending
       .filter(p => {
         if (seedId && p.seed_id !== seedId) return false
@@ -139,7 +143,7 @@ export class JsonApprovalStore extends ApprovalStore {
       .map(p => ({
         requestId: p.request_id,
         seedId: p.seed_id,
-        type: p.type,
+        type: p.type as ApprovalType,
         chainId: p.chain_id,
         targetHash: p.target_hash,
         metadata: p.metadata_json ? JSON.parse(p.metadata_json) as Record<string, unknown> : undefined,
@@ -147,13 +151,23 @@ export class JsonApprovalStore extends ApprovalStore {
       }))
   }
 
-  override async loadPendingByRequestId (requestId: string): Promise<PendingRequest | null> {
-    const pending = await this._read<PendingRequest[]>('pending.json') || []
-    return pending.find(p => p.request_id === requestId) || null
+  override async loadPendingByRequestId (requestId: string): Promise<PendingApprovalRequest | null> {
+    const pending = await this._read<PendingApprovalRow[]>('pending.json') || []
+    const row = pending.find(p => p.request_id === requestId)
+    if (!row) return null
+    return {
+      requestId: row.request_id,
+      seedId: row.seed_id,
+      type: row.type as ApprovalType,
+      chainId: row.chain_id,
+      targetHash: row.target_hash,
+      metadata: row.metadata_json ? JSON.parse(row.metadata_json) as Record<string, unknown> : undefined,
+      createdAt: row.created_at
+    }
   }
 
   override async savePendingApproval (seedId: string, request: ApprovalRequest): Promise<void> {
-    const pending = await this._read<PendingRequest[]>('pending.json') || []
+    const pending = await this._read<PendingApprovalRow[]>('pending.json') || []
     pending.push({
       request_id: request.requestId,
       seed_id: seedId,
@@ -167,7 +181,7 @@ export class JsonApprovalStore extends ApprovalStore {
   }
 
   override async removePendingApproval (requestId: string): Promise<void> {
-    const pending = await this._read<PendingRequest[]>('pending.json') || []
+    const pending = await this._read<PendingApprovalRow[]>('pending.json') || []
     const filtered = pending.filter(p => p.request_id !== requestId)
     await this._write('pending.json', filtered)
   }
@@ -274,38 +288,48 @@ export class JsonApprovalStore extends ApprovalStore {
 
   // --- Cron ---
 
-  override async listCrons (seedId?: string): Promise<CronRecord[]> {
-    const crons = await this._read<CronRecord[]>('crons.json') || []
-    if (seedId) {
-      return crons.filter(c => c.seed_id === seedId)
-    }
-    return crons
+  override async listCrons (seedId?: string): Promise<StoredCron[]> {
+    const crons = await this._read<CronRow[]>('crons.json') || []
+    const filtered = seedId ? crons.filter(c => c.seed_id === seedId) : crons
+    return filtered.map(c => ({
+      id: c.id,
+      seedId: c.seed_id,
+      sessionId: c.session_id,
+      interval: c.interval,
+      prompt: c.prompt,
+      chainId: c.chain_id,
+      createdAt: c.created_at,
+      lastRunAt: c.last_run_at,
+      isActive: c.is_active === 1
+    }))
   }
 
-  override async saveCron (seedId: string, cron: CronInput): Promise<void> {
-    const crons = await this._read<CronRecord[]>('crons.json') || []
+  override async saveCron (seedId: string, cron: CronInput): Promise<string> {
+    const crons = await this._read<CronRow[]>('crons.json') || []
+    const id = randomUUID()
     crons.push({
-      id: cron.id || randomUUID(),
+      id,
       seed_id: seedId,
-      session_id: cron.sessionId || '',
+      session_id: cron.sessionId,
       interval: cron.interval,
       prompt: cron.prompt,
-      chain_id: cron.chainId ?? null,
-      created_at: cron.createdAt || Date.now(),
+      chain_id: cron.chainId,
+      created_at: Date.now(),
       last_run_at: null,
       is_active: 1
     })
     await this._write('crons.json', crons)
+    return id
   }
 
   override async removeCron (cronId: string): Promise<void> {
-    const crons = await this._read<CronRecord[]>('crons.json') || []
+    const crons = await this._read<CronRow[]>('crons.json') || []
     const filtered = crons.filter(c => c.id !== cronId)
     await this._write('crons.json', filtered)
   }
 
   override async updateCronLastRun (cronId: string, timestamp: number): Promise<void> {
-    const crons = await this._read<CronRecord[]>('crons.json') || []
+    const crons = await this._read<CronRow[]>('crons.json') || []
     const cron = crons.find(c => c.id === cronId)
     if (cron) {
       cron.last_run_at = timestamp
@@ -390,17 +414,18 @@ export class JsonApprovalStore extends ApprovalStore {
     }
   }
 
-  override async saveJournalEntry (entry: JournalEntry): Promise<void> {
+  override async saveJournalEntry (entry: JournalInput): Promise<void> {
     const journal = await this._read<StoredJournalEntry[]>('journal.json') || []
+    const now = Date.now()
     journal.push({
-      intent_id: entry.intentId || '',
-      seed_id: entry.seedId || '',
+      intent_id: entry.intentId,
+      seed_id: entry.seedId,
       chain_id: entry.chainId,
-      target_hash: entry.targetHash || '',
+      target_hash: entry.targetHash,
       status: entry.status,
-      tx_hash: entry.txHash ?? null,
-      created_at: entry.createdAt || Date.now(),
-      updated_at: entry.updatedAt || Date.now()
+      tx_hash: null,
+      created_at: now,
+      updated_at: now
     })
     await this._write('journal.json', journal)
   }

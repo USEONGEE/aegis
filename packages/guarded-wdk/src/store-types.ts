@@ -4,7 +4,7 @@
  */
 
 /** @internal snake_case representation for store implementations. */
-export interface PendingRequest {
+export interface PendingApprovalRow {
   request_id: string
   seed_id: string
   type: string
@@ -29,7 +29,7 @@ export interface StoredHistoryEntry {
 }
 
 /** @internal */
-export interface CronRecord {
+export interface CronRow {
   id: string
   seed_id: string
   session_id: string

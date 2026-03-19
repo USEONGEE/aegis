@@ -88,9 +88,9 @@ describe('SqliteApprovalStore', () => {
 
     test('removeSeed cleans up related data', async () => {
       const s = await store.addSeed('test', 'mnemonic')
-      await store.savePolicy(s.id, 1, { policies_json: '{}', signature_json: '{}' })
+      await store.savePolicy(s.id, 1, { policies: [], signature: {} })
       await store.savePendingApproval(s.id, { requestId: 'r1', type: 'tx', chainId: 1, targetHash: '0x1', createdAt: Date.now() })
-      await store.saveCron(s.id, { id: 'c1', sessionId: 'sess', interval: '* * * * *', prompt: 'test' })
+      await store.saveCron(s.id, { sessionId: 'sess', interval: '* * * * *', prompt: 'test', chainId: null })
       await store.removeSeed(s.id)
 
       const policies = await store.loadPolicy(s.id, 1)
@@ -119,19 +119,19 @@ describe('SqliteApprovalStore', () => {
 
     test('savePolicy + loadPolicy round-trips', async () => {
       await store.savePolicy(seedId, 1, {
-        policies_json: '{"maxAmount":"1000"}',
-        signature_json: '{"sig":"abc"}'
+        policies: [{ maxAmount: '1000' }],
+        signature: { sig: 'abc' }
       })
       const loaded = await store.loadPolicy(seedId, 1)
       expect(loaded!.seed_id).toBe(seedId)
       expect(loaded!.chain_id).toBe(1)
-      expect(loaded!.policies_json).toBe('{"maxAmount":"1000"}')
+      expect(loaded!.policies_json).toBe('[{"maxAmount":"1000"}]')
       expect(loaded!.policy_version).toBe(1)
     })
 
     test('savePolicy increments version on update', async () => {
-      await store.savePolicy(seedId, 1, { policies_json: '{}', signature_json: '{}' })
-      await store.savePolicy(seedId, 1, { policies_json: '{"v":2}', signature_json: '{}' })
+      await store.savePolicy(seedId, 1, { policies: [], signature: {} })
+      await store.savePolicy(seedId, 1, { policies: [{ v: 2 }], signature: {} })
       const loaded = await store.loadPolicy(seedId, 1)
       expect(loaded!.policy_version).toBe(2)
     })
@@ -142,23 +142,30 @@ describe('SqliteApprovalStore', () => {
     })
 
     test('getPolicyVersion returns current version', async () => {
-      await store.savePolicy(seedId, 1, { policies_json: '{}', signature_json: '{}' })
+      await store.savePolicy(seedId, 1, { policies: [], signature: {} })
       const v = await store.getPolicyVersion(seedId, 1)
       expect(v).toBe(1)
     })
 
     test('policies are scoped to seed+chain', async () => {
       const s2 = await store.addSeed('second', 'm2')
-      await store.savePolicy(seedId, 1, { policies_json: '{"s1":"eth"}', signature_json: '{}' })
-      await store.savePolicy(s2.id, 1, { policies_json: '{"s2":"eth"}', signature_json: '{}' })
-      await store.savePolicy(seedId, 900, { policies_json: '{"s1":"sol"}', signature_json: '{}' })
+      await store.savePolicy(seedId, 1, { policies: [{ s1: 'eth' }], signature: {} })
+      await store.savePolicy(s2.id, 1, { policies: [{ s2: 'eth' }], signature: {} })
+      await store.savePolicy(seedId, 900, { policies: [{ s1: 'sol' }], signature: {} })
 
       const p1 = await store.loadPolicy(seedId, 1)
-      expect(p1!.policies_json).toBe('{"s1":"eth"}')
+      expect(p1!.policies_json).toBe('[{"s1":"eth"}]')
       const p2 = await store.loadPolicy(s2.id, 1)
-      expect(p2!.policies_json).toBe('{"s2":"eth"}')
+      expect(p2!.policies_json).toBe('[{"s2":"eth"}]')
       const p3 = await store.loadPolicy(seedId, 900)
-      expect(p3!.policies_json).toBe('{"s1":"sol"}')
+      expect(p3!.policies_json).toBe('[{"s1":"sol"}]')
+    })
+
+    test('savePolicy with empty policies array round-trips', async () => {
+      await store.savePolicy(seedId, 1, { policies: [], signature: {} })
+      const loaded = await store.loadPolicy(seedId, 1)
+      expect(loaded!.policies_json).toBe('[]')
+      expect(loaded!.signature_json).toBe('{}')
     })
   })
 
@@ -206,6 +213,18 @@ describe('SqliteApprovalStore', () => {
       await store.removePendingApproval('req-1')
       const pending = await store.loadPendingApprovals(seedId, null, null)
       expect(pending).toHaveLength(0)
+    })
+
+    test('loadPendingByRequestId returns camelCase PendingApprovalRequest', async () => {
+      await store.savePendingApproval(seedId, { requestId: 'req-cc', type: 'tx', chainId: 1, targetHash: '0xcc', createdAt: 12345 })
+      const result = await store.loadPendingByRequestId('req-cc')
+      expect(result).not.toBeNull()
+      expect(result!.requestId).toBe('req-cc')
+      expect(result!.seedId).toBe(seedId)
+      expect(result!.type).toBe('tx')
+      expect(result!.chainId).toBe(1)
+      expect(result!.targetHash).toBe('0xcc')
+      expect(result!.createdAt).toBe(12345)
     })
   })
 
@@ -351,7 +370,6 @@ describe('SqliteApprovalStore', () => {
 
     test('saveCron + listCrons round-trips', async () => {
       await store.saveCron(seedId, {
-        id: 'cron-1',
         sessionId: 'sess-1',
         interval: '*/5 * * * *',
         prompt: 'check balance',
@@ -359,40 +377,62 @@ describe('SqliteApprovalStore', () => {
       })
       const crons = await store.listCrons(seedId)
       expect(crons).toHaveLength(1)
-      expect(crons[0].id).toBe('cron-1')
+      expect(crons[0].id).toBeTruthy()
       expect(crons[0].prompt).toBe('check balance')
-      expect(crons[0].is_active).toBe(1)
+      expect(crons[0].isActive).toBe(true)
     })
 
     test('listCrons filters by seedId', async () => {
       const s2 = await store.addSeed('second', 'm2')
-      await store.saveCron(seedId, { id: 'c1', sessionId: 's1', interval: '* * * * *', prompt: 'p1' })
-      await store.saveCron(s2.id, { id: 'c2', sessionId: 's2', interval: '* * * * *', prompt: 'p2' })
+      await store.saveCron(seedId, { sessionId: 's1', interval: '* * * * *', prompt: 'p1', chainId: null })
+      await store.saveCron(s2.id, { sessionId: 's2', interval: '* * * * *', prompt: 'p2', chainId: null })
 
       const crons1 = await store.listCrons(seedId)
       expect(crons1).toHaveLength(1)
-      expect(crons1[0].id).toBe('c1')
+      expect(crons1[0].prompt).toBe('p1')
     })
 
     test('removeCron deletes cron', async () => {
-      await store.saveCron(seedId, { id: 'c1', sessionId: 's1', interval: '* * * * *', prompt: 'p' })
-      await store.removeCron('c1')
+      await store.saveCron(seedId, { sessionId: 's1', interval: '* * * * *', prompt: 'p', chainId: null })
       const crons = await store.listCrons(seedId)
-      expect(crons).toHaveLength(0)
+      await store.removeCron(crons[0].id)
+      const after = await store.listCrons(seedId)
+      expect(after).toHaveLength(0)
     })
 
     test('updateCronLastRun updates timestamp', async () => {
-      await store.saveCron(seedId, { id: 'c1', sessionId: 's1', interval: '* * * * *', prompt: 'p' })
-      await store.updateCronLastRun('c1', 99999)
+      await store.saveCron(seedId, { sessionId: 's1', interval: '* * * * *', prompt: 'p', chainId: null })
       const crons = await store.listCrons(seedId)
-      expect(crons[0].last_run_at).toBe(99999)
+      await store.updateCronLastRun(crons[0].id, 99999)
+      const after = await store.listCrons(seedId)
+      expect(after[0].lastRunAt).toBe(99999)
     })
 
-    test('saveCron auto-generates id if not provided', async () => {
-      await store.saveCron(seedId, { sessionId: 's1', interval: '* * * * *', prompt: 'p' })
+    test('saveCron auto-generates id', async () => {
+      await store.saveCron(seedId, { sessionId: 's1', interval: '* * * * *', prompt: 'p', chainId: null })
       const crons = await store.listCrons(seedId)
       expect(crons).toHaveLength(1)
       expect(crons[0].id).toBeTruthy()
+    })
+
+    test('saveCron with chainId null round-trips', async () => {
+      await store.saveCron(seedId, { sessionId: 's1', interval: '*/5 * * * *', prompt: 'check all', chainId: null })
+      const crons = await store.listCrons(seedId)
+      expect(crons).toHaveLength(1)
+      expect(crons[0].chainId).toBeNull()
+    })
+
+    test('listCrons returns camelCase StoredCron with boolean isActive', async () => {
+      await store.saveCron(seedId, { sessionId: 's1', interval: '*/5 * * * *', prompt: 'p', chainId: 1 })
+      const crons = await store.listCrons(seedId)
+      expect(crons).toHaveLength(1)
+      expect(crons[0].seedId).toBe(seedId)
+      expect(crons[0].sessionId).toBe('s1')
+      expect(crons[0].chainId).toBe(1)
+      expect(crons[0].createdAt).toBeGreaterThan(0)
+      expect(crons[0].lastRunAt).toBeNull()
+      expect(typeof crons[0].isActive).toBe('boolean')
+      expect(crons[0].isActive).toBe(true)
     })
   })
 
@@ -445,9 +485,9 @@ describe('SqliteApprovalStore', () => {
         seedId,
         chainId: 1,
         targetHash: '0xabc',
-        status: 'received',
-        txHash: '0xold'
+        status: 'received'
       })
+      await store.updateJournalStatus('int-1', 'pending', '0xold')
       await store.updateJournalStatus('int-1', 'settled', undefined)
       const entry = await store.getJournalEntry('int-1')
       expect(entry!.status).toBe('settled')

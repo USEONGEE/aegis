@@ -477,7 +477,7 @@ export async function executeToolCall (name: string, args: ToolArgs, wdkContext:
       try {
         const chainId = resolveChainId(chain)
         const policy = await store.loadPolicy(seedId, chainId)
-        return { policies: policy?.policies || [] }
+        return { policies: policy ? JSON.parse(policy.policies_json) : [] }
       } catch (err: any) {
         logger.error({ err, name: 'policyList' }, 'Tool execution error')
         return { status: 'error', error: err.message }
@@ -530,9 +530,7 @@ export async function executeToolCall (name: string, args: ToolArgs, wdkContext:
       const { interval, prompt, chain, sessionId } = args as RegisterCronArgs
       try {
         const chainId = resolveChainId(chain)
-        const cronId = randomUUID()
-        await store.saveCron(seedId, {
-          id: cronId,
+        const cronId = await store.saveCron(seedId, {
           sessionId,
           interval,
           prompt,
