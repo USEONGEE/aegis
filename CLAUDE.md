@@ -16,6 +16,12 @@ AI DeFi Agent 서명 엔진 + 제어 인프라.
 - **Codex Session ID**: `/Users/mousebook/Documents/GitHub/WDK-APP/docs/phases/v0.1.8-evaluation-context`
 - **시작일**: 2026-03-19
 
+### v0.1.9 — Device → Signer 추상화
+- **상태**: Step 5 완료 (커밋 대기)
+- **문서**: [docs/phases/v0.1.9-signer-abstraction/](docs/phases/v0.1.9-signer-abstraction/)
+- **Codex Session ID**: `/Users/mousebook/Documents/GitHub/WDK-APP/docs/phases/v0.1.9-signer-abstraction`
+- **시작일**: 2026-03-19
+
 ## 프로젝트 구조
 
 ```
