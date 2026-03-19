@@ -55,7 +55,8 @@ WDK-APP은 6개 패키지(canonical, guarded-wdk, manifest, daemon, relay, app)�
                               ⇐ { hash, fee }
                                     │
                               tool-surface.ts
-                              │ journal.track(intentId) [GAP 13: 실제로는 'received'로 저장, 성공 시 'settled']
+                              │ journal.track(intentId, { seedId, chainId, targetHash }) → status: 'received'
+                              │ journal.updateStatus(intentId, 'settled', hash) → status: 'settled'
                               ⇐ { status: 'executed', hash, fee, chain }
                                     │
                               [OpenClaw API]
@@ -446,12 +447,94 @@ WDK-APP은 6개 패키지(canonical, guarded-wdk, manifest, daemon, relay, app)�
             tool-surface.ts
             │ 1차: canonical.intentHash(tx) → hash_abc
             │      journal.isDuplicate(hash_abc) → false
-            │      → 정상 실행 → journal.track(intentId) [GAP 13: 실제로는 'received'로 저장]
+            │      → 정상 실행 → journal.track(intentId, meta) → status: 'received'
+            │      → 성공 시 journal.updateStatus(intentId, 'settled', txHash)
             │
             │ 2차: canonical.intentHash(tx) → hash_abc
             │      journal.isDuplicate(hash_abc) → true (이미 broadcasted)
             │      → 즉시 반환: { status: 'duplicate', intentHash }
             │      → tx 실행하지 않음
+```
+
+---
+
+## Case 15: transfer (토큰 전송)
+
+```
+            OpenClaw: tool_call { name: 'transfer', args: { chain, to, token, amount } }
+                        │
+            tool-surface.ts
+            │ 1. canonical.intentHash({ chain, to, token, amount })
+            │ 2. journal.isDuplicate(hash) → false
+            │ 3. wdk.getAccount(chain, 0)
+            │ 4. account.transfer({ to, token, amount })
+            │    → guarded-middleware: policy 평가 (Case 1/2/3과 동일 흐름)
+            │ 5. journal.track(intentId, meta) → 'received'
+            │ 6. 성공 시 journal.updateStatus(intentId, 'settled', txHash)
+            ⇐ { status: 'executed', hash, fee, chain }
+```
+
+---
+
+## Case 16: getBalance (잔고 조회)
+
+```
+            OpenClaw: tool_call { name: 'getBalance', args: { chain, token? } }
+                        │
+            tool-surface.ts
+            │ 1. wdk.getAccount(chain, 0)
+            │ 2. account.getBalance(token)
+            │    → 읽기 전용: policy 평가 불필요
+            ⇐ { balance, token, chain }
+```
+
+---
+
+## Case 17: policyList (등록된 policy 목록)
+
+```
+            OpenClaw: tool_call { name: 'policyList', args: { chain? } }
+                        │
+            tool-surface.ts
+            │ 1. store.loadPolicy(seedId, chain) 또는 전체 chain 순회
+            ⇐ { policies: [...] }
+```
+
+---
+
+## Case 18: policyPending (대기 중인 policy 요청)
+
+```
+            OpenClaw: tool_call { name: 'policyPending', args: {} }
+                        │
+            tool-surface.ts
+            │ 1. broker.getPending(seedId, 'policy', null)
+            ⇐ { pending: [...] }
+```
+
+---
+
+## Case 19: listCrons (cron job 목록)
+
+```
+            OpenClaw: tool_call { name: 'listCrons', args: {} }
+                        │
+            tool-surface.ts
+            │ 1. store.listCrons(seedId)
+            ⇐ { crons: [...] }
+```
+
+---
+
+## Case 20: removeCron (cron job 삭제)
+
+```
+            OpenClaw: tool_call { name: 'removeCron', args: { cronId } }
+                        │
+            tool-surface.ts
+            │ 1. store.removeCron(cronId)
+            │ 2. cronScheduler.remove(cronId)
+            ⇐ { status: 'removed', cronId }
 ```
 
 ---
@@ -528,10 +611,10 @@ WDK-APP은 6개 패키지(canonical, guarded-wdk, manifest, daemon, relay, app)�
 - **현재 코드**: wdk-host.ts에서 JsonApprovalStore 사용 (line 46)
 - **영향**: Case 13의 "SqliteApprovalStore(dbPath)" 서술이 부정확
 
-### Gap 8: 나머지 6개 tool 케이스 누락 (Medium)
+### ~~Gap 8: 나머지 6개 tool 케이스 누락 (Medium)~~ ✅ 해결됨
 - **문서화된 tool**: sendTransaction, policyRequest, registerCron
-- **누락된 tool**: transfer, getBalance, policyList, policyPending, listCrons, removeCron
-- **사유**: 핵심 흐름 중심으로 문서화, 나머지는 유사 패턴
+- **추가된 tool**: transfer (Case 15), getBalance (Case 16), policyList (Case 17), policyPending (Case 18), listCrons (Case 19), removeCron (Case 20)
+- **문서 추가 완료**: 6개 tool 케이스 모두 Case 15~20으로 문서화
 
 ### Gap 9: manifest schema 불일치 (Medium)
 - **설계**: manifest의 PolicyPermission이 guarded-wdk permission과 호환
@@ -553,19 +636,19 @@ WDK-APP은 6개 패키지(canonical, guarded-wdk, manifest, daemon, relay, app)�
 - **현재 코드**: updatePolicies()는 in-memory snapshot + store 갱신만 수행. countersign 로직 없음 (guarded-wdk-factory.ts:140)
 - **영향**: 보안 경계의 "daemon countersign ✅"이 현재 false
 
-### Gap 13: journal API 불일치 (Medium)
-- **설계**: journal.track(intentId, { status: 'broadcasted', hash })
+### ~~Gap 13: journal API 불일치 (Medium)~~ ✅ 해결됨
+- **설계**: journal.track(intentId, meta) → 'received', journal.updateStatus(intentId, 'settled', txHash)
 - **현재 코드**: journal.track()은 'received'로 저장 (execution-journal.ts:99), 성공 시 updateStatus(..., 'settled')로 갱신 (tool-surface.ts:261)
-- **영향**: Case 1/14의 journal 상태 설명이 실제 API와 다름
+- **문서 정정 완료**: Case 1/14의 journal 서술을 실제 API에 맞게 수정
 
 ### Gap 14: broker emitter 미설정 (Medium)
 - **설계**: broker가 PolicyApplied, PendingPolicyRequested 등 이벤트 emit
 - **현재 코드**: wdk-host.ts에서 emitter 없이 broker 생성 (line 66)
 - **영향**: Policy/approval 이벤트가 발생하지 않아 Activity 탭 업데이트 불가
 
-### Gap 15: Case 6 ApprovalRejected 이벤트 미구현 (Low)
+### ~~Gap 15: Case 6 ApprovalRejected 이벤트 미구현 (Low)~~ ✅ 해결됨
 - **설계**: policy 거부 시 ⚡ ApprovalRejected
-- **현재 코드**: signed-approval-broker.ts에 ApprovalRejected emit 없음 (line 129)
+- **구현 완료**: signed-approval-broker.ts의 policy_reject case에 `emit('ApprovalRejected', { type, requestId, timestamp })` 추가
 
 ### Gap 16: Pairing auth mismatch (Critical)
 - **설계**: app이 QR 스캔 → Relay 연결 → pairing_confirm 전송
@@ -587,15 +670,13 @@ WDK-APP은 6개 패키지(canonical, guarded-wdk, manifest, daemon, relay, app)�
 - **현재 코드**: App이 request_balances를 control로 보내고 balance_update/position_update를 기다리지만, daemon control-handler에 해당 경로 없음
 - **영향**: Dashboard 탭 데이터 표시 불가
 
-### Gap 20: chat streaming/error 미소비 (Medium)
+### ~~Gap 20: chat streaming/error 미소비 (Medium)~~ ✅ 해결됨
 - **설계**: daemon이 typing/stream/done/error 전송, App이 스트리밍 표시
-- **현재 코드**: ChatScreen이 content 있는 최종 메시지만 처리. typing/stream delta/error 무시
-- **영향**: 실시간 타이핑 표시, 스트리밍 응답, 에러 표시 안 됨
+- **구현 완료**: ChatScreen.tsx에 typing (인디케이터 표시), stream (delta append), error (에러 메시지 표시), done (스트림 종료) 핸들러 추가
 
-### Gap 21: chmod 600 미구현 (Medium)
+### ~~Gap 21: chmod 600 미구현 (Medium)~~ ✅ 해결됨
 - **설계**: daemon이 DB 파일 + admin socket에 chmod 600 설정
-- **현재 코드**: JsonApprovalStore/SqliteApprovalStore에 chmod/fchmod 설정 코드 없음. admin-server.ts의 Unix socket도 permission 미설정
-- **영향**: 보안 경계의 "seed 접근 ❌ (chmod 600)"이 코드가 아닌 운영 가정. admin socket도 누구나 접근 가능
+- **구현 완료**: JsonApprovalStore에 chmodSync(dir, 0o700), SqliteApprovalStore에 chmodSync(dbPath, 0o600), admin-server.ts에 chmodSync(socketPath, 0o600) 추가
 
 ### Gap 22: app sendApproval resolver mismatch (High)
 - **설계**: policy/device approval 후 app이 결과 수신
