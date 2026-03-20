@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto'
+import { randomUUID, createHash } from 'node:crypto'
 import { verifyApproval } from './approval-verifier.js'
 import type { VerificationContext } from './approval-verifier.js'
 import { ApprovalTimeoutError } from './errors.js'
@@ -142,15 +142,24 @@ export class SignedApprovalBroker {
       }
 
       case 'device_revoke': {
-        const signerId = signedApproval.signerId
-        if (!signerId) {
-          throw new Error('device_revoke requires signerId')
+        const targetHash = signedApproval.targetHash
+        if (!targetHash) {
+          throw new Error('device_revoke requires targetHash')
         }
-        await this._store.revokeSigner(signerId)
+        // Find signer whose SHA-256(publicKey) === targetHash
+        const signers = await this._store.listSigners()
+        const target = signers.find(s => {
+          const hash = '0x' + createHash('sha256').update(s.publicKey).digest('hex')
+          return hash === targetHash
+        })
+        if (!target) {
+          throw new Error('device_revoke target signer not found')
+        }
+        await this._store.revokeSigner(target.publicKey)
         if (this._emitter) {
           this._emitter.emit('SignerRevoked', {
             type: 'SignerRevoked',
-            signerId,
+            publicKey: target.publicKey,
             timestamp: Date.now()
           })
         }
@@ -200,7 +209,6 @@ export class SignedApprovalBroker {
       chainId: signedApproval.chainId,
       targetHash: signedApproval.targetHash,
       approver: signedApproval.approver,
-      signerId: signedApproval.signerId,
       action: type === 'policy_reject' ? 'rejected' : 'approved',
       content: signedApproval.content,
       timestamp: Date.now()

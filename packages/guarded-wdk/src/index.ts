@@ -45,4 +45,4 @@ export type {
 export type { VerificationContext } from './approval-verifier.js'
 export type { KeyPair } from './crypto-utils.js'
 export type { EvaluationResult, EvaluationContext, FailedArg, RuleFailure, Rule, PermissionDict, SignTransactionResult, ArgCondition, Decision } from './guarded-middleware.js'
-export { permissionsToDict } from './guarded-middleware.js'
+export { permissionsToDict, validatePolicies } from './guarded-middleware.js'

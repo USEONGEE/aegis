@@ -11,7 +11,7 @@ class MockApprovalStore extends ApprovalStore {
   _policies: Record<string, unknown> = {}
   _pending: Array<ApprovalRequest & Record<string, unknown>> = []
   _history: HistoryEntry[] = []
-  _signers: Record<string, { revoked: boolean }> = {}
+  _signers: Record<string, { revoked: boolean; publicKey: string }> = {}
   _nonces: Record<string, number> = {}
 
   constructor () {
@@ -28,10 +28,12 @@ class MockApprovalStore extends ApprovalStore {
   override async removePendingApproval (requestId: string) { this._pending = this._pending.filter(p => p.requestId !== requestId) }
   override async appendHistory (entry: HistoryEntry) { this._history.push(entry) }
   override async getHistory (_opts?: HistoryQueryOpts) { return this._history as HistoryEntry[] }
-  override async isSignerRevoked (signerId: string) { return this._signers[signerId]?.revoked === true }
-  override async revokeSigner (signerId: string) { this._signers[signerId] = { revoked: true } }
-  override async getLastNonce (approver: string, signerId: string) { return this._nonces[`${approver}:${signerId}`] || 0 }
-  override async updateNonce (approver: string, signerId: string, nonce: number) { this._nonces[`${approver}:${signerId}`] = nonce }
+  override async saveSigner (publicKey: string) { this._signers[publicKey] = { revoked: false, publicKey } }
+  override async listSigners () { return Object.values(this._signers).map(s => ({ publicKey: s.publicKey, name: null, registeredAt: Date.now(), revokedAt: s.revoked ? Date.now() : null })) }
+  override async isSignerRevoked (publicKey: string) { return this._signers[publicKey]?.revoked === true }
+  override async revokeSigner (publicKey: string) { if (this._signers[publicKey]) { this._signers[publicKey].revoked = true } }
+  override async getLastNonce (approver: string) { return this._nonces[approver] || 0 }
+  override async updateNonce (approver: string, nonce: number) { this._nonces[approver] = nonce }
 }
 
 function makeSignedApproval (keyPair: KeyPair, overrides: Record<string, unknown> = {}) {
@@ -41,7 +43,6 @@ function makeSignedApproval (keyPair: KeyPair, overrides: Record<string, unknown
     chainId: 1,
     targetHash: '0xabc123',
     approver: keyPair.publicKey,
-    signerId: 'signer-1',
     policyVersion: 0,
     expiresAt: Math.floor(Date.now() / 1000) + 300,
     nonce: 1,

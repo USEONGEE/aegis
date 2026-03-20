@@ -215,8 +215,8 @@ export class AdminServer {
         return {
           ok: true,
           data: {
-            signers: signers.map((d: { signerId: string; name: string | null; registeredAt: number; revokedAt: number | null }) => ({
-              signerId: d.signerId,
+            signers: signers.map((d: { publicKey: string; name: string | null; registeredAt: number; revokedAt: number | null }) => ({
+              publicKey: d.publicKey,
               name: d.name,
               registeredAt: d.registeredAt,
               revokedAt: d.revokedAt,

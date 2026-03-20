@@ -36,8 +36,8 @@ export class UntrustedApproverError extends Error {
 }
 
 export class SignerRevokedError extends Error {
-  constructor (signerId: string) {
-    super(`Signer has been revoked: ${signerId}`)
+  constructor (publicKey: string) {
+    super(`Signer has been revoked: ${publicKey}`)
     this.name = 'SignerRevokedError'
   }
 }

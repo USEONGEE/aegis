@@ -35,17 +35,17 @@ export async function verifyApproval (
   store: ApprovalStore,
   context: VerificationContext = {}
 ): Promise<void> {
-  const { type, targetHash, approver, signerId, policyVersion, expiresAt, nonce, sig } = signedApproval
+  const { type, targetHash, approver, policyVersion, expiresAt, nonce, sig } = signedApproval
 
   // Step 1: approver in trustedApprovers?
   if (!trustedApprovers.includes(approver)) {
     throw new UntrustedApproverError(approver)
   }
 
-  // Step 2: signerId not revoked?
-  const revoked = await store.isSignerRevoked(signerId)
+  // Step 2: approver not revoked?
+  const revoked = await store.isSignerRevoked(approver)
   if (revoked) {
-    throw new SignerRevokedError(signerId)
+    throw new SignerRevokedError(approver)
   }
 
   // Step 3: Ed25519 signature verification
@@ -61,8 +61,8 @@ export async function verifyApproval (
     throw new ApprovalExpiredError(expiresAt)
   }
 
-  // Step 5: nonce replay check (per-approver-per-signer)
-  const lastNonce = await store.getLastNonce(approver, signerId)
+  // Step 5: nonce replay check (per-approver)
+  const lastNonce = await store.getLastNonce(approver)
   if (nonce <= lastNonce) {
     throw new ReplayError(nonce, lastNonce)
   }
@@ -89,8 +89,8 @@ export async function verifyApproval (
       break
 
     case 'device_revoke': {
-      // targetHash should be SHA-256 of the signerId being revoked.
-      // context.expectedTargetHash is SHA-256(signerId) computed by the caller.
+      // targetHash should be SHA-256 of the publicKey being revoked.
+      // context.expectedTargetHash is SHA-256(publicKey) computed by the caller.
       if (context.expectedTargetHash && targetHash !== context.expectedTargetHash) {
         throw new SignatureError(`device_revoke targetHash mismatch: expected ${context.expectedTargetHash}, got ${targetHash}`)
       }
@@ -102,5 +102,5 @@ export async function verifyApproval (
   }
 
   // All 6 steps passed -- update nonce
-  await store.updateNonce(approver, signerId, nonce)
+  await store.updateNonce(approver, nonce)
 }

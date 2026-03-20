@@ -34,7 +34,6 @@ export interface ControlResult {
   ok: boolean
   type?: string
   requestId?: string
-  signerId?: string
   messageId?: string
   error?: string
   reason?: string
@@ -67,7 +66,6 @@ function toSignedApproval (payload: ControlPayload, type: string): SignedApprova
     chainId: (payload.chainId || 0) as number,
     targetHash: (payload.targetHash || '') as string,
     approver: (payload.approverPubKey || '') as string,
-    signerId: (payload.signerId || '') as string,
     accountIndex: (payload.accountIndex || 0) as number,
     policyVersion: (payload.policyVersion || 0) as number,
     expiresAt: (payload.expiresAt || 0) as number,
@@ -172,10 +170,14 @@ export async function handleControlMessage (
       try {
         const signedApproval = toSignedApproval(payload, 'device_revoke')
 
-        const signerId = payload.signerId
+        // The signed approval's targetHash = SHA-256(publicKey of signer being revoked)
+        // Verifier Step 6 checks targetHash matches expectedTargetHash if provided.
+        // We compute expectedTargetHash from payload if targetPublicKey is available,
+        // otherwise skip (verifier trusts the signed targetHash).
+        const targetPublicKey = (payload.targetPublicKey || payload.signerId) as string | undefined
         const context: VerificationContext = {}
-        if (signerId) {
-          context.expectedTargetHash = '0x' + createHash('sha256').update(signerId).digest('hex')
+        if (targetPublicKey) {
+          context.expectedTargetHash = '0x' + createHash('sha256').update(targetPublicKey).digest('hex')
         }
 
         await broker.submitApproval(signedApproval, context)
@@ -235,44 +237,44 @@ export async function handleControlMessage (
     // -----------------------------------------------------------------------
     case 'pairing_confirm': {
       try {
-        const { signerId, identityPubKey, encryptionPubKey, pairingToken, sas } = payload
+        const { identityPubKey, encryptionPubKey, pairingToken, sas } = payload
 
-        if (!signerId || !identityPubKey) {
-          return { ok: false, type: 'pairing_confirm', error: 'Missing signerId or identityPubKey' }
+        if (!identityPubKey) {
+          return { ok: false, type: 'pairing_confirm', error: 'Missing identityPubKey' }
         }
 
         if (!pairingToken) {
-          logger.warn({ signerId }, 'Pairing rejected: missing pairingToken')
+          logger.warn({ identityPubKey }, 'Pairing rejected: missing pairingToken')
           return { ok: false, type: 'pairing_confirm', error: 'Missing pairingToken' }
         }
 
         if (!pairingSession) {
-          logger.warn({ signerId }, 'Pairing rejected: no active pairing session on daemon')
+          logger.warn({ identityPubKey }, 'Pairing rejected: no active pairing session on daemon')
           return { ok: false, type: 'pairing_confirm', error: 'No active pairing session' }
         }
 
         const tokenValid = pairingToken === pairingSession.pairingToken
         if (!tokenValid) {
-          logger.warn({ signerId }, 'Pairing rejected: invalid pairingToken')
+          logger.warn({ identityPubKey }, 'Pairing rejected: invalid pairingToken')
           return { ok: false, type: 'pairing_confirm', error: 'Invalid pairingToken' }
         }
 
         if (!sas) {
-          logger.warn({ signerId }, 'Pairing rejected: missing SAS')
+          logger.warn({ identityPubKey }, 'Pairing rejected: missing SAS')
           return { ok: false, type: 'pairing_confirm', error: 'Missing SAS for verification' }
         }
 
         if (sas !== pairingSession.expectedSAS) {
-          logger.warn({ signerId, receivedSAS: sas, expectedSAS: pairingSession.expectedSAS }, 'Pairing rejected: SAS mismatch (possible MITM)')
+          logger.warn({ identityPubKey, receivedSAS: sas, expectedSAS: pairingSession.expectedSAS }, 'Pairing rejected: SAS mismatch (possible MITM)')
           return { ok: false, type: 'pairing_confirm', error: 'SAS mismatch — possible man-in-the-middle attack' }
         }
 
-        logger.info({ signerId, sas }, 'Pairing token and SAS verified successfully')
+        logger.info({ identityPubKey, sas }, 'Pairing token and SAS verified successfully')
 
         // Register signer in store and update trusted approvers
         if (approvalStore) {
-          await approvalStore.saveSigner(signerId as string, identityPubKey as string)
-          logger.info({ signerId }, 'Signer registered in store')
+          await approvalStore.saveSigner(identityPubKey as string)
+          logger.info({ identityPubKey }, 'Signer registered in store')
 
           // Re-read from store (source of truth) and update broker
           const signers: StoredSigner[] = await approvalStore.listSigners()
@@ -298,8 +300,8 @@ export async function handleControlMessage (
           }
         }
 
-        logger.info({ signerId, sas }, 'Pairing confirmed successfully')
-        return { ok: true, type: 'pairing_confirm', signerId: signerId as string }
+        logger.info({ identityPubKey, sas }, 'Pairing confirmed successfully')
+        return { ok: true, type: 'pairing_confirm' }
       } catch (err: unknown) {
         logger.error({ err }, 'Pairing confirmation failed')
         return { ok: false, type: 'pairing_confirm', error: (err as Error).message }

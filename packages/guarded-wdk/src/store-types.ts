@@ -24,7 +24,6 @@ export interface StoredHistoryEntry {
   chain_id: number | null
   target_hash: string
   approver: string
-  signer_id: string
   action: HistoryAction
   content: string | null
   signed_approval_json: string | null
@@ -58,7 +57,6 @@ export interface StoredJournalEntry {
 
 /** @internal */
 export interface SignerRow {
-  signer_id: string
   public_key: string
   name: string | null
   registered_at: number

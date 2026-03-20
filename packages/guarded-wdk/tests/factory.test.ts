@@ -67,10 +67,10 @@ class MockApprovalStore extends ApprovalStore {
   override async removePendingApproval (requestId: string) { this._pending = this._pending.filter(p => p.requestId !== requestId) }
   override async appendHistory (entry: HistoryEntry) { this._history.push(entry) }
   override async getHistory (_opts?: HistoryQueryOpts) { return this._history as HistoryEntry[] }
-  override async isSignerRevoked (_signerId: string) { return false }
-  override async revokeSigner (signerId: string) { this._signers[signerId] = { revoked: true } }
-  override async getLastNonce (approver: string, signerId: string) { return this._nonces[`${approver}:${signerId}`] || 0 }
-  override async updateNonce (approver: string, signerId: string, nonce: number) { this._nonces[`${approver}:${signerId}`] = nonce }
+  override async isSignerRevoked (_publicKey: string) { return false }
+  override async revokeSigner (publicKey: string) { this._signers[publicKey] = { revoked: true } }
+  override async getLastNonce (approver: string) { return this._nonces[approver] || 0 }
+  override async updateNonce (approver: string, nonce: number) { this._nonces[approver] = nonce }
 }
 
 function makeConfig (overrides: Record<string, unknown> = {}) {

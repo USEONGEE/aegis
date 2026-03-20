@@ -31,7 +31,6 @@ export interface SignedApproval {
   chainId: number
   targetHash: string
   approver: string
-  signerId: string
   accountIndex: number
   policyVersion: number
   expiresAt: number
@@ -75,7 +74,6 @@ export interface HistoryEntry {
   chainId?: number | null
   targetHash: string
   approver: string
-  signerId: string
   action: HistoryAction
   content?: string
   signedApproval?: SignedApproval
@@ -85,7 +83,6 @@ export interface HistoryEntry {
 // StoredHistoryEntry moved to store-types.ts (@internal)
 
 export interface StoredSigner {
-  signerId: string
   publicKey: string
   name: string | null
   registeredAt: number
@@ -203,16 +200,16 @@ export abstract class ApprovalStore {
 
   // --- Signers ---
 
-  async saveSigner (_signerId: string, _publicKey: string): Promise<void> { throw new Error('Not implemented') }
-  async getSigner (_signerId: string): Promise<StoredSigner | null> { throw new Error('Not implemented') }
+  async saveSigner (_publicKey: string, _name?: string): Promise<void> { throw new Error('Not implemented') }
+  async getSigner (_publicKey: string): Promise<StoredSigner | null> { throw new Error('Not implemented') }
   async listSigners (): Promise<StoredSigner[]> { throw new Error('Not implemented') }
-  async revokeSigner (_signerId: string): Promise<void> { throw new Error('Not implemented') }
-  async isSignerRevoked (_signerId: string): Promise<boolean> { throw new Error('Not implemented') }
+  async revokeSigner (_publicKey: string): Promise<void> { throw new Error('Not implemented') }
+  async isSignerRevoked (_publicKey: string): Promise<boolean> { throw new Error('Not implemented') }
 
   // --- Nonce ---
 
-  async getLastNonce (_approver: string, _signerId: string): Promise<number> { throw new Error('Not implemented') }
-  async updateNonce (_approver: string, _signerId: string, _nonce: number): Promise<void> { throw new Error('Not implemented') }
+  async getLastNonce (_approver: string): Promise<number> { throw new Error('Not implemented') }
+  async updateNonce (_approver: string, _nonce: number): Promise<void> { throw new Error('Not implemented') }
 
   // --- Cron ---
 

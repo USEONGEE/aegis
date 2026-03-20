@@ -319,7 +319,6 @@ export class JsonApprovalStore extends ApprovalStore {
       chain_id: entry.chainId ?? null,
       target_hash: entry.targetHash,
       approver: entry.approver,
-      signer_id: entry.signerId,
       action: entry.action,
       content: entry.content ?? null,
       signed_approval_json: entry.signedApproval ? JSON.stringify(entry.signedApproval) : null,
@@ -349,7 +348,6 @@ export class JsonApprovalStore extends ApprovalStore {
       chainId: h.chain_id,
       targetHash: h.target_hash,
       approver: h.approver,
-      signerId: h.signer_id,
       action: h.action,
       content: h.content ?? undefined,
       signedApproval: h.signed_approval_json ? JSON.parse(h.signed_approval_json) as SignedApproval : undefined,
@@ -359,24 +357,22 @@ export class JsonApprovalStore extends ApprovalStore {
 
   // --- Signers ---
 
-  override async saveSigner (signerId: string, publicKey: string): Promise<void> {
+  override async saveSigner (publicKey: string, name?: string): Promise<void> {
     const signers = await this._read<Record<string, SignerRow>>('signers.json') || {}
-    signers[signerId] = {
-      signer_id: signerId,
+    signers[publicKey] = {
       public_key: publicKey,
-      name: null,
+      name: name ?? null,
       registered_at: Date.now(),
       revoked_at: null
     }
     await this._write('signers.json', signers)
   }
 
-  override async getSigner (signerId: string): Promise<StoredSigner | null> {
+  override async getSigner (publicKey: string): Promise<StoredSigner | null> {
     const signers = await this._read<Record<string, SignerRow>>('signers.json') || {}
-    const row = signers[signerId]
+    const row = signers[publicKey]
     if (!row) return null
     return {
-      signerId: row.signer_id,
       publicKey: row.public_key,
       name: row.name,
       registeredAt: row.registered_at,
@@ -387,7 +383,6 @@ export class JsonApprovalStore extends ApprovalStore {
   override async listSigners (): Promise<StoredSigner[]> {
     const signers = await this._read<Record<string, SignerRow>>('signers.json') || {}
     return Object.values(signers).map(row => ({
-      signerId: row.signer_id,
       publicKey: row.public_key,
       name: row.name,
       registeredAt: row.registered_at,
@@ -395,33 +390,31 @@ export class JsonApprovalStore extends ApprovalStore {
     }))
   }
 
-  override async revokeSigner (signerId: string): Promise<void> {
+  override async revokeSigner (publicKey: string): Promise<void> {
     const signers = await this._read<Record<string, SignerRow>>('signers.json') || {}
-    if (signers[signerId]) {
-      signers[signerId].revoked_at = Date.now()
+    if (signers[publicKey]) {
+      signers[publicKey].revoked_at = Date.now()
       await this._write('signers.json', signers)
     }
   }
 
-  override async isSignerRevoked (signerId: string): Promise<boolean> {
+  override async isSignerRevoked (publicKey: string): Promise<boolean> {
     const signers = await this._read<Record<string, SignerRow>>('signers.json') || {}
-    const row = signers[signerId]
+    const row = signers[publicKey]
     if (!row) return false
     return row.revoked_at !== null
   }
 
   // --- Nonce ---
 
-  override async getLastNonce (approver: string, signerId: string): Promise<number> {
+  override async getLastNonce (approver: string): Promise<number> {
     const nonces = await this._read<Record<string, number>>('nonces.json') || {}
-    const key = `${approver}:${signerId}`
-    return nonces[key] || 0
+    return nonces[approver] || 0
   }
 
-  override async updateNonce (approver: string, signerId: string, nonce: number): Promise<void> {
+  override async updateNonce (approver: string, nonce: number): Promise<void> {
     const nonces = await this._read<Record<string, number>>('nonces.json') || {}
-    const key = `${approver}:${signerId}`
-    nonces[key] = nonce
+    nonces[approver] = nonce
     await this._write('nonces.json', nonces)
   }
 

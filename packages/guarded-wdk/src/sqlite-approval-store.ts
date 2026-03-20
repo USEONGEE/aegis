@@ -102,7 +102,6 @@ export class SqliteApprovalStore extends ApprovalStore {
         chain_id INTEGER,
         target_hash TEXT NOT NULL,
         approver TEXT NOT NULL,
-        signer_id TEXT NOT NULL,
         action TEXT NOT NULL,
         content TEXT,
         signed_approval_json TEXT,
@@ -110,18 +109,15 @@ export class SqliteApprovalStore extends ApprovalStore {
       );
 
       CREATE TABLE IF NOT EXISTS signers (
-        signer_id TEXT PRIMARY KEY,
-        public_key TEXT NOT NULL,
+        public_key TEXT PRIMARY KEY,
         name TEXT,
         registered_at INTEGER NOT NULL,
         revoked_at INTEGER
       );
 
       CREATE TABLE IF NOT EXISTS nonces (
-        approver TEXT NOT NULL,
-        signer_id TEXT NOT NULL,
-        last_nonce INTEGER NOT NULL DEFAULT 0,
-        PRIMARY KEY (approver, signer_id)
+        approver TEXT PRIMARY KEY,
+        last_nonce INTEGER NOT NULL DEFAULT 0
       );
 
       CREATE TABLE IF NOT EXISTS crons (
@@ -365,15 +361,14 @@ export class SqliteApprovalStore extends ApprovalStore {
 
   override async appendHistory (entry: HistoryEntry): Promise<void> {
     this._db!.prepare(`
-      INSERT INTO approval_history (account_index, type, chain_id, target_hash, approver, signer_id, action, content, signed_approval_json, timestamp)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO approval_history (account_index, type, chain_id, target_hash, approver, action, content, signed_approval_json, timestamp)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       entry.accountIndex,
       entry.type,
       entry.chainId ?? null,
       entry.targetHash,
       entry.approver,
-      entry.signerId,
       entry.action,
       entry.content ?? null,
       entry.signedApproval ? JSON.stringify(entry.signedApproval) : null,
@@ -396,7 +391,6 @@ export class SqliteApprovalStore extends ApprovalStore {
       chainId: h.chain_id,
       targetHash: h.target_hash,
       approver: h.approver,
-      signerId: h.signer_id,
       action: h.action,
       content: h.content ?? undefined,
       signedApproval: h.signed_approval_json ? JSON.parse(h.signed_approval_json) as SignedApproval : undefined,
@@ -406,21 +400,20 @@ export class SqliteApprovalStore extends ApprovalStore {
 
   // --- Signers ---
 
-  override async saveSigner (signerId: string, publicKey: string): Promise<void> {
+  override async saveSigner (publicKey: string, name?: string): Promise<void> {
     this._db!.prepare(`
-      INSERT INTO signers (signer_id, public_key, registered_at)
+      INSERT INTO signers (public_key, name, registered_at)
       VALUES (?, ?, ?)
-      ON CONFLICT (signer_id) DO UPDATE SET
-        public_key = excluded.public_key,
+      ON CONFLICT (public_key) DO UPDATE SET
+        name = COALESCE(excluded.name, signers.name),
         registered_at = excluded.registered_at
-    `).run(signerId, publicKey, Date.now())
+    `).run(publicKey, name ?? null, Date.now())
   }
 
-  override async getSigner (signerId: string): Promise<StoredSigner | null> {
-    const row = this._db!.prepare('SELECT * FROM signers WHERE signer_id = ?').get(signerId) as SignerRow | undefined
+  override async getSigner (publicKey: string): Promise<StoredSigner | null> {
+    const row = this._db!.prepare('SELECT * FROM signers WHERE public_key = ?').get(publicKey) as SignerRow | undefined
     if (!row) return null
     return {
-      signerId: row.signer_id,
       publicKey: row.public_key,
       name: row.name,
       registeredAt: row.registered_at,
@@ -431,7 +424,6 @@ export class SqliteApprovalStore extends ApprovalStore {
   override async listSigners (): Promise<StoredSigner[]> {
     const rows = this._db!.prepare('SELECT * FROM signers').all() as SignerRow[]
     return rows.map(row => ({
-      signerId: row.signer_id,
       publicKey: row.public_key,
       name: row.name,
       registeredAt: row.registered_at,
@@ -439,31 +431,31 @@ export class SqliteApprovalStore extends ApprovalStore {
     }))
   }
 
-  override async revokeSigner (signerId: string): Promise<void> {
-    this._db!.prepare('UPDATE signers SET revoked_at = ? WHERE signer_id = ?').run(Date.now(), signerId)
+  override async revokeSigner (publicKey: string): Promise<void> {
+    this._db!.prepare('UPDATE signers SET revoked_at = ? WHERE public_key = ?').run(Date.now(), publicKey)
   }
 
-  override async isSignerRevoked (signerId: string): Promise<boolean> {
-    const row = this._db!.prepare('SELECT revoked_at FROM signers WHERE signer_id = ?').get(signerId) as { revoked_at: number | null } | undefined
+  override async isSignerRevoked (publicKey: string): Promise<boolean> {
+    const row = this._db!.prepare('SELECT revoked_at FROM signers WHERE public_key = ?').get(publicKey) as { revoked_at: number | null } | undefined
     if (!row) return false
     return row.revoked_at !== null
   }
 
   // --- Nonce ---
 
-  override async getLastNonce (approver: string, signerId: string): Promise<number> {
+  override async getLastNonce (approver: string): Promise<number> {
     const row = this._db!.prepare(
-      'SELECT last_nonce FROM nonces WHERE approver = ? AND signer_id = ?'
-    ).get(approver, signerId) as { last_nonce: number } | undefined
+      'SELECT last_nonce FROM nonces WHERE approver = ?'
+    ).get(approver) as { last_nonce: number } | undefined
     return row ? row.last_nonce : 0
   }
 
-  override async updateNonce (approver: string, signerId: string, nonce: number): Promise<void> {
+  override async updateNonce (approver: string, nonce: number): Promise<void> {
     this._db!.prepare(`
-      INSERT INTO nonces (approver, signer_id, last_nonce)
-      VALUES (?, ?, ?)
-      ON CONFLICT (approver, signer_id) DO UPDATE SET last_nonce = excluded.last_nonce
-    `).run(approver, signerId, nonce)
+      INSERT INTO nonces (approver, last_nonce)
+      VALUES (?, ?)
+      ON CONFLICT (approver) DO UPDATE SET last_nonce = excluded.last_nonce
+    `).run(approver, nonce)
   }
 
   // --- Cron ---

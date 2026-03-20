@@ -93,7 +93,6 @@ describe('handleControlMessage', () => {
     const msg: ControlMessage = {
       type: 'pairing_confirm',
       payload: {
-        signerId: 'dev_001',
         identityPubKey: '0xpubkey123',
         encryptionPubKey: '0xenckey456',
         pairingToken: 'tok_abc',
@@ -105,8 +104,7 @@ describe('handleControlMessage', () => {
 
     expect(result.ok).toBe(true)
     expect(result.type).toBe('pairing_confirm')
-    expect(result.signerId).toBe('dev_001')
-    expect(store.saveSigner).toHaveBeenCalledWith('dev_001', '0xpubkey123')
+    expect(store.saveSigner).toHaveBeenCalledWith('0xpubkey123')
   })
 
   test('pairing_confirm: adds identityPubKey to trusted approvers', async () => {
@@ -124,7 +122,6 @@ describe('handleControlMessage', () => {
     const msg: ControlMessage = {
       type: 'pairing_confirm',
       payload: {
-        signerId: 'dev_002',
         identityPubKey: '0xnewkey',
         pairingToken: 'tok_pair',
         sas: '5678'
@@ -136,29 +133,17 @@ describe('handleControlMessage', () => {
     expect(broker.setTrustedApprovers).toHaveBeenCalledWith(['0xnewkey'])
   })
 
-  test('pairing_confirm: returns error when signerId is missing', async () => {
+  test('pairing_confirm: returns error when identityPubKey is missing', async () => {
     const msg: ControlMessage = {
       type: 'pairing_confirm',
-      payload: { identityPubKey: '0xkey' }
+      payload: {}
     }
 
     const result = await handleControlMessage(msg, broker, logger as any)
 
     expect(result.ok).toBe(false)
     expect(result.type).toBe('pairing_confirm')
-    expect(result.error).toBe('Missing signerId or identityPubKey')
-  })
-
-  test('pairing_confirm: returns error when identityPubKey is missing', async () => {
-    const msg: ControlMessage = {
-      type: 'pairing_confirm',
-      payload: { signerId: 'dev_003' }
-    }
-
-    const result = await handleControlMessage(msg, broker, logger as any)
-
-    expect(result.ok).toBe(false)
-    expect(result.error).toBe('Missing signerId or identityPubKey')
+    expect(result.error).toBe('Missing identityPubKey')
   })
 
   // -------------------------------------------------------------------------
@@ -294,8 +279,8 @@ describe('handleControlMessage', () => {
   // -------------------------------------------------------------------------
 
   test('device_revoke: calls broker.submitApproval with expectedTargetHash', async () => {
-    const signerId = 'device_to_revoke'
-    const expectedHash = '0x' + createHash('sha256').update(signerId).digest('hex')
+    const targetPublicKey = '0xpubkey_to_revoke'
+    const expectedHash = '0x' + createHash('sha256').update(targetPublicKey).digest('hex')
 
     store.listSigners.mockResolvedValue([
       { publicKey: '0xactive1', revokedAt: null },
@@ -306,7 +291,7 @@ describe('handleControlMessage', () => {
       type: 'device_revoke',
       payload: {
         requestId: 'req_rev_1',
-        signerId
+        targetPublicKey
       }
     }
 
@@ -316,8 +301,7 @@ describe('handleControlMessage', () => {
     expect(result.type).toBe('device_revoke')
     expect(broker.submitApproval).toHaveBeenCalledWith(
       expect.objectContaining({
-        type: 'device_revoke',
-        signerId
+        type: 'device_revoke'
       }),
       { expectedTargetHash: expectedHash }
     )
@@ -334,7 +318,7 @@ describe('handleControlMessage', () => {
       type: 'device_revoke',
       payload: {
         requestId: 'req_rev_2',
-        signerId: 'dev_x'
+        targetPublicKey: '0xdev_x'
       }
     }
 
@@ -350,7 +334,7 @@ describe('handleControlMessage', () => {
       type: 'device_revoke',
       payload: {
         requestId: 'req_rev_3',
-        signerId: 'dev_y'
+        targetPublicKey: '0xdev_y'
       }
     }
 

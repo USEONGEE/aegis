@@ -88,7 +88,7 @@ describe('SqliteApprovalStore', () => {
       await store.savePolicy(0, 1, { policies: [], signature: {} })
       await store.savePendingApproval(0, { requestId: 'r1', type: 'tx', chainId: 1, targetHash: '0x1', accountIndex: 0, content: '', createdAt: Date.now() })
       await store.saveCron(0, { sessionId: 'sess', interval: '* * * * *', prompt: 'test', chainId: null })
-      await store.appendHistory({ accountIndex: 0, type: 'tx', chainId: 1, targetHash: '0x1', approver: 'a', signerId: 'd', action: 'approved', timestamp: Date.now() })
+      await store.appendHistory({ accountIndex: 0, type: 'tx', chainId: 1, targetHash: '0x1', approver: 'a', action: 'approved', timestamp: Date.now() })
       await store.deleteWallet(0)
 
       const policy = await store.loadPolicy(0, 1)
@@ -261,7 +261,6 @@ describe('SqliteApprovalStore', () => {
         chainId: 1,
         targetHash: '0xabc',
         approver: '0xpub',
-        signerId: 'dev-1',
         action: 'approved',
         timestamp: 1000
       })
@@ -273,9 +272,9 @@ describe('SqliteApprovalStore', () => {
 
     test('getHistory filters by accountIndex, type, chain', async () => {
       await store.createWallet(1, 'second', '0xaddr1')
-      await store.appendHistory({ accountIndex, type: 'tx', chainId: 1, targetHash: '0x1', approver: 'a', signerId: 'd', action: 'approved', timestamp: Date.now() })
-      await store.appendHistory({ accountIndex, type: 'policy', chainId: 1, targetHash: '0x2', approver: 'a', signerId: 'd', action: 'approved', timestamp: Date.now() })
-      await store.appendHistory({ accountIndex: 1, type: 'tx', chainId: 900, targetHash: '0x3', approver: 'a', signerId: 'd', action: 'rejected', timestamp: Date.now() })
+      await store.appendHistory({ accountIndex, type: 'tx', chainId: 1, targetHash: '0x1', approver: 'a', action: 'approved', timestamp: Date.now() })
+      await store.appendHistory({ accountIndex, type: 'policy', chainId: 1, targetHash: '0x2', approver: 'a', action: 'approved', timestamp: Date.now() })
+      await store.appendHistory({ accountIndex: 1, type: 'tx', chainId: 900, targetHash: '0x3', approver: 'a', action: 'rejected', timestamp: Date.now() })
 
       const a0Tx = await store.getHistory({ accountIndex, type: 'tx' })
       expect(a0Tx).toHaveLength(1)
@@ -284,7 +283,7 @@ describe('SqliteApprovalStore', () => {
 
     test('getHistory respects limit', async () => {
       for (let i = 0; i < 5; i++) {
-        await store.appendHistory({ accountIndex, type: 'tx', chainId: 1, targetHash: `0x${i}`, approver: 'a', signerId: 'd', action: 'approved', timestamp: Date.now() })
+        await store.appendHistory({ accountIndex, type: 'tx', chainId: 1, targetHash: `0x${i}`, approver: 'a', action: 'approved', timestamp: Date.now() })
       }
       const limited = await store.getHistory({ limit: 2 })
       expect(limited).toHaveLength(2)
@@ -295,9 +294,8 @@ describe('SqliteApprovalStore', () => {
 
   describe('signers', () => {
     test('saveSigner + getSigner round-trips', async () => {
-      await store.saveSigner('dev-1', '0xpubkey123')
-      const dev = await store.getSigner('dev-1')
-      expect(dev!.signerId).toBe('dev-1')
+      await store.saveSigner('0xpubkey123')
+      const dev = await store.getSigner('0xpubkey123')
       expect(dev!.publicKey).toBe('0xpubkey123')
       expect(dev!.revokedAt).toBeNull()
     })
@@ -308,39 +306,40 @@ describe('SqliteApprovalStore', () => {
     })
 
     test('listSigners returns all signers', async () => {
-      await store.saveSigner('dev-1', 'pk1')
-      await store.saveSigner('dev-2', 'pk2')
+      await store.saveSigner('pk1')
+      await store.saveSigner('pk2')
       const signers = await store.listSigners()
       expect(signers).toHaveLength(2)
     })
 
     test('revokeSigner sets revoked_at', async () => {
-      await store.saveSigner('dev-1', 'pk1')
-      await store.revokeSigner('dev-1')
-      const dev = await store.getSigner('dev-1')
+      await store.saveSigner('pk1')
+      await store.revokeSigner('pk1')
+      const dev = await store.getSigner('pk1')
       expect(dev!.revokedAt).toBeTruthy()
     })
 
     test('isSignerRevoked returns false for active signer', async () => {
-      await store.saveSigner('dev-1', 'pk1')
-      expect(await store.isSignerRevoked('dev-1')).toBe(false)
+      await store.saveSigner('pk1')
+      expect(await store.isSignerRevoked('pk1')).toBe(false)
     })
 
     test('isSignerRevoked returns true for revoked signer', async () => {
-      await store.saveSigner('dev-1', 'pk1')
-      await store.revokeSigner('dev-1')
-      expect(await store.isSignerRevoked('dev-1')).toBe(true)
+      await store.saveSigner('pk1')
+      await store.revokeSigner('pk1')
+      expect(await store.isSignerRevoked('pk1')).toBe(true)
     })
 
     test('isSignerRevoked returns false for unknown signer', async () => {
       expect(await store.isSignerRevoked('nonexistent')).toBe(false)
     })
 
-    test('saveSigner updates existing signer', async () => {
-      await store.saveSigner('dev-1', 'pk1')
-      await store.saveSigner('dev-1', 'pk2')
-      const dev = await store.getSigner('dev-1')
-      expect(dev!.publicKey).toBe('pk2')
+    test('saveSigner updates existing signer on conflict', async () => {
+      await store.saveSigner('pk1', 'name1')
+      await store.saveSigner('pk1', 'name2')
+      const dev = await store.getSigner('pk1')
+      expect(dev!.publicKey).toBe('pk1')
+      expect(dev!.name).toBe('name2')
     })
   })
 
@@ -348,29 +347,27 @@ describe('SqliteApprovalStore', () => {
 
   describe('nonces', () => {
     test('getLastNonce returns 0 by default', async () => {
-      const nonce = await store.getLastNonce('0xapprover', 'dev-1')
+      const nonce = await store.getLastNonce('0xapprover')
       expect(nonce).toBe(0)
     })
 
     test('updateNonce + getLastNonce round-trips', async () => {
-      await store.updateNonce('0xapprover', 'dev-1', 5)
-      const nonce = await store.getLastNonce('0xapprover', 'dev-1')
+      await store.updateNonce('0xapprover', 5)
+      const nonce = await store.getLastNonce('0xapprover')
       expect(nonce).toBe(5)
     })
 
-    test('nonce is scoped per approver+signer', async () => {
-      await store.updateNonce('a1', 'd1', 10)
-      await store.updateNonce('a1', 'd2', 20)
-      await store.updateNonce('a2', 'd1', 30)
-      expect(await store.getLastNonce('a1', 'd1')).toBe(10)
-      expect(await store.getLastNonce('a1', 'd2')).toBe(20)
-      expect(await store.getLastNonce('a2', 'd1')).toBe(30)
+    test('nonce is scoped per approver', async () => {
+      await store.updateNonce('a1', 10)
+      await store.updateNonce('a2', 20)
+      expect(await store.getLastNonce('a1')).toBe(10)
+      expect(await store.getLastNonce('a2')).toBe(20)
     })
 
     test('updateNonce overwrites previous value', async () => {
-      await store.updateNonce('a1', 'd1', 5)
-      await store.updateNonce('a1', 'd1', 15)
-      expect(await store.getLastNonce('a1', 'd1')).toBe(15)
+      await store.updateNonce('a1', 5)
+      await store.updateNonce('a1', 15)
+      expect(await store.getLastNonce('a1')).toBe(15)
     })
   })
 
