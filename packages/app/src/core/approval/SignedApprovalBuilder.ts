@@ -99,16 +99,13 @@ const DEFAULT_EXPIRY_SECONDS = 300; // 5 minutes
 
 export class SignedApprovalBuilder {
   private keyPair: IdentityKeyPair;
-  private signerId: string;
   private nonce: number;
 
   constructor(
     keyPair: IdentityKeyPair,
-    signerId?: string,
     initialNonce?: number,
   ) {
     this.keyPair = keyPair;
-    this.signerId = signerId ?? 'signer_unknown';
     this.nonce = initialNonce ?? 0;
   }
 
@@ -168,24 +165,24 @@ export class SignedApprovalBuilder {
 
   /**
    * Build SignedApproval for a device revocation.
-   * targetHash = SHA-256(deviceId), matching the verifier in guarded-wdk.
+   * targetHash = SHA-256(publicKey of the signer being revoked).
    */
   forDeviceRevoke(params: {
-    targetSignerId: string;
+    targetPublicKey: string;
     chainId: number;
     accountIndex: number;
     content: string;
     expiresInSeconds?: number;
   }): SignedApproval {
-    // targetHash for device revoke = SHA-256(signerId)
-    // Must match: createHash('sha256').update(signerId).digest('hex') in approval-verifier
-    const targetHash = sha256Hex(params.targetSignerId);
+    // targetHash for device revoke = SHA-256(publicKey)
+    // Must match: createHash('sha256').update(publicKey).digest('hex') in approval-verifier
+    const targetHash = sha256Hex(params.targetPublicKey);
 
     return this.build({
       type: 'device_revoke',
       targetHash,
       chainId: params.chainId,
-      requestId: `revoke_${params.targetSignerId}`,
+      requestId: `revoke_${params.targetPublicKey.slice(0, 16)}`,
       accountIndex: params.accountIndex,
       content: params.content,
       policyVersion: 0,
@@ -240,7 +237,6 @@ export class SignedApprovalBuilder {
       type: params.type,
       targetHash: params.targetHash,
       approver,
-      signerId: this.signerId,
       chainId: params.chainId,
       requestId: params.requestId,
       policyVersion: params.policyVersion ?? 0,
@@ -285,12 +281,5 @@ export class SignedApprovalBuilder {
    */
   setNonce(nonce: number): void {
     this.nonce = nonce;
-  }
-
-  /**
-   * Update signer ID (after pairing).
-   */
-  setSignerId(signerId: string): void {
-    this.signerId = signerId;
   }
 }

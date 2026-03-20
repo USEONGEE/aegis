@@ -34,7 +34,6 @@ describe('PairingService', () => {
     const payload = {
       type: 'pairing_confirm',
       payload: {
-        signerId: 'device_test123',
         identityPubKey: '0x' + Buffer.from(appKp.publicKey).toString('hex'),
         encryptionPubKey: '0x' + Buffer.from(encKp.publicKey).toString('hex'),
         pairingToken: 'abc123'

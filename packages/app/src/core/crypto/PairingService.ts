@@ -124,7 +124,6 @@ export class PairingService {
         type: 'pairing_confirm',
         payload: {
           pairingToken: qrPayload.pairingToken,
-          signerId: deviceId,
           identityPubKey: identityPubKeyHex,
           encryptionPubKey: this.e2eCrypto.getPublicKeyBase64(),
           sas: this.sas,

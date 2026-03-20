@@ -1,5 +1,6 @@
 import { describe, test, expect } from '@jest/globals'
 import { manifestToPolicy, validateManifest } from '../src/index.js'
+import { validatePolicies } from '@wdk-app/guarded-wdk'
 import type { PermissionDict } from '../src/index.js'
 import { aaveV3Manifest } from '../src/examples/aave-v3.js'
 
@@ -14,7 +15,7 @@ describe('manifestToPolicy', () => {
     expect(dict[POOL_ADDRESS]).toBeDefined()
     expect(dict[POOL_ADDRESS]['0x617ba037']).toBeDefined()
     expect(dict[POOL_ADDRESS]['0x617ba037'].length).toBe(1)
-    expect(dict[POOL_ADDRESS]['0x617ba037'][0].decision).toBe('REQUIRE_APPROVAL')
+    expect(dict[POOL_ADDRESS]['0x617ba037'][0].decision).toBe('ALLOW')
 
     // repay call rule: pool/0x573ade81
     expect(dict[POOL_ADDRESS]['0x573ade81']).toBeDefined()
@@ -29,7 +30,7 @@ describe('manifestToPolicy', () => {
     expect(dict[POOL_ADDRESS]['0x69328dec'].length).toBe(1)
   })
 
-  test('approve rules auto-generated from feature.approvals with spender constraint', () => {
+  test('approve rules auto-generated from feature.approvals with spender arg', () => {
     const dict: PermissionDict = manifestToPolicy(aaveV3Manifest, 1)
 
     // Wildcard target with approve selector
@@ -40,7 +41,7 @@ describe('manifestToPolicy', () => {
     const approveRules = dict['*'][APPROVE_SELECTOR]
     expect(approveRules.length).toBe(2)
 
-    // All approve rules have spender constraint as args[0] EQ
+    // All approve rules have spender arg as args[0] EQ
     for (const rule of approveRules) {
       expect(rule.args).toBeDefined()
       expect(rule.args!['0']).toBeDefined()
@@ -49,7 +50,15 @@ describe('manifestToPolicy', () => {
     }
   })
 
-  test('features without approvals do not generate approve rules', () => {
+  test('approve rules default decision is ALLOW (E6)', () => {
+    const dict: PermissionDict = manifestToPolicy(aaveV3Manifest, 1)
+    const approveRules = dict['*'][APPROVE_SELECTOR]
+    for (const rule of approveRules) {
+      expect(rule.decision).toBe('ALLOW')
+    }
+  })
+
+  test('features without approvals do not generate approve rules (E3)', () => {
     const dict: PermissionDict = manifestToPolicy(aaveV3Manifest, 1, {
       features: ['borrow']
     })
@@ -85,17 +94,22 @@ describe('manifestToPolicy', () => {
     expect(dict['*'][APPROVE_SELECTOR].length).toBe(2)
   })
 
-  test('userConfig overrides decision', () => {
+  test('userConfig overrides decision with REJECT (E1)', () => {
     const dict: PermissionDict = manifestToPolicy(aaveV3Manifest, 1, {
       features: ['supply'],
-      decision: 'AUTO'
+      decision: 'REJECT'
     })
 
     // Call rule
-    expect(dict[POOL_ADDRESS]['0x617ba037'][0].decision).toBe('AUTO')
+    expect(dict[POOL_ADDRESS]['0x617ba037'][0].decision).toBe('REJECT')
 
     // Approve rule
-    expect(dict['*'][APPROVE_SELECTOR][0].decision).toBe('AUTO')
+    expect(dict['*'][APPROVE_SELECTOR][0].decision).toBe('REJECT')
+  })
+
+  test('default decision is ALLOW when userConfig omitted (E2)', () => {
+    const dict: PermissionDict = manifestToPolicy(aaveV3Manifest, 1)
+    expect(dict[POOL_ADDRESS]['0x617ba037'][0].decision).toBe('ALLOW')
   })
 
   test('userConfig overrides args conditions', () => {
@@ -110,12 +124,12 @@ describe('manifestToPolicy', () => {
     expect(callRule.args!.maxValue).toEqual({ condition: 'EQ', value: '1000000' })
   })
 
-  test('unknown chainId returns empty dict', () => {
+  test('unknown chainId returns empty dict (E4)', () => {
     const dict: PermissionDict = manifestToPolicy(aaveV3Manifest, 999)
     expect(dict).toEqual({})
   })
 
-  test('empty features array returns empty dict', () => {
+  test('empty features array returns empty dict (E5)', () => {
     const dict: PermissionDict = manifestToPolicy(aaveV3Manifest, 1, {
       features: []
     })
@@ -158,47 +172,22 @@ describe('manifestToPolicy', () => {
     }
   })
 
-  test('round-trip: output is structurally compatible with guarded-wdk CallPolicy', () => {
+  test('integration: manifestToPolicy output passes guarded-wdk validatePolicies (F3)', () => {
+    const dict: PermissionDict = manifestToPolicy(aaveV3Manifest, 1)
+
+    // Wrap as CallPolicy and validate through guarded-wdk public API
+    const policies = [{ type: 'call' as const, permissions: dict }]
+    expect(() => validatePolicies(policies)).not.toThrow()
+  })
+
+  test('integration: REJECT decision also passes validatePolicies', () => {
     const dict: PermissionDict = manifestToPolicy(aaveV3Manifest, 1, {
       features: ['supply'],
-      decision: 'AUTO'
+      decision: 'REJECT'
     })
 
-    // Wrap as CallPolicy — this is exactly how guarded-wdk consumes it
-    const callPolicy = { type: 'call' as const, permissions: dict }
-    const chainPolicies = { 1: { policies: [callPolicy] } }
-
-    // Verify structure: target -> selector -> Rule[]
-    const permissions = chainPolicies[1].policies[0].permissions
-    expect(typeof permissions).toBe('object')
-
-    // Each rule must have: order (number), decision (valid string), optional args/valueLimit
-    for (const [target, selectorMap] of Object.entries(permissions)) {
-      expect(typeof target).toBe('string')
-      for (const [selector, rules] of Object.entries(selectorMap)) {
-        expect(typeof selector).toBe('string')
-        expect(Array.isArray(rules)).toBe(true)
-        for (const rule of rules) {
-          expect(typeof rule.order).toBe('number')
-          expect(['AUTO', 'REQUIRE_APPROVAL', 'REJECT']).toContain(rule.decision)
-          if (rule.args) {
-            for (const [, cond] of Object.entries(rule.args)) {
-              expect(['EQ', 'NEQ', 'GT', 'GTE', 'LT', 'LTE', 'ONE_OF', 'NOT_ONE_OF']).toContain(cond.condition)
-              expect(cond.value).toBeDefined()
-            }
-          }
-          if (rule.valueLimit !== undefined) {
-            expect(['string', 'number']).toContain(typeof rule.valueLimit)
-          }
-        }
-      }
-    }
-
-    // Verify the supply call rule is present
-    expect(permissions[POOL_ADDRESS]['0x617ba037'][0].decision).toBe('AUTO')
-    // Verify the approve rule is present with args
-    expect(permissions['*'][APPROVE_SELECTOR][0].args!['0'].condition).toBe('EQ')
-    expect(permissions['*'][APPROVE_SELECTOR][0].args!['0'].value).toBe(POOL_ADDRESS)
+    const policies = [{ type: 'call' as const, permissions: dict }]
+    expect(() => validatePolicies(policies)).not.toThrow()
   })
 })
 
@@ -239,8 +228,7 @@ describe('validateManifest', () => {
               name: 'F1',
               description: 'Test',
               calls: [{ contract: 'pool', selector: 'bad', signature: 'fn()', description: 'test' }],
-              approvals: [],
-              constraints: []
+              approvals: []
             }
           ]
         }

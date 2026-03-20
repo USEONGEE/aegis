@@ -15,8 +15,6 @@ const APPROVE_SELECTOR = '0x095ea7b3'
  *   - features: filter to specific feature IDs
  *   - decision: override default decision for all rules
  *   - argsConditions: add argument conditions to rules
- *   - tokenAddresses: map token symbols to addresses
- *   - userAddress: user wallet address
  */
 export function manifestToPolicy(
   manifest: Manifest,
@@ -29,9 +27,7 @@ export function manifestToPolicy(
   const {
     features: enabledFeatures,
     decision,
-    argsConditions,
-    tokenAddresses = {},
-    userAddress
+    argsConditions
   } = userConfig
 
   const selectedFeatures: Feature[] = enabledFeatures
@@ -52,7 +48,7 @@ export function manifestToPolicy(
 
       const rule: Rule = {
         order: order++,
-        decision: decision || 'REQUIRE_APPROVAL'
+        decision: decision || 'ALLOW'
       }
 
       if (argsConditions) {
@@ -74,7 +70,7 @@ export function manifestToPolicy(
 
       const rule: Rule = {
         order: order++,
-        decision: decision || 'REQUIRE_APPROVAL',
+        decision: decision || 'ALLOW',
         args: {
           0: { condition: 'EQ', value: spenderAddress }
         }

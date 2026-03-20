@@ -24,7 +24,7 @@ import { useToast } from '../../../shared/ui/ToastProvider';
  */
 
 interface PairedSigner {
-  signerId: string;
+  publicKey: string;
   name?: string;
   type: 'app' | 'daemon';
   registeredAt: number;
@@ -186,9 +186,10 @@ export function SettingsScreen() {
   // Revoke a signer — builds a proper SignedApproval via SignedApprovalBuilder
   const handleRevoke = useCallback(
     (signer: PairedSigner) => {
+      const displayName = signer.name ?? `${signer.publicKey.slice(0, 8)}...${signer.publicKey.slice(-4)}`;
       Alert.alert(
         'Revoke Signer',
-        `Revoke "${signer.name ?? signer.signerId}"? This signer will no longer be able to sign approvals.`,
+        `Revoke "${displayName}"? This signer will no longer be able to sign approvals.`,
         [
           { text: 'Cancel', style: 'cancel' },
           {
@@ -201,12 +202,12 @@ export function SettingsScreen() {
                   showToast('No identity key — cannot sign revocation', 'error');
                   return;
                 }
-                const builder = new SignedApprovalBuilder(keyPair, deviceId ?? undefined);
+                const builder = new SignedApprovalBuilder(keyPair);
                 const signedApproval = builder.forDeviceRevoke({
-                  targetSignerId: signer.signerId,
+                  targetPublicKey: signer.publicKey,
                   chainId: 1, // ethereum mainnet
                   accountIndex: 0,
-                  content: `Revoke signer ${signer.signerId}`,
+                  content: `Revoke signer ${signer.publicKey.slice(0, 16)}`,
                 });
                 await relay.sendApproval(signedApproval);
                 showToast('Signer revoke request sent', 'info');
@@ -218,7 +219,7 @@ export function SettingsScreen() {
         ],
       );
     },
-    [relay, identity, deviceId, showToast],
+    [relay, identity, showToast],
   );
 
   // Delete identity key
@@ -322,10 +323,10 @@ export function SettingsScreen() {
           <Text style={styles.emptyText}>No paired signers</Text>
         ) : (
           signers.map((signer) => (
-            <View key={signer.signerId} style={styles.deviceRow}>
+            <View key={signer.publicKey} style={styles.deviceRow}>
               <View style={styles.deviceInfo}>
                 <Text style={styles.deviceName}>
-                  {signer.name ?? signer.signerId}
+                  {signer.name ?? `${signer.publicKey.slice(0, 8)}...${signer.publicKey.slice(-4)}`}
                 </Text>
                 <Text style={styles.deviceMeta}>
                   {signer.type} | {new Date(signer.registeredAt).toLocaleDateString()}
@@ -334,7 +335,7 @@ export function SettingsScreen() {
                   <Text style={styles.revokedBadge}>REVOKED</Text>
                 )}
               </View>
-              {!signer.isRevoked && signer.signerId !== deviceId && (
+              {!signer.isRevoked && signer.publicKey !== publicKeyHex && (
                 <Pressable
                   style={styles.revokeButton}
                   onPress={() => handleRevoke(signer)}

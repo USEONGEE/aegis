@@ -7,7 +7,6 @@ export type {
   Feature,
   Call,
   Approval,
-  Constraint,
   ValidationResult,
   UserConfig
 } from './types.js'

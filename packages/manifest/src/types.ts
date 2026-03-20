@@ -2,18 +2,6 @@ import type { ArgCondition, Rule, PermissionDict, Decision } from '@wdk-app/guar
 export type { ArgCondition, Rule, PermissionDict, Decision }
 
 /**
- * Constraint type for features.
- */
-export interface Constraint {
-  /** Constraint type ('maxAmount' | 'allowedTokens' | 'allowedRecipients') */
-  type: string
-  /** Constraint value (varies by type) */
-  value: unknown
-  /** Constraint description */
-  description: string
-}
-
-/**
  * A contract call definition within a feature.
  */
 export interface Call {
@@ -53,8 +41,6 @@ export interface Feature {
   calls: Call[]
   /** ERC-20 approve calls required by this feature */
   approvals: Approval[]
-  /** Constraints for this feature */
-  constraints: Constraint[]
 }
 
 /**
@@ -101,10 +87,6 @@ export interface UserConfig {
   decision?: Decision
   /** Additional argument conditions */
   argsConditions?: Record<string, string>
-  /** Token symbol -> address map */
-  tokenAddresses?: Record<string, string>
-  /** User wallet address */
-  userAddress?: string
 }
 
 export const Types = {}

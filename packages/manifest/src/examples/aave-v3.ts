@@ -35,13 +35,6 @@ export const aaveV3Manifest: Manifest = {
               spender: 'pool',
               description: 'Approve token for Aave V3 Pool'
             }
-          ],
-          constraints: [
-            {
-              type: 'allowedTokens',
-              value: ['USDC', 'USDT', 'DAI', 'WETH', 'WBTC'],
-              description: 'Supported supply tokens'
-            }
           ]
         },
         {
@@ -56,8 +49,7 @@ export const aaveV3Manifest: Manifest = {
               description: 'Borrow asset from pool'
             }
           ],
-          approvals: [],
-          constraints: []
+          approvals: []
         },
         {
           id: 'repay',
@@ -77,8 +69,7 @@ export const aaveV3Manifest: Manifest = {
               spender: 'pool',
               description: 'Approve token for repayment'
             }
-          ],
-          constraints: []
+          ]
         },
         {
           id: 'withdraw',
@@ -92,8 +83,7 @@ export const aaveV3Manifest: Manifest = {
               description: 'Withdraw asset from pool'
             }
           ],
-          approvals: [],
-          constraints: []
+          approvals: []
         }
       ]
     }

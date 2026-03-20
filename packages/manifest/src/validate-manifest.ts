@@ -86,9 +86,6 @@ export function validateManifest(manifest: Manifest | null | undefined): Validat
         }
       }
 
-      if (!Array.isArray(feature.constraints)) {
-        errors.push(`${fp}.constraints must be an array`)
-      }
     }
   }
 
