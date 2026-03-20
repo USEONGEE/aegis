@@ -267,21 +267,6 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
 ]
 
 // ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-/**
- * Swap the active policies to match the given wallet before tx execution.
- * Single-threaded + sequential tool calls = safe without locking.
- */
-async function swapPoliciesForWallet (store: any, wdk: WDKInstance, accountIndex: number, chainId: number): Promise<void> {
-  const stored = await store.loadPolicy(accountIndex, chainId)
-  if (stored && wdk.updatePolicies) {
-    await wdk.updatePolicies(chainId, { policies: stored.policies }, accountIndex)
-  }
-}
-
-// ---------------------------------------------------------------------------
 // Tool call dispatcher
 // ---------------------------------------------------------------------------
 
@@ -313,8 +298,6 @@ export async function executeToolCall (name: string, args: ToolArgs, wdkContext:
       }
 
       try {
-        // Swap policies for this wallet before execution
-        await swapPoliciesForWallet(store, wdk, acctIdx, chainId)
         const account = await wdk.getAccount(chain, acctIdx)
 
         // Race sendTransaction against the ApprovalRequested event.
@@ -414,7 +397,6 @@ export async function executeToolCall (name: string, args: ToolArgs, wdkContext:
 
       try {
         const chainId = resolveChainId(chain)
-        await swapPoliciesForWallet(store, wdk, acctIdx, chainId)
         const account = await wdk.getAccount(chain, acctIdx)
         const txData = encodeTransferData(token, to, amount)
         const txValue = token.toLowerCase() === 'eth' ? amount : '0'
@@ -622,8 +604,6 @@ export async function executeToolCall (name: string, args: ToolArgs, wdkContext:
       }
 
       try {
-        // Swap policies for this wallet before execution
-        await swapPoliciesForWallet(store, wdk, acctIdx, chainId)
         const account = await wdk.getAccount(chain, acctIdx)
 
         // Race signTransaction against the ApprovalRequested event.

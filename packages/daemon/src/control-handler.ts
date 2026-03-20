@@ -40,9 +40,10 @@ export interface ControlResult {
   wasProcessing?: boolean
 }
 
-interface ApprovalStoreReader {
+interface ApprovalStoreWriter {
   loadPendingByRequestId (requestId: string): Promise<{ requestId: string; accountIndex: number; type: string; chainId: number; targetHash: string; content: string; createdAt: number } | null>
   getPolicyVersion (accountIndex: number, chainId: number): Promise<number>
+  savePolicy (accountIndex: number, chainId: number, input: { policies: unknown[]; signature: Record<string, unknown> }): Promise<void>
 }
 
 /**
@@ -83,7 +84,7 @@ export async function handleControlMessage (
   logger: Logger,
   wdk?: WDKInstance | null,
   relayClient?: RelayClient,
-  approvalStore?: ApprovalStoreReader | null,
+  approvalStore?: ApprovalStoreWriter | null,
   pairingSession?: PairingSession | null,
   queueManager?: MessageQueueManager | null
 ): Promise<ControlResult> {
@@ -155,16 +156,13 @@ export async function handleControlMessage (
 
         await broker.submitApproval(signedApproval, context)
 
-        // After successful approval, apply the policy to WDK
-        if (wdk && payload.policies && payload.chainId !== undefined) {
-          try {
-            await wdk.updatePolicies?.(payload.chainId as number, {
-              policies: payload.policies
-            }, payload.accountIndex as number)
-            logger.info({ chainId: payload.chainId }, 'Policy applied to WDK')
-          } catch (applyErr: any) {
-            logger.error({ err: applyErr, chainId: payload.chainId }, 'Failed to apply policy to WDK')
-          }
+        if (approvalStore && payload.policies && payload.chainId !== undefined) {
+          await approvalStore.savePolicy(
+            payload.accountIndex as number,
+            payload.chainId as number,
+            { policies: payload.policies as unknown[], signature: {} }
+          )
+          logger.info({ chainId: payload.chainId, accountIndex: payload.accountIndex }, 'Policy saved to store')
         }
 
         logger.info({ requestId: payload.requestId }, 'Policy approval submitted successfully')

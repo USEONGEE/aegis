@@ -21,7 +21,6 @@ export interface MockAccount {
 export interface WDKInstance {
   getAccount (chain: string, index?: number): Promise<any>
   getFeeRates? (): Promise<Record<string, unknown>>
-  updatePolicies? (chainId: number, newPolicies: Record<string, unknown>, accountIndex?: number): Promise<void>
   getApprovalBroker? (): SignedApprovalBroker
   getApprovalStore? (): any
   on (event: string, listener: (...args: any[]) => void): void
@@ -73,23 +72,6 @@ export async function initWDK (config: DaemonConfig, logger: Logger): Promise<WD
   const emitter = new EventEmitter()
   const broker = new SignedApprovalBroker(trustedApprovers, store, emitter)
 
-  // Step 08: Restore stored policies on boot (accountIndex 0 as default)
-  // Runtime swap loads per-wallet policies from DB before each tool call.
-  const restoredPolicies: Record<string, { policies: unknown[] } & Record<string, unknown>> = {}
-  try {
-    const chains = await store.listPolicyChains(0)
-    for (const chainIdStr of chains) {
-      const chainId = Number(chainIdStr)
-      const stored = await store.loadPolicy(0, chainId)
-      if (stored) {
-        restoredPolicies[chainIdStr] = { policies: stored.policies }
-        logger.info({ accountIndex: 0, chainId }, 'Restored policy from store')
-      }
-    }
-  } catch (err: any) {
-    logger.warn({ err: err.message }, 'Failed to restore policies from store')
-  }
-
   // Try to create the real guarded WDK; fall back to mock if @tetherto/wdk is absent
   let wdk: WDKInstance
   try {
@@ -98,7 +80,6 @@ export async function initWDK (config: DaemonConfig, logger: Logger): Promise<WD
       seed: mnemonic,
       wallets: {},
       protocols: {},
-      policies: restoredPolicies,
       approvalBroker: broker,
       approvalStore: store,
       trustedApprovers
@@ -108,7 +89,7 @@ export async function initWDK (config: DaemonConfig, logger: Logger): Promise<WD
     wdk = createMockWDK(broker, store)
   }
 
-  logger.info({ approverCount: trustedApprovers.length, restoredPolicies: Object.keys(restoredPolicies).length }, 'WDK host initialized.')
+  logger.info({ approverCount: trustedApprovers.length }, 'WDK host initialized.')
 
   return { wdk, broker, store }
 }
@@ -145,12 +126,6 @@ function createMockWDK (broker: SignedApprovalBroker, store: any): WDKInstance {
     },
     async getFeeRates (): Promise<Record<string, unknown>> {
       return {}
-    },
-    async updatePolicies (chainId: number, newPolicies: Record<string, unknown>, accountIndex: number = 0): Promise<void> {
-      await store.savePolicy(accountIndex, chainId, {
-        policies: (newPolicies as Record<string, unknown>).policies as unknown[] || [],
-        signature: (newPolicies as Record<string, unknown>).signature as Record<string, unknown> || {}
-      })
     },
     getApprovalBroker (): SignedApprovalBroker {
       return broker

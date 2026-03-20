@@ -36,14 +36,16 @@ function createMockStore (overrides: Record<string, any> = {}): any {
   return {
     saveSigner: jest.fn<() => Promise<undefined>>().mockResolvedValue(undefined),
     listSigners: jest.fn<() => Promise<any[]>>().mockResolvedValue([]),
+    savePolicy: jest.fn<() => Promise<undefined>>().mockResolvedValue(undefined),
+    loadPendingByRequestId: jest.fn<() => Promise<null>>().mockResolvedValue(null),
+    getPolicyVersion: jest.fn<() => Promise<number>>().mockResolvedValue(0),
     ...overrides
   }
 }
 
 function createMockWdk (store: any): any {
   return {
-    getApprovalStore: jest.fn().mockReturnValue(store),
-    updatePolicies: jest.fn<() => Promise<undefined>>().mockResolvedValue(undefined)
+    getApprovalStore: jest.fn().mockReturnValue(store)
   }
 }
 
@@ -230,7 +232,7 @@ describe('handleControlMessage', () => {
     }), expect.any(Object))
   })
 
-  test('policy_approval: applies policies to WDK when payload.policies present', async () => {
+  test('policy_approval: saves policies to store when payload.policies present', async () => {
     const msg: ControlMessage = {
       type: 'policy_approval',
       payload: {
@@ -241,11 +243,31 @@ describe('handleControlMessage', () => {
       }
     }
 
-    await handleControlMessage(msg, broker, logger as any, wdk)
+    await handleControlMessage(msg, broker, logger as any, wdk, undefined, store)
 
-    expect(wdk.updatePolicies).toHaveBeenCalledWith(1, {
-      policies: [{ type: 'auto', maxUsd: 500 }]
-    }, 0)
+    expect(store.savePolicy).toHaveBeenCalledWith(0, 1, {
+      policies: [{ type: 'auto', maxUsd: 500 }],
+      signature: {}
+    })
+  })
+
+  test('policy_approval: broker failure prevents savePolicy', async () => {
+    broker.submitApproval.mockRejectedValue(new Error('Verification failed'))
+
+    const msg: ControlMessage = {
+      type: 'policy_approval',
+      payload: {
+        requestId: 'req_pol_fail',
+        chainId: 1,
+        accountIndex: 0,
+        policies: [{ type: 'auto', maxUsd: 500 }]
+      }
+    }
+
+    const result = await handleControlMessage(msg, broker, logger as any, wdk, undefined, store)
+
+    expect(result.ok).toBe(false)
+    expect(store.savePolicy).not.toHaveBeenCalled()
   })
 
   test('policy_approval: returns error when broker.submitApproval throws', async () => {
