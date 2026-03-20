@@ -58,6 +58,36 @@ AI DeFi Agent 서명 엔진 + 제어 인프라.
 - **Codex Session ID**: `/Users/mousebook/Documents/GitHub/WDK-APP/docs/phases/v0.2.6-daemon-boundary-normalization`
 - **시작일**: 2026-03-20
 
+### v0.2.8 — Manifest 정책 호환성 복원
+- **상태**: Step 5 완료 (커밋 대기)
+- **문서**: [docs/phases/v0.2.8-manifest-policy-compat/](docs/phases/v0.2.8-manifest-policy-compat/)
+- **Codex Session ID**: `/Users/mousebook/Documents/GitHub/WDK-APP/docs/phases/v0.2.8-manifest-policy-compat`
+- **시작일**: 2026-03-20
+
+### v0.2.7 — signerId === publicKey 통합
+- **상태**: Step 1 - PRD
+- **문서**: [docs/phases/v0.2.7-signer-id-unification/](docs/phases/v0.2.7-signer-id-unification/)
+- **Codex Session ID**: `/Users/mousebook/Documents/GitHub/WDK-APP/docs/phases/v0.2.7-signer-id-unification`
+- **시작일**: 2026-03-20
+
+### v0.2.9 — Daemon Wide-Bag Union 분리
+- **상태**: Step 1 - PRD
+- **문서**: [docs/phases/v0.2.9-daemon-wide-bag-union/](docs/phases/v0.2.9-daemon-wide-bag-union/)
+- **Codex Session ID**: `/Users/mousebook/Documents/GitHub/WDK-APP/docs/phases/v0.2.9-daemon-wide-bag-union`
+- **시작일**: 2026-03-20
+
+### v0.2.10 — WDKContext 분해 + Port Interface
+- **상태**: Step 1 - PRD
+- **문서**: [docs/phases/v0.2.10-wdkcontext-decomposition/](docs/phases/v0.2.10-wdkcontext-decomposition/)
+- **Codex Session ID**: `/Users/mousebook/Documents/GitHub/WDK-APP/docs/phases/v0.2.10-wdkcontext-decomposition`
+- **시작일**: 2026-03-20
+
+### v0.2.11 — Daemon 타입 인프라 정리
+- **상태**: Step 1 - PRD
+- **문서**: [docs/phases/v0.2.11-daemon-type-infra-cleanup/](docs/phases/v0.2.11-daemon-type-infra-cleanup/)
+- **Codex Session ID**: `/Users/mousebook/Documents/GitHub/WDK-APP/docs/phases/v0.2.11-daemon-type-infra-cleanup`
+- **시작일**: 2026-03-20
+
 ## 프로젝트 구조
 
 ```
