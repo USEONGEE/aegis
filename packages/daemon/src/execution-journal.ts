@@ -6,16 +6,16 @@ import type { JournalStatus } from '@wdk-app/guarded-wdk'
 // ---------------------------------------------------------------------------
 
 export interface JournalEntry {
-  intentId: string
+  intentHash: string
   targetHash: string
   status: JournalStatus
-  seedId?: string
+  accountIndex: number
   chainId?: number
-  txHash?: string
+  txHash?: string | null
 }
 
 export interface TrackMeta {
-  seedId: string
+  accountIndex: number
   chainId: number
   targetHash: string
 }
@@ -24,19 +24,19 @@ export interface JournalListOptions {
   status?: JournalStatus
   chainId?: number
   limit?: number
-  seedId?: string
+  accountIndex?: number
 }
 
 interface ApprovalStore {
   listJournal (opts: JournalListOptions): Promise<JournalEntry[]>
   saveJournalEntry (entry: {
-    intentId: string
-    seedId: string
+    intentHash: string
+    accountIndex: number
     chainId: number
     targetHash: string
     status: JournalStatus
   }): Promise<void>
-  updateJournalStatus (intentId: string, status: JournalStatus, txHash?: string): Promise<void>
+  updateJournalStatus (intentHash: string, status: JournalStatus, txHash?: string): Promise<void>
 }
 
 /**
@@ -56,18 +56,16 @@ interface ApprovalStore {
  */
 export class ExecutionJournal {
   private _store: ApprovalStore
-  private _seedId: string
   private _logger: Logger
 
-  // In-memory index: targetHash -> intentId (for fast dedup)
+  // In-memory index: targetHash -> intentHash (for fast dedup)
   private _hashIndex: Map<string, string>
 
-  // In-memory index: intentId -> status
+  // In-memory index: intentHash -> status
   private _statusIndex: Map<string, JournalStatus>
 
-  constructor (store: ApprovalStore, seedId: string, logger: Logger) {
+  constructor (store: ApprovalStore, logger: Logger) {
     this._store = store
-    this._seedId = seedId
     this._logger = logger
 
     this._hashIndex = new Map()
@@ -80,19 +78,19 @@ export class ExecutionJournal {
    */
   async recover (): Promise<void> {
     try {
-      const entries = await this._store.listJournal({ seedId: this._seedId })
+      const entries = await this._store.listJournal({})
       let recovered = 0
 
       for (const entry of entries) {
-        const intentId = entry.intentId
+        const intentHash = entry.intentHash
         const targetHash = entry.targetHash
         const status = entry.status
 
-        this._statusIndex.set(intentId, status)
+        this._statusIndex.set(intentHash, status)
 
         // Only index non-terminal entries for dedup
         if (status !== 'settled' && status !== 'failed' && status !== 'signed') {
-          this._hashIndex.set(targetHash, intentId)
+          this._hashIndex.set(targetHash, intentHash)
           recovered++
         }
       }
@@ -106,35 +104,35 @@ export class ExecutionJournal {
   /**
    * Track a new intent. Records it with status 'received'.
    */
-  async track (intentId: string, meta: TrackMeta): Promise<void> {
-    const { seedId, chainId, targetHash } = meta
+  async track (intentHash: string, meta: TrackMeta): Promise<void> {
+    const { accountIndex, chainId, targetHash } = meta
 
-    this._hashIndex.set(targetHash, intentId)
-    this._statusIndex.set(intentId, 'received')
+    this._hashIndex.set(targetHash, intentHash)
+    this._statusIndex.set(intentHash, 'received')
 
     try {
       await this._store.saveJournalEntry({
-        intentId,
-        seedId: seedId || this._seedId,
+        intentHash,
+        accountIndex,
         chainId,
         targetHash,
         status: 'received'
       })
     } catch (err) {
-      this._logger.error({ err, intentId }, 'Failed to persist journal entry')
+      this._logger.error({ err, intentHash }, 'Failed to persist journal entry')
     }
   }
 
   /**
    * Update the status of a tracked intent.
    */
-  async updateStatus (intentId: string, status: JournalStatus, txHash?: string): Promise<void> {
-    this._statusIndex.set(intentId, status)
+  async updateStatus (intentHash: string, status: JournalStatus, txHash?: string): Promise<void> {
+    this._statusIndex.set(intentHash, status)
 
     // Remove from hash index if terminal
     if (status === 'settled' || status === 'failed' || status === 'signed') {
       for (const [hash, id] of this._hashIndex) {
-        if (id === intentId) {
+        if (id === intentHash) {
           this._hashIndex.delete(hash)
           break
         }
@@ -142,9 +140,9 @@ export class ExecutionJournal {
     }
 
     try {
-      await this._store.updateJournalStatus(intentId, status, txHash)
+      await this._store.updateJournalStatus(intentHash, status, txHash)
     } catch (err) {
-      this._logger.error({ err, intentId, status }, 'Failed to update journal status')
+      this._logger.error({ err, intentHash, status }, 'Failed to update journal status')
     }
   }
 
@@ -158,12 +156,12 @@ export class ExecutionJournal {
   /**
    * Get the status of an intent.
    */
-  getStatus (intentId: string): JournalStatus | null {
-    return this._statusIndex.get(intentId) || null
+  getStatus (intentHash: string): JournalStatus | null {
+    return this._statusIndex.get(intentHash) || null
   }
 
   /**
-   * Get the intent ID for a given target hash (if in-flight).
+   * Get the intent hash for a given target hash (if in-flight).
    */
   getIntentByHash (targetHash: string): string | null {
     return this._hashIndex.get(targetHash) || null
@@ -173,7 +171,7 @@ export class ExecutionJournal {
    * List all journal entries (delegates to store).
    */
   async list (opts: JournalListOptions = {}): Promise<JournalEntry[]> {
-    return this._store.listJournal({ seedId: this._seedId, ...opts })
+    return this._store.listJournal(opts)
   }
 
   /**

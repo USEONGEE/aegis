@@ -205,6 +205,8 @@ export function SettingsScreen() {
                 const signedApproval = builder.forDeviceRevoke({
                   targetSignerId: signer.signerId,
                   chainId: 1, // ethereum mainnet
+                  accountIndex: 0,
+                  content: `Revoke signer ${signer.signerId}`,
                 });
                 await relay.sendApproval(signedApproval);
                 showToast('Signer revoke request sent', 'info');

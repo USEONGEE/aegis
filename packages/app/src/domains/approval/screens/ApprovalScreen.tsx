@@ -97,25 +97,16 @@ function ApprovalCard({
         )}
       </View>
 
-      {approval.metadata.to && (
-        <View style={styles.detailRow}>
-          <Text style={styles.detailLabel}>To</Text>
-          <Text style={styles.detailValueMono}>{truncateAddr(approval.metadata.to)}</Text>
-        </View>
-      )}
+      <View style={styles.detailRow}>
+        <Text style={styles.detailLabel}>Wallet</Text>
+        <Text style={styles.detailValue}>Account #{approval.accountIndex}</Text>
+      </View>
 
-      {approval.metadata.value && approval.metadata.value !== '0' && (
+      {approval.content !== '' && (
         <View style={styles.detailRow}>
-          <Text style={styles.detailLabel}>Value</Text>
-          <Text style={styles.detailValue}>{approval.metadata.value} wei</Text>
-        </View>
-      )}
-
-      {approval.metadata.description && (
-        <View style={styles.detailRow}>
-          <Text style={styles.detailLabel}>Description</Text>
-          <Text style={styles.detailValue} numberOfLines={2}>
-            {approval.metadata.description}
+          <Text style={styles.detailLabel}>Reason</Text>
+          <Text style={styles.detailValue} numberOfLines={3}>
+            {approval.content}
           </Text>
         </View>
       )}

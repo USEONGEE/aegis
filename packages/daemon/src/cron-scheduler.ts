@@ -15,6 +15,7 @@ export interface CronEntry {
   intervalMs: number
   prompt: string
   chainId: number | null
+  accountIndex: number
   lastRunAt: number
 }
 
@@ -24,6 +25,7 @@ export interface CronRegistration {
   interval: string
   prompt: string
   chainId: number | null
+  accountIndex: number
 }
 
 export interface CronListItem {
@@ -32,11 +34,12 @@ export interface CronListItem {
   interval: string
   prompt: string
   chainId: number | null
+  accountIndex: number
   lastRunAt: number
 }
 
 interface CronStore {
-  listCrons (seedId: string): Promise<Array<{ id: string; seedId: string; sessionId: string; interval: string; prompt: string; chainId: number | null; createdAt: number; lastRunAt: number | null; isActive: boolean }>>
+  listCrons (accountIndex?: number): Promise<Array<{ id: string; accountIndex: number; sessionId: string; interval: string; prompt: string; chainId: number | null; createdAt: number; lastRunAt: number | null; isActive: boolean }>>
   removeCron (cronId: string): Promise<void>
   updateCronLastRun (cronId: string, timestamp: number): Promise<void>
 }
@@ -57,7 +60,6 @@ export interface CronSchedulerOptions {
  */
 export class CronScheduler {
   private _store: CronStore
-  private _seedId: string
   private _wdkContext: WDKContext
   private _openclawClient: OpenClawClient
   private _logger: Logger
@@ -71,14 +73,12 @@ export class CronScheduler {
 
   constructor (
     store: CronStore,
-    seedId: string,
     wdkContext: WDKContext,
     openclawClient: OpenClawClient,
     logger: Logger,
     opts: CronSchedulerOptions = {}
   ) {
     this._store = store
-    this._seedId = seedId
     this._wdkContext = wdkContext
     this._openclawClient = openclawClient
     this._logger = logger
@@ -97,7 +97,7 @@ export class CronScheduler {
     if (this._running) return
 
     // Load existing crons from store
-    const crons = await this._store.listCrons(this._seedId)
+    const crons = await this._store.listCrons()
     for (const cron of crons) {
       if (cron.isActive) {
         this._crons.set(cron.id, {
@@ -107,6 +107,7 @@ export class CronScheduler {
           intervalMs: parseInterval(cron.interval),
           prompt: cron.prompt,
           chainId: cron.chainId,
+          accountIndex: cron.accountIndex,
           lastRunAt: cron.lastRunAt || 0
         })
       }
@@ -140,6 +141,7 @@ export class CronScheduler {
       intervalMs: parseInterval(cron.interval),
       prompt: cron.prompt,
       chainId: cron.chainId,
+      accountIndex: cron.accountIndex,
       lastRunAt: 0
     }
 
@@ -223,6 +225,7 @@ export class CronScheduler {
         interval: cron.interval,
         prompt: cron.prompt,
         chainId: cron.chainId,
+        accountIndex: cron.accountIndex,
         lastRunAt: cron.lastRunAt
       })
     }

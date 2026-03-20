@@ -332,6 +332,8 @@ export class RelayClient {
         policy: 'policy_approval',
         policy_reject: 'policy_reject',
         device_revoke: 'device_revoke',
+        wallet_create: 'wallet_create',
+        wallet_delete: 'wallet_delete',
       };
       const controlType = approvalTypeMap[approval?.type ?? ''] ?? 'tx_approval';
 
@@ -345,6 +347,13 @@ export class RelayClient {
 
         if (data.type === 'approval_result' && (data.txHash || data.hash)) {
           resolve({ txHash: (data.txHash ?? data.hash)! });
+        } else if (data.type === 'wallet_create' || data.type === 'wallet_delete') {
+          // Wallet lifecycle responses don't have txHash
+          if ((data as any).ok) {
+            resolve({ txHash: '' });
+          } else {
+            reject(new Error((data as any).error ?? 'Wallet operation failed'));
+          }
         } else if (data.type === 'approval_error') {
           reject(new Error(data.error ?? 'Approval failed'));
         }

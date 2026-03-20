@@ -230,15 +230,14 @@ describe('handleControlMessage', () => {
     }), expect.any(Object))
   })
 
-  test('policy_approval: applies policies to WDK when metadata.policies present', async () => {
+  test('policy_approval: applies policies to WDK when payload.policies present', async () => {
     const msg: ControlMessage = {
       type: 'policy_approval',
       payload: {
         requestId: 'req_pol_2',
         chainId: 1,
-        metadata: {
-          policies: [{ type: 'auto', maxUsd: 500 }]
-        }
+        accountIndex: 0,
+        policies: [{ type: 'auto', maxUsd: 500 }]
       }
     }
 
@@ -246,7 +245,7 @@ describe('handleControlMessage', () => {
 
     expect(wdk.updatePolicies).toHaveBeenCalledWith(1, {
       policies: [{ type: 'auto', maxUsd: 500 }]
-    })
+    }, 0)
   })
 
   test('policy_approval: returns error when broker.submitApproval throws', async () => {
@@ -303,7 +302,7 @@ describe('handleControlMessage', () => {
       type: 'device_revoke',
       payload: {
         requestId: 'req_rev_1',
-        metadata: { signerId }
+        signerId
       }
     }
 
@@ -314,7 +313,7 @@ describe('handleControlMessage', () => {
     expect(broker.submitApproval).toHaveBeenCalledWith(
       expect.objectContaining({
         type: 'device_revoke',
-        metadata: { signerId }
+        signerId
       }),
       { expectedTargetHash: expectedHash }
     )
@@ -331,7 +330,7 @@ describe('handleControlMessage', () => {
       type: 'device_revoke',
       payload: {
         requestId: 'req_rev_2',
-        metadata: { signerId: 'dev_x' }
+        signerId: 'dev_x'
       }
     }
 
@@ -347,7 +346,7 @@ describe('handleControlMessage', () => {
       type: 'device_revoke',
       payload: {
         requestId: 'req_rev_3',
-        metadata: { signerId: 'dev_y' }
+        signerId: 'dev_y'
       }
     }
 

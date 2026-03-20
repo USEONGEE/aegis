@@ -6,7 +6,7 @@
 /**
  * The approval types supported by the system.
  */
-export type ApprovalType = 'tx' | 'policy' | 'policy_reject' | 'device_revoke';
+export type ApprovalType = 'tx' | 'policy' | 'policy_reject' | 'device_revoke' | 'wallet_create' | 'wallet_delete';
 
 /**
  * Unsigned intent — the tx format that WDK receives from any source (AI, DeFi CLI, etc).
@@ -37,6 +37,8 @@ export interface SignedApproval {
   chainId: number;              // cross-chain replay prevention
   requestId: string;            // pending policy ID or intent ID
   policyVersion: number;        // tx approval: current policy version binding
+  accountIndex: number;         // BIP-44 account index
+  content: string;              // approval reason / description
 
   // When
   expiresAt: number;            // unix timestamp
@@ -55,23 +57,8 @@ export interface ApprovalRequest {
   chainId: number;
   targetHash: string;
 
-  // Display metadata
-  metadata: {
-    // For tx approvals
-    to?: string;
-    value?: string;
-    data?: string;
-    description?: string;
-    estimatedFeeUSD?: string;
-
-    // For policy approvals
-    reason?: string;
-    policies?: unknown[];
-
-    // For device revoke
-    signerId?: string;
-    signerName?: string;
-  };
+  accountIndex: number;         // BIP-44 account index
+  content: string;              // approval reason / description
 
   policyVersion: number;
   createdAt: number;
@@ -89,6 +76,8 @@ export interface SignedApprovalPayload {
   chainId: number;
   requestId: string;
   policyVersion: number;
+  accountIndex: number;
+  content: string;
   expiresAt: number;
   nonce: number;
 }

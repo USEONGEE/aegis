@@ -76,57 +76,27 @@ function PendingContent({
   onApprove: () => void;
   onReject: () => void;
 }) {
-  const truncateAddr = (addr: string) =>
-    addr ? `${addr.slice(0, 10)}...${addr.slice(-8)}` : '-';
-
   return (
     <View style={styles.section}>
       <Text style={styles.sectionTitle}>Review Transaction</Text>
 
       <InfoRow label="Type" value={request.type} />
       <InfoRow label="Chain" value={String(request.chainId)} />
+      <InfoRow label="Wallet" value={`Account #${request.accountIndex}`} />
       <InfoRow label="Request ID" value={request.requestId} />
-      {request.metadata.to && (
-        <InfoRow label="To" value={truncateAddr(request.metadata.to)} mono />
-      )}
-      {request.metadata.value && request.metadata.value !== '0' && (
-        <InfoRow label="Value" value={`${request.metadata.value} wei`} />
-      )}
-      {request.metadata.description && (
-        <InfoRow label="Description" value={request.metadata.description} />
-      )}
-      {request.metadata.estimatedFeeUSD && (
-        <InfoRow label="Est. Fee" value={`$${request.metadata.estimatedFeeUSD}`} />
-      )}
-      {request.metadata.reason && (
-        <InfoRow label="Reason" value={request.metadata.reason} />
+
+      {request.content !== '' && (
+        <View style={styles.dataSection}>
+          <Text style={styles.dataLabel}>Reason</Text>
+          <ScrollView style={styles.dataBox} nestedScrollEnabled>
+            <Text style={styles.dataText} selectable>
+              {request.content}
+            </Text>
+          </ScrollView>
+        </View>
       )}
 
       <InfoRow label="Expires" value={new Date(request.expiresAt * 1000).toLocaleTimeString()} />
-
-      {/* Raw data section */}
-      {request.metadata.data && (
-        <View style={styles.dataSection}>
-          <Text style={styles.dataLabel}>Calldata</Text>
-          <ScrollView style={styles.dataBox} nestedScrollEnabled>
-            <Text style={styles.dataText} selectable>
-              {request.metadata.data}
-            </Text>
-          </ScrollView>
-        </View>
-      )}
-
-      {/* Policy details for policy approvals */}
-      {request.metadata.policies && (
-        <View style={styles.dataSection}>
-          <Text style={styles.dataLabel}>Policies</Text>
-          <ScrollView style={styles.dataBox} nestedScrollEnabled>
-            <Text style={styles.dataText} selectable>
-              {JSON.stringify(request.metadata.policies, null, 2)}
-            </Text>
-          </ScrollView>
-        </View>
-      )}
 
       {/* Buttons */}
       <View style={styles.buttonRow}>

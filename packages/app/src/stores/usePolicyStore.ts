@@ -26,6 +26,7 @@ export interface PolicyGroup {
 export interface PendingPolicyRequest {
   requestId: string;
   chainId: number;
+  accountIndex: number;
   reason: string;
   policies: Policy[];
   requestedBy: string;        // 'ai' or 'owner'

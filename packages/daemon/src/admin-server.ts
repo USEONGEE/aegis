@@ -50,7 +50,7 @@ interface AdminResponse {
  *   - journal_list   -> list execution journal entries
  *   - signer_list    -> list paired signers
  *   - cron_list      -> list registered cron jobs
- *   - seed_list      -> list seeds (mnemonic redacted)
+ *   - wallet_list    -> list wallets
  */
 export class AdminServer {
   private _socketPath: string
@@ -183,7 +183,6 @@ export class AdminServer {
           data: {
             uptime: Date.now() - this._startedAt,
             startedAt: this._startedAt,
-            seedId: this._wdkContext?.seedId || null,
             relayConnected: this._relayClient?.connected || false,
             journalActive: this._journal?.activeCount || 0,
             cronCount: this._cronScheduler?.size || 0
@@ -216,7 +215,7 @@ export class AdminServer {
         return {
           ok: true,
           data: {
-            signers: signers.map(d => ({
+            signers: signers.map((d: { signerId: string; name: string | null; registeredAt: number; revokedAt: number | null }) => ({
               signerId: d.signerId,
               name: d.name,
               registeredAt: d.registeredAt,
@@ -239,22 +238,20 @@ export class AdminServer {
       }
 
       // -------------------------------------------------------------------
-      // seed_list -- seeds (mnemonic redacted)
+      // wallet_list -- wallets
       // -------------------------------------------------------------------
-      case 'seed_list': {
-        const seeds = await this._store.listSeeds()
-        const activeSeed = await this._store.getActiveSeed()
+      case 'wallet_list': {
+        const wallets = await this._store.listWallets()
 
         return {
           ok: true,
           data: {
-            seeds: seeds.map(s => ({
-              id: s.id,
-              name: s.name,
-              createdAt: s.createdAt,
-              isActive: s.id === activeSeed?.id
-            })),
-            activeSeedId: activeSeed?.id || null
+            wallets: wallets.map((w: { accountIndex: number; name: string; address: string; createdAt: number }) => ({
+              accountIndex: w.accountIndex,
+              name: w.name,
+              address: w.address,
+              createdAt: w.createdAt
+            }))
           }
         }
       }

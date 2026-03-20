@@ -21,7 +21,7 @@ export interface MockAccount {
 export interface WDKInstance {
   getAccount (chain: string, index?: number): Promise<any>
   getFeeRates? (): Promise<Record<string, unknown>>
-  updatePolicies? (chainId: number, newPolicies: Record<string, unknown>): Promise<void>
+  updatePolicies? (chainId: number, newPolicies: Record<string, unknown>, accountIndex?: number): Promise<void>
   getApprovalBroker? (): SignedApprovalBroker
   getApprovalStore? (): any
   on (event: string, listener: (...args: any[]) => void): void
@@ -31,16 +31,14 @@ export interface WDKInstance {
 
 export interface WDKInitResult {
   wdk: WDKInstance | null
-  account: any | null
   broker: SignedApprovalBroker | null
   store: InstanceType<typeof SqliteApprovalStore>
-  seedId: string | null
 }
 
 /**
- * Initialize the WDK host: load active seed, create store + broker, build guarded WDK.
+ * Initialize the WDK host: load master seed, create store + broker, build guarded WDK.
  *
- * Returns { wdk, account, broker, store, seedId } or null if no seed is available.
+ * Returns { wdk, broker, store } or null wdk if no seed is available.
  *
  * NOTE: createGuardedWDK depends on @tetherto/wdk which may not be available
  * in all environments. The import is deferred so the rest of the daemon can
@@ -56,15 +54,14 @@ export async function initWDK (config: DaemonConfig, logger: Logger): Promise<WD
   const store = new SqliteApprovalStore(dbPath)
   await store.init()
 
-  // Load active seed
-  const activeSeed = await store.getActiveSeed()
-  if (!activeSeed) {
-    logger.warn('No active seed found. WDK will not be initialized until a seed is added.')
-    return { wdk: null, account: null, broker: null, store, seedId: null }
+  // Load master seed
+  const masterSeed = await store.getMasterSeed()
+  if (!masterSeed) {
+    logger.warn('No master seed found. WDK will not be initialized until a seed is added.')
+    return { wdk: null, broker: null, store }
   }
 
-  const seedId: string = activeSeed.id
-  const mnemonic: string = activeSeed.mnemonic
+  const mnemonic: string = masterSeed.mnemonic
 
   // Load trusted approvers (public keys) from paired signers
   const signers = await store.listSigners()
@@ -76,17 +73,18 @@ export async function initWDK (config: DaemonConfig, logger: Logger): Promise<WD
   const emitter = new EventEmitter()
   const broker = new SignedApprovalBroker(trustedApprovers, store, emitter)
 
-  // Step 08: Restore stored policies on boot
+  // Step 08: Restore stored policies on boot (accountIndex 0 as default)
+  // Runtime swap loads per-wallet policies from DB before each tool call.
   const restoredPolicies: Record<string, { policies: unknown[] } & Record<string, unknown>> = {}
   try {
-    const chains = await store.listPolicyChains(seedId)
+    const chains = await store.listPolicyChains(0)
     for (const chainIdStr of chains) {
       const chainId = Number(chainIdStr)
-      const stored = await store.loadPolicy(seedId, chainId)
+      const stored = await store.loadPolicy(0, chainId)
       if (stored) {
         const policiesArr = JSON.parse(stored.policiesJson)
         restoredPolicies[chainIdStr] = { policies: policiesArr }
-        logger.info({ seedId, chainId }, 'Restored policy from store')
+        logger.info({ accountIndex: 0, chainId }, 'Restored policy from store')
       }
     }
   } catch (err: any) {
@@ -95,7 +93,6 @@ export async function initWDK (config: DaemonConfig, logger: Logger): Promise<WD
 
   // Try to create the real guarded WDK; fall back to mock if @tetherto/wdk is absent
   let wdk: WDKInstance
-  let account: any
   try {
     const { createGuardedWDK } = await import('@wdk-app/guarded-wdk')
     wdk = await createGuardedWDK({
@@ -107,29 +104,20 @@ export async function initWDK (config: DaemonConfig, logger: Logger): Promise<WD
       approvalStore: store,
       trustedApprovers
     })
-
-    // Attempt to get the default account (ethereum, index 0)
-    try {
-      account = await wdk.getAccount('ethereum', 0)
-    } catch {
-      account = null
-      logger.info('No ethereum wallet registered; account will be null.')
-    }
   } catch (err: any) {
     logger.warn({ err: err.message }, 'Could not create real GuardedWDK. Using mock host.')
-    wdk = createMockWDK(broker, store, seedId)
-    account = null
+    wdk = createMockWDK(broker, store)
   }
 
-  logger.info({ seedId, approverCount: trustedApprovers.length, restoredPolicies: Object.keys(restoredPolicies).length }, 'WDK host initialized.')
+  logger.info({ approverCount: trustedApprovers.length, restoredPolicies: Object.keys(restoredPolicies).length }, 'WDK host initialized.')
 
-  return { wdk, account, broker, store, seedId }
+  return { wdk, broker, store }
 }
 
 /**
- * Re-initialize WDK with a different seed (used on seed switch).
+ * Re-initialize WDK (used on seed switch).
  */
-export async function switchSeed (newSeedId: string, config: DaemonConfig, logger: Logger): Promise<WDKInitResult> {
+export async function switchSeed (config: DaemonConfig, logger: Logger): Promise<WDKInitResult> {
   return initWDK(config, logger)
 }
 
@@ -137,7 +125,7 @@ export async function switchSeed (newSeedId: string, config: DaemonConfig, logge
  * Minimal mock WDK for environments where @tetherto/wdk is not installed.
  * Exposes the same interface shape so the daemon can boot and handle admin commands.
  */
-function createMockWDK (broker: SignedApprovalBroker, store: any, seedId: string): WDKInstance {
+function createMockWDK (broker: SignedApprovalBroker, store: any): WDKInstance {
   return {
     async getAccount (chain: string, index: number = 0) {
       return {
@@ -159,8 +147,8 @@ function createMockWDK (broker: SignedApprovalBroker, store: any, seedId: string
     async getFeeRates (): Promise<Record<string, unknown>> {
       return {}
     },
-    async updatePolicies (chainId: number, newPolicies: Record<string, unknown>): Promise<void> {
-      await store.savePolicy(seedId, chainId, {
+    async updatePolicies (chainId: number, newPolicies: Record<string, unknown>, accountIndex: number = 0): Promise<void> {
+      await store.savePolicy(accountIndex, chainId, {
         policies: (newPolicies as Record<string, unknown>).policies as unknown[] || [],
         signature: (newPolicies as Record<string, unknown>).signature as Record<string, unknown> || {}
       })

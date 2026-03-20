@@ -30,10 +30,8 @@ export function PolicyScreen() {
           type: 'policy',
           chainId: pending.chainId,
           targetHash: '', // Will be computed from policies
-          metadata: {
-            reason: pending.reason,
-            policies: pending.policies,
-          },
+          accountIndex: pending.accountIndex ?? 0,
+          content: pending.reason,
           policyVersion: 0,
           createdAt: pending.createdAt,
           expiresAt: pending.expiresAt,
@@ -54,10 +52,8 @@ export function PolicyScreen() {
           type: 'policy_reject',
           chainId: pending.chainId,
           targetHash: '',
-          metadata: {
-            reason: `Rejected: ${pending.reason}`,
-            policies: pending.policies,
-          },
+          accountIndex: pending.accountIndex ?? 0,
+          content: `Rejected: ${pending.reason}`,
           policyVersion: 0,
           createdAt: pending.createdAt,
           expiresAt: pending.expiresAt,

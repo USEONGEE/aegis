@@ -25,11 +25,10 @@ function createMockLogger (): MockLogger {
 function createMockWdk (overrides: Record<string, any> = {}): any {
   const account = {
     sendTransaction: jest.fn<() => Promise<{ hash: string; fee: string }>>().mockResolvedValue({ hash: '0xabc123', fee: '0.001' }),
-    signTransaction: jest.fn<() => Promise<{ signedTx: string; intentHash: string; requestId: string; intentId: string }>>().mockResolvedValue({
+    signTransaction: jest.fn<() => Promise<{ signedTx: string; intentHash: string; requestId: string }>>().mockResolvedValue({
       signedTx: '0xsigned_tx_data',
       intentHash: '0xintent_hash',
-      requestId: 'req_sign_1',
-      intentId: 'intent_sign_1'
+      requestId: 'req_sign_1'
     }),
     getBalance: jest.fn<() => Promise<Array<{ token: string; balance: string }>>>().mockResolvedValue([
       { token: 'ETH', balance: '1.5' },
@@ -49,10 +48,10 @@ function createMockWdk (overrides: Record<string, any> = {}): any {
 
 function createMockStore (overrides: Record<string, any> = {}): any {
   return {
-    loadPolicy: jest.fn<() => Promise<{ policiesJson: string; signatureJson: string; seedId: string; chainId: number; policyVersion: number; updatedAt: number }>>().mockResolvedValue({
+    loadPolicy: jest.fn<() => Promise<{ policiesJson: string; signatureJson: string; accountIndex: number; chainId: number; policyVersion: number; updatedAt: number }>>().mockResolvedValue({
       policiesJson: JSON.stringify([{ type: 'auto', maxUsd: 100 }]),
       signatureJson: '{}',
-      seedId: 'test-seed',
+      accountIndex: 0,
       chainId: 1,
       policyVersion: 1,
       updatedAt: Date.now()
@@ -90,7 +89,6 @@ function buildContext (overrides: Record<string, any> = {}): WDKContext {
     wdk: createMockWdk(overrides),
     broker: createMockBroker(overrides.broker),
     store: createMockStore(overrides.store),
-    seedId: 'seed_test_001',
     logger: createMockLogger() as any,
     journal: createMockJournal(),
     ...overrides.extra
@@ -126,7 +124,8 @@ describe('executeToolCall', () => {
       chain: 'ethereum',
       to: '0x1234567890abcdef1234567890abcdef12345678',
       data: '0x',
-      value: '1000000000000000000'
+      value: '1000000000000000000',
+      accountIndex: 0
     }, ctx)
 
     expect(result.status).toBe('executed')
@@ -146,7 +145,8 @@ describe('executeToolCall', () => {
       chain: 'ethereum',
       to: '0xdead',
       data: '0x',
-      value: '0'
+      value: '0',
+      accountIndex: 0
     }, ctx)
 
     expect(result.status).toBe('duplicate')
@@ -168,7 +168,8 @@ describe('executeToolCall', () => {
       chain: 'ethereum',
       to: '0xdead',
       data: '0x',
-      value: '999999'
+      value: '999999',
+      accountIndex: 0
     }, ctx)
 
     expect(result.status).toBe('rejected')
@@ -184,7 +185,8 @@ describe('executeToolCall', () => {
       chain: 'ethereum',
       token: 'USDC',
       to: '0xrecipient',
-      amount: '100'
+      amount: '100',
+      accountIndex: 0
     }, ctx)
 
     expect(result.status).toBe('executed')
@@ -230,31 +232,27 @@ describe('executeToolCall', () => {
     expect((result.pending as any[])[0].requestId).toBe('req_1')
   })
 
-  // 8. policyRequest returns { requestId, status: "pending" }
-  test('policyRequest returns { requestId, status: "pending" }', async () => {
+  // 8. policyRequest returns { status: "pending" }
+  test('policyRequest returns { status: "pending" }', async () => {
     const ctx = buildContext()
 
     const result = await executeToolCall('policyRequest', {
       chain: 'ethereum',
       reason: 'Increase daily limit',
-      policies: [{ type: 'auto', maxUsd: 500 }]
+      policies: [{ type: 'auto', maxUsd: 500 }],
+      accountIndex: 0
     }, ctx)
 
     expect(result.status).toBe('pending')
-    expect(result.requestId).toBeDefined()
-    expect(typeof result.requestId).toBe('string')
     expect(result.policyHash).toBeDefined()
     expect(result.policyHash!.startsWith('0x')).toBe(true)
 
     // Verify broker.createRequest was called
     expect(ctx.broker.createRequest).toHaveBeenCalledWith('policy', expect.objectContaining({
       chainId: 1,
-      requestId: expect.any(String),
       targetHash: expect.any(String),
-      metadata: expect.objectContaining({
-        reason: 'Increase daily limit',
-        policies: [{ type: 'auto', maxUsd: 500 }]
-      })
+      accountIndex: 0,
+      content: 'Increase daily limit'
     }))
   })
 
@@ -266,12 +264,13 @@ describe('executeToolCall', () => {
       interval: '5m',
       prompt: 'check ETH balance',
       chain: 'ethereum',
-      sessionId: 'session_001'
+      sessionId: 'session_001',
+      accountIndex: 0
     }, ctx)
 
     expect(result.status).toBe('registered')
     expect(result.cronId).toBe('mock-cron-id')
-    expect(ctx.store.saveCron).toHaveBeenCalledWith('seed_test_001', expect.objectContaining({
+    expect(ctx.store.saveCron).toHaveBeenCalledWith(0, expect.objectContaining({
       interval: '5m',
       prompt: 'check ETH balance',
       chainId: 1,
@@ -287,7 +286,7 @@ describe('executeToolCall', () => {
 
     expect(result.crons).toHaveLength(1)
     expect((result.crons as any[])[0].id).toBe('cron_1')
-    expect(ctx.store.listCrons).toHaveBeenCalledWith('seed_test_001')
+    expect(ctx.store.listCrons).toHaveBeenCalled()
   })
 
   // 11. removeCron
@@ -347,14 +346,14 @@ describe('executeToolCall', () => {
       chain: 'ethereum',
       to: '0x1234567890abcdef1234567890abcdef12345678',
       data: '0x',
-      value: '1000000000000000000'
+      value: '1000000000000000000',
+      accountIndex: 0
     }, ctx)
 
     expect(result.status).toBe('signed')
     expect(result.signedTx).toBe('0xsigned_tx_data')
     expect(result.intentHash).toBeDefined()
     expect(result.requestId).toBeDefined()
-    expect(result.intentId).toBeDefined()
     expect(result).not.toHaveProperty('context')
   })
 
@@ -374,7 +373,8 @@ describe('executeToolCall', () => {
       chain: 'ethereum',
       to: '0xdead',
       data: '0x',
-      value: '999999'
+      value: '999999',
+      accountIndex: 0
     }, ctx)
 
     expect(result.status).toBe('rejected')
@@ -391,7 +391,8 @@ describe('executeToolCall', () => {
       chain: 'ethereum',
       to: '0xdead',
       data: '0x',
-      value: '0'
+      value: '0',
+      accountIndex: 0
     }, ctx)
 
     expect(result.status).toBe('duplicate')
@@ -420,7 +421,8 @@ describe('executeToolCall', () => {
       chain: 'ethereum',
       to: '0xdead',
       data: '0xdeadbeef',
-      value: '0'
+      value: '0',
+      accountIndex: 0
     }, ctx)
 
     expect(result.status).toBe('rejected')
@@ -448,7 +450,8 @@ describe('executeToolCall', () => {
       chain: 'ethereum',
       to: '0xdead',
       data: '0x',
-      value: '0'
+      value: '0',
+      accountIndex: 0
     }, ctx)
 
     expect(result.status).toBe('approval_timeout')

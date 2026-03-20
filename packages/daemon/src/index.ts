@@ -32,15 +32,12 @@ async function main (): Promise<void> {
   const config = loadConfig()
   logger.info({ wdkHome: config.wdkHome, relayUrl: config.relayUrl }, 'Config loaded')
 
-  // 2. Init WDK (load seed -> store -> broker)
-  const { wdk, account, broker, store, seedId } = await initWDK(config, logger)
+  // 2. Init WDK (load master seed -> store -> broker)
+  const { wdk, broker, store } = await initWDK(config, logger)
 
   // 3. Init execution journal
-  let journal: ExecutionJournal | null = null
-  if (seedId) {
-    journal = new ExecutionJournal(store, seedId, logger)
-    await journal.recover()
-  }
+  const journal = new ExecutionJournal(store, logger)
+  await journal.recover()
 
   // 4. Create OpenClaw client
   const openclawClient = createOpenClawClient(config)
@@ -58,10 +55,8 @@ async function main (): Promise<void> {
   // (e.g., approval_result after a pending_approval tx completes)
   const wdkContext: WDKContext = {
     wdk: wdk!,
-    account,
     broker,
     store,
-    seedId: seedId!,
     logger,
     journal,
     relayClient
@@ -140,14 +135,11 @@ async function main (): Promise<void> {
   }
 
   // 7. Start cron scheduler
-  let cronScheduler: CronScheduler | null = null
-  if (seedId) {
-    cronScheduler = new CronScheduler(
-      store, seedId, wdkContext, openclawClient, logger,
-      { tickIntervalMs: config.cronTickIntervalMs, queueManager }
-    )
-    await cronScheduler.start()
-  }
+  const cronScheduler = new CronScheduler(
+    store, wdkContext, openclawClient, logger,
+    { tickIntervalMs: config.cronTickIntervalMs, queueManager }
+  )
+  await cronScheduler.start()
 
   // 8. Start admin server
   const adminServer = new AdminServer({
@@ -168,7 +160,7 @@ async function main (): Promise<void> {
     logger.info({ signal }, 'Shutting down daemon...')
 
     // Stop cron
-    if (cronScheduler) cronScheduler.stop()
+    cronScheduler.stop()
 
     // Dispose message queue
     queueManager.dispose()
@@ -197,9 +189,8 @@ async function main (): Promise<void> {
   process.on('SIGTERM', () => shutdown('SIGTERM'))
 
   logger.info({
-    seedId,
     relayConnected: relayClient.connected,
-    cronCount: cronScheduler?.size || 0,
+    cronCount: cronScheduler.size,
     socketPath: config.socketPath
   }, 'WDK daemon running.')
 }

@@ -18,12 +18,14 @@ export interface ControlPayload {
   signature?: string
   approverPubKey?: string
   chainId?: number
-  metadata?: Record<string, any>
+  accountIndex?: number
+  content?: string
   signerId?: string
   identityPubKey?: string
   encryptionPubKey?: string
   pairingToken?: string
   sas?: string
+  policies?: Record<string, unknown>[]
   [key: string]: unknown
 }
 
@@ -39,8 +41,8 @@ export interface ControlResult {
 }
 
 interface ApprovalStoreReader {
-  loadPendingByRequestId (requestId: string): Promise<{ requestId: string; seedId: string; type: string; chainId: number; targetHash: string; metadata?: Record<string, unknown>; createdAt: number } | null>
-  getPolicyVersion (seedId: string, chainId: number): Promise<number>
+  loadPendingByRequestId (requestId: string): Promise<{ requestId: string; accountIndex: number; type: string; chainId: number; targetHash: string; content: string; createdAt: number } | null>
+  getPolicyVersion (accountIndex: number, chainId: number): Promise<number>
 }
 
 /**
@@ -111,7 +113,7 @@ export async function handleControlMessage (
           const pending = await approvalStore.loadPendingByRequestId(payload.requestId)
           if (pending) {
             context.expectedTargetHash = pending.targetHash
-            const policyVersion = await approvalStore.getPolicyVersion(pending.seedId, pending.chainId)
+            const policyVersion = await approvalStore.getPolicyVersion(pending.accountIndex, pending.chainId)
             context.currentPolicyVersion = policyVersion
             logger.debug({ requestId: payload.requestId, targetHash: pending.targetHash, policyVersion }, 'TX context loaded from server-side pending')
           } else {
@@ -154,11 +156,11 @@ export async function handleControlMessage (
         await broker.submitApproval(signedApproval, context)
 
         // After successful approval, apply the policy to WDK
-        if (wdk && payload.metadata?.policies && payload.chainId !== undefined) {
+        if (wdk && payload.policies && payload.chainId !== undefined) {
           try {
             await wdk.updatePolicies?.(payload.chainId as number, {
-              policies: payload.metadata.policies
-            })
+              policies: payload.policies
+            }, payload.accountIndex as number)
             logger.info({ chainId: payload.chainId }, 'Policy applied to WDK')
           } catch (applyErr: any) {
             logger.error({ err: applyErr, chainId: payload.chainId }, 'Failed to apply policy to WDK')
@@ -204,8 +206,7 @@ export async function handleControlMessage (
         }
 
         // Compute expectedTargetHash = SHA-256(signerId) for verification.
-        // The signerId to revoke is in metadata.signerId.
-        const signerId = (signedApproval.metadata as Record<string, any>)?.signerId as string | undefined
+        const signerId = payload.signerId
         const context: Record<string, unknown> = {}
         if (signerId) {
           context.expectedTargetHash = '0x' + createHash('sha256').update(signerId).digest('hex')
@@ -229,6 +230,46 @@ export async function handleControlMessage (
       } catch (err: any) {
         logger.error({ err, requestId: payload.requestId }, 'Signer revocation verification failed')
         return { ok: false, type: 'device_revoke', requestId: payload.requestId, error: err.message }
+      }
+    }
+
+    // -----------------------------------------------------------------------
+    // wallet_create -- owner approved wallet creation
+    // -----------------------------------------------------------------------
+    case 'wallet_create': {
+      try {
+        const signedApproval: Record<string, unknown> = {
+          ...payload,
+          type: 'wallet_create'
+        }
+
+        await broker.submitApproval(signedApproval)
+
+        logger.info({ requestId: payload.requestId, accountIndex: payload.accountIndex }, 'Wallet creation approval submitted successfully')
+        return { ok: true, type: 'wallet_create', requestId: payload.requestId }
+      } catch (err: any) {
+        logger.error({ err, requestId: payload.requestId }, 'Wallet creation approval verification failed')
+        return { ok: false, type: 'wallet_create', requestId: payload.requestId, error: err.message }
+      }
+    }
+
+    // -----------------------------------------------------------------------
+    // wallet_delete -- owner approved wallet deletion
+    // -----------------------------------------------------------------------
+    case 'wallet_delete': {
+      try {
+        const signedApproval: Record<string, unknown> = {
+          ...payload,
+          type: 'wallet_delete'
+        }
+
+        await broker.submitApproval(signedApproval)
+
+        logger.info({ requestId: payload.requestId, accountIndex: payload.accountIndex }, 'Wallet deletion approval submitted successfully')
+        return { ok: true, type: 'wallet_delete', requestId: payload.requestId }
+      } catch (err: any) {
+        logger.error({ err, requestId: payload.requestId }, 'Wallet deletion approval verification failed')
+        return { ok: false, type: 'wallet_delete', requestId: payload.requestId, error: err.message }
       }
     }
 

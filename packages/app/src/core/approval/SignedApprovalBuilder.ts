@@ -119,6 +119,8 @@ export class SignedApprovalBuilder {
     targetHash: string;
     chainId: number;
     requestId: string;
+    accountIndex: number;
+    content: string;
     policyVersion?: number;
     expiresInSeconds?: number;
   }): SignedApproval {
@@ -135,6 +137,8 @@ export class SignedApprovalBuilder {
     targetHash: string;
     chainId: number;
     requestId: string;
+    accountIndex: number;
+    content: string;
     expiresInSeconds?: number;
   }): SignedApproval {
     return this.build({
@@ -151,6 +155,8 @@ export class SignedApprovalBuilder {
     targetHash: string;
     chainId: number;
     requestId: string;
+    accountIndex: number;
+    content: string;
     expiresInSeconds?: number;
   }): SignedApproval {
     return this.build({
@@ -167,27 +173,46 @@ export class SignedApprovalBuilder {
   forDeviceRevoke(params: {
     targetSignerId: string;
     chainId: number;
+    accountIndex: number;
+    content: string;
     expiresInSeconds?: number;
   }): SignedApproval {
     // targetHash for device revoke = SHA-256(signerId)
     // Must match: createHash('sha256').update(signerId).digest('hex') in approval-verifier
     const targetHash = sha256Hex(params.targetSignerId);
 
-    const approval = this.build({
+    return this.build({
       type: 'device_revoke',
       targetHash,
       chainId: params.chainId,
       requestId: `revoke_${params.targetSignerId}`,
+      accountIndex: params.accountIndex,
+      content: params.content,
       policyVersion: 0,
       expiresInSeconds: params.expiresInSeconds,
     });
+  }
 
-    // Attach metadata.signerId so the daemon's control-handler can verify
-    // the targetHash against the revoked signer ID.
-    return {
-      ...approval,
-      metadata: { signerId: params.targetSignerId },
-    } as SignedApproval & { metadata: { signerId: string } };
+  /**
+   * Build SignedApproval for wallet lifecycle (create/delete).
+   */
+  forWallet(params: {
+    type: 'wallet_create' | 'wallet_delete';
+    targetHash: string;
+    chainId: number;
+    requestId: string;
+    accountIndex: number;
+    content: string;
+  }): SignedApproval {
+    return this.build({
+      type: params.type,
+      targetHash: params.targetHash,
+      chainId: params.chainId,
+      requestId: params.requestId,
+      accountIndex: params.accountIndex,
+      content: params.content,
+      policyVersion: 0,
+    });
   }
 
   /**
@@ -198,6 +223,8 @@ export class SignedApprovalBuilder {
     targetHash: string;
     chainId: number;
     requestId: string;
+    accountIndex: number;
+    content: string;
     policyVersion?: number;
     expiresInSeconds?: number;
   }): SignedApproval {
@@ -217,6 +244,8 @@ export class SignedApprovalBuilder {
       chainId: params.chainId,
       requestId: params.requestId,
       policyVersion: params.policyVersion ?? 0,
+      accountIndex: params.accountIndex,
+      content: params.content,
       expiresAt,
       nonce: currentNonce,
     };

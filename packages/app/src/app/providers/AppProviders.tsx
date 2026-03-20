@@ -21,6 +21,8 @@ async function approvalExecutor(request: {
   targetHash: string;
   chainId: number;
   requestId: string;
+  accountIndex: number;
+  content: string;
   policyVersion?: number;
   targetSignerId?: string;
 }): Promise<{ txHash: `0x${string}` }> {
@@ -41,6 +43,8 @@ async function approvalExecutor(request: {
         targetHash: request.targetHash,
         chainId: request.chainId,
         requestId: request.requestId,
+        accountIndex: request.accountIndex,
+        content: request.content,
         policyVersion: request.policyVersion,
       });
       break;
@@ -50,6 +54,8 @@ async function approvalExecutor(request: {
         targetHash: request.targetHash,
         chainId: request.chainId,
         requestId: request.requestId,
+        accountIndex: request.accountIndex,
+        content: request.content,
       });
       break;
 
@@ -58,6 +64,8 @@ async function approvalExecutor(request: {
         targetHash: request.targetHash,
         chainId: request.chainId,
         requestId: request.requestId,
+        accountIndex: request.accountIndex,
+        content: request.content,
       });
       break;
 
@@ -65,6 +73,20 @@ async function approvalExecutor(request: {
       signedApproval = builder.forDeviceRevoke({
         targetSignerId: request.targetSignerId ?? request.requestId,
         chainId: request.chainId,
+        accountIndex: request.accountIndex,
+        content: request.content,
+      });
+      break;
+
+    case 'wallet_create':
+    case 'wallet_delete':
+      signedApproval = builder.forWallet({
+        type: request.type,
+        targetHash: request.targetHash,
+        chainId: request.chainId,
+        requestId: request.requestId,
+        accountIndex: request.accountIndex,
+        content: request.content,
       });
       break;
 
