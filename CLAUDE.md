@@ -52,6 +52,12 @@ AI DeFi Agent 서명 엔진 + 제어 인프라.
 - **Codex Session ID**: `/Users/mousebook/Documents/GitHub/WDK-APP/docs/phases/v0.2.5-decision-simplification`
 - **시작일**: 2026-03-20
 
+### v0.2.6 — Daemon 타입 경계 정합성 복원
+- **상태**: Step 1 - PRD
+- **문서**: [docs/phases/v0.2.6-daemon-boundary-normalization/](docs/phases/v0.2.6-daemon-boundary-normalization/)
+- **Codex Session ID**: `/Users/mousebook/Documents/GitHub/WDK-APP/docs/phases/v0.2.6-daemon-boundary-normalization`
+- **시작일**: 2026-03-20
+
 ## 프로젝트 구조
 
 ```

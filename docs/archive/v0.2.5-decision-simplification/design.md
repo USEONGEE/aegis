@@ -75,7 +75,6 @@ tx → evaluatePolicy → ALLOW: 실행
 | middleware: REQUIRE_APPROVAL 분기 + waitForApproval | 삭제 |
 | middleware: ApprovalRequested 이벤트 emit | 삭제 |
 | `MiddlewareConfig.approvalBroker` | 삭제 — tx 승인 경로 폐기로 middleware에서 broker 불필요 |
-| `MiddlewareConfig` | `rejectionRecorder: (entry: RejectionEntry) => Promise<void>` 추가 — middleware가 REJECT 시 이력 저장 |
 | `SignedApprovalBroker.waitForApproval()` | 삭제 |
 | `SignedApprovalBroker.createRequest()` for tx | 삭제 |
 | `tx_approval` control message | 삭제 |
@@ -130,8 +129,9 @@ CREATE TABLE policy_versions (
 
 ## 실패/에러 처리
 
-- REJECT 시 middleware가 `PolicyRejectionError` throw 전에 `rejectionRecorder()` 호출하여 이력 저장. guarded-wdk 레이어이므로 daemon 경유 여부와 무관하게 모든 호출 경로에서 보장.
-- `rejectionRecorder()` 실패 시: 저장 실패는 catch하여 로깅만 (부수 효과). `PolicyRejectionError`는 **반드시** throw. No Fallback 원칙은 "tx rejection이 반드시 호출자에게 전파됨"에 적용. 저장 실패로 tx rejection 자체가 무시되는 일은 없음.
+- REJECT 시 middleware는 `PolicyRejectionError`만 throw. rejection 이력 저장은 **daemon tool-surface**에서 담당 — `PolicyRejectionError`를 catch한 시점에 이미 정확한 `intentHash`(journal과 동일 키)를 보유하므로 상관관계 보장.
+- `store.saveRejection()` 실패 시: catch하여 로깅만. `PolicyRejectionError` 결과는 그대로 반환.
+- direct `@wdk-app/guarded-wdk` 사용 시 rejection 이력은 저장되지 않음 — daemon 경유가 전제.
 
 ## 가정/제약
 
@@ -177,7 +177,7 @@ N/A: rejection_history/policy_versions는 로컬 SQLite. 레코드 수가 적어
 - sendTransaction/transfer/signTransaction에서 REQUIRE_APPROVAL 분기 전체 제거
 - `waitForApproval`, `approvalBroker.createRequest(tx)` 호출 제거
 - `ApprovalRequested` 이벤트 emit 제거
-- ALLOW: 실행, REJECT: `store.saveRejection()` 후 throw (단순 2분기, rejection 저장은 middleware 책임)
+- ALLOW: 실행, REJECT: throw PolicyRejectionError (단순 2분기). rejection 이력 저장은 daemon tool-surface에서 담당.
 
 ### Step 3: SignedApprovalBroker 정리
 
@@ -230,7 +230,7 @@ N/A: rejection_history/policy_versions는 로컬 SQLite. 레코드 수가 적어
 |------|-----------|
 | `guarded-wdk/src/approval-store.ts` | Decision 변경, JournalStatus 변경, RejectionEntry/PolicyVersionEntry 추가, 추상 메서드 추가 |
 | `guarded-wdk/src/guarded-middleware.ts` | Decision 변경, REQUIRE_APPROVAL 분기 제거, validatePolicy 변경 |
-| `guarded-wdk/src/guarded-wdk-factory.ts` | middleware 등록에서 approvalBroker 제거, rejectionRecorder 주입 |
+| `guarded-wdk/src/guarded-wdk-factory.ts` | middleware 등록에서 approvalBroker 제거 |
 | `guarded-wdk/src/signed-approval-broker.ts` | waitForApproval 삭제, createRequest tx 경로 삭제 |
 | `guarded-wdk/src/json-approval-store.ts` | rejection/policyVersion CRUD 구현 |
 | `guarded-wdk/src/sqlite-approval-store.ts` | rejection/policyVersion CRUD 구현, 테이블 생성 |

@@ -10,8 +10,8 @@
 | F4 | middleware `waitForApproval` 호출 제거 | guarded-middleware.ts에서 `waitForApproval` 검색 0건 |
 | F5 | middleware `ApprovalRequested` 이벤트 emit 제거 | guarded-middleware.ts에서 `ApprovalRequested` 검색 0건 |
 | F6 | `MiddlewareConfig.approvalBroker` 제거 | guarded-middleware.ts에서 `approvalBroker` 검색 0건 |
-| F7 | `MiddlewareConfig.rejectionRecorder` 추가 | guarded-middleware.ts에서 `rejectionRecorder` 존재 확인 |
-| F8 | middleware REJECT 시 `rejectionRecorder` 호출 후 `PolicyRejectionError` throw | integration.test.ts에서 REJECT 시 rejectionRecorder 호출 + 에러 throw 확인 |
+| F7 | daemon tool-surface에서 REJECT 시 `store.saveRejection()` 호출 | tool-surface.test.ts에서 PolicyRejectionError catch 후 saveRejection 호출 검증 |
+| F8 | rejection 이력의 `intentHash`가 journal/tool 응답의 `intentHash`와 동일 | tool-surface.test.ts에서 rejected 응답의 intentHash === saveRejection 호출의 intentHash 확인 |
 | F9 | `SignedApprovalBroker.waitForApproval()` 삭제 | signed-approval-broker.ts에서 `waitForApproval` 검색 0건 |
 | F10 | `SignedApprovalBroker.createRequest()` tx 경로 삭제 | broker가 tx 타입 승인 요청을 생성하지 않음 확인 |
 | F11 | `ApprovalStore.saveRejection()` + `listRejections()` 추가 | approval-store.ts에서 메서드 존재 확인 |
@@ -24,7 +24,7 @@
 | F18 | daemon index.ts에서 `ApprovalRequested` 이벤트 relay 제거 | index.ts에서 `ApprovalRequested` 검색 0건 |
 | F19 | `policyRequest` tool: `reason` → `description` rename | tool-surface.ts에서 policyRequest의 파라미터가 `description` |
 | F20 | `validatePolicy`에서 `REQUIRE_APPROVAL` 제거 | guarded-middleware.ts validatePolicy에서 `ALLOW`/`REJECT`만 허용 |
-| F21 | factory에서 middleware 등록 시 `approvalBroker` 제거 + `rejectionRecorder` 주입 | guarded-wdk-factory.ts 확인 |
+| F21 | factory에서 middleware 등록 시 `approvalBroker` 제거 (rejection recording은 daemon 담당) | guarded-wdk-factory.ts에서 `approvalBroker`/`rejectionRecorder` 검색 0건 |
 | F22 | daemon tool surface에 `listRejections` + `listPolicyVersions` 조회 도구 추가. store에 rejection/policyVersion이 저장된 상태에서 도구 호출 시 기대 필드(accountIndex, chainId 필터 포함)로 반환 | tool-surface.test.ts에서 store에 데이터 삽입 후 `listRejections`/`listPolicyVersions` tool 호출 → 반환값 필드/필터 검증 |
 
 ## 비기능 완료 조건
@@ -43,12 +43,12 @@
 
 | # | 시나리오 | 기대 동작 | 검증 방법 |
 |---|---------|----------|----------|
-| E1 | REJECT 시 rejectionRecorder 실패 | PolicyRejectionError는 반드시 throw. 저장 실패는 로깅만. | integration.test.ts에서 rejectionRecorder가 throw해도 PolicyRejectionError 전파 확인 |
+| E1 | daemon에서 saveRejection 실패 | rejected 응답은 그대로 반환. 저장 실패는 로깅만. | tool-surface.test.ts에서 saveRejection throw해도 rejected 응답 반환 확인 |
 | E2 | 빈 정책으로 tx 실행 | REJECT + reason "no policies for chain" | evaluate-policy.test.ts |
 | E3 | 최초 정책 생성 (이전 버전 없음) | policy_versions에 version=1, diff=null, description 기록 | json/sqlite-approval-store.test.ts |
 | E4 | 정책 2회 변경 후 diff 확인 | 2번째 버전의 diff가 1번째와의 차이를 구조화 JSON으로 포함 | json/sqlite-approval-store.test.ts |
 | E5 | control-handler에서 policy_approval 시 description 전달 | savePolicy에 pending.content가 description으로 전달됨 | control-handler.test.ts |
-| E6 | `missing tx.to` / invalid `tx.data` 등 malformed tx의 REJECT | rejectionRecorder에 `targetHash: ''`(빈 문자열)로 기록. 저장 대상에서 제외하지 않음. | integration.test.ts에서 malformed tx REJECT 시 rejectionRecorder 호출 + `targetHash === ''` assert |
+| E6 | transfer REJECT 시 | daemon이 tx 정보를 기반으로 intentHash 생성 또는 randomUUID() 사용. 저장 대상에서 제외하지 않음. | tool-surface.test.ts에서 transfer REJECT 시 saveRejection 호출 확인 |
 | E7 | `policyRequest(description)` → pending content → `policy_versions.description` round-trip | 동일한 description 문자열이 policyRequest tool → broker.createRequest(content) → pending request → policy_approval → savePolicy(description) → policy_versions.description까지 전달 | tool-surface.test.ts에서 policyRequest(description) 호출 시 broker.createRequest의 content 검증 + control-handler.test.ts에서 pending.content → savePolicy(description) 전달 검증 (2단계 연결) |
 
 ## PRD 목표 ↔ DoD 매핑
@@ -66,7 +66,7 @@
 | Decision ALLOW/REJECT | F1, F20 |
 | JournalStatus pending_approval 제거 | F2 |
 | middleware approvalBroker 제거 | F6, F21 |
-| rejectionRecorder 주입 | F7, F8, E1 |
+| daemon rejection recording | F7, F8, E1 |
 | waitForApproval 삭제 | F4, F9 |
 | tx_approval 폐기 | F17 |
 | ApprovalRequested 폐기 | F5, F18 |
