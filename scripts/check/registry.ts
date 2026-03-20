@@ -3,6 +3,15 @@ import type { CheckEntry } from './types.js'
 // --- guarded-wdk checks ---
 import { noAppImport } from './checks/guarded-wdk/no-app-import.js'
 import { noTypeAssertion } from './checks/guarded-wdk/no-type-assertion.js'
+import {
+  verifierOnlyInBroker,
+  domainOpsOnlyViaBroker,
+  middlewareNoDirectStore,
+  evaluatePolicyOnlyInMiddleware,
+  verifierPrimitivesOnlyInVerifier,
+  approvalStateOnlyInBroker,
+  noPublicVerifierExport
+} from './checks/guarded-wdk/responsibility-boundary.js'
 
 // --- server checks ---
 import { noBrowserGlobals } from './checks/server/no-browser-globals.js'
@@ -35,6 +44,50 @@ export const checks: CheckEntry[] = [
     description: 'daemon and relay must not reference browser globals',
     group: 'server',
     fn: noBrowserGlobals,
+  },
+
+  // guarded-wdk responsibility boundary (7)
+  {
+    name: 'guarded-wdk/verifier-only-in-broker',
+    description: 'verifyApproval may only be imported from signed-approval-broker',
+    group: 'guarded-wdk',
+    fn: verifierOnlyInBroker,
+  },
+  {
+    name: 'guarded-wdk/domain-ops-only-via-broker',
+    description: 'createWallet/deleteWallet/revokeSigner calls restricted to broker',
+    group: 'guarded-wdk',
+    fn: domainOpsOnlyViaBroker,
+  },
+  {
+    name: 'guarded-wdk/middleware-no-direct-store',
+    description: 'guarded-middleware must not import store types directly',
+    group: 'guarded-wdk',
+    fn: middlewareNoDirectStore,
+  },
+  {
+    name: 'guarded-wdk/evaluate-policy-only-in-middleware',
+    description: 'evaluatePolicy() calls restricted to guarded-middleware',
+    group: 'guarded-wdk',
+    fn: evaluatePolicyOnlyInMiddleware,
+  },
+  {
+    name: 'guarded-wdk/verifier-primitives-only-in-verifier',
+    description: 'nonce/revocation store primitives restricted to approval-verifier',
+    group: 'guarded-wdk',
+    fn: verifierPrimitivesOnlyInVerifier,
+  },
+  {
+    name: 'guarded-wdk/approval-state-only-in-broker',
+    description: 'pending/history mutations restricted to signed-approval-broker',
+    group: 'guarded-wdk',
+    fn: approvalStateOnlyInBroker,
+  },
+  {
+    name: 'guarded-wdk/no-public-verifier-export',
+    description: 'verifyApproval must not be exported from public API',
+    group: 'guarded-wdk',
+    fn: noPublicVerifierExport,
   },
 
   // cross group (5)
