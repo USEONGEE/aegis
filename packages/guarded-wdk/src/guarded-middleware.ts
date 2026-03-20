@@ -1,5 +1,6 @@
 import { randomUUID, createHash } from 'node:crypto'
 import { intentHash } from '@wdk-app/canonical'
+import type { IWalletAccount } from '@tetherto/wdk'
 import { ForbiddenError, PolicyRejectionError } from './errors.js'
 import type { SignedApprovalBroker } from './signed-approval-broker.js'
 import type { EventEmitter } from 'node:events'
@@ -66,17 +67,16 @@ interface TransactionReceipt {
   status: number
 }
 
-interface GuardedAccount {
+export interface GuardedAccount {
   sendTransaction: (tx: Transaction) => Promise<TransactionResult>
   signTransaction?: (tx: Transaction) => Promise<SignTransactionResult>
   transfer: (options: TransferOptions) => Promise<TransactionResult>
-  sign: (...args: unknown[]) => never
-  signTypedData?: (...args: unknown[]) => never
-  dispose: (...args: unknown[]) => never
-  keyPair: unknown
+  sign: (message: string) => Promise<string>
+  signTypedData?: (...args: unknown[]) => unknown
+  dispose: () => void
+  keyPair: { publicKey: Uint8Array; privateKey: Uint8Array | null }
   getAddress: () => Promise<string>
   getTransactionReceipt: (hash: string) => Promise<TransactionReceipt | null>
-  [key: string]: unknown
 }
 
 export interface FailedArg {
@@ -327,12 +327,13 @@ async function pollReceipt (account: GuardedAccount, hash: string, emitter: Even
   }
 }
 
-export function createGuardedMiddleware ({ policyResolver, approvalBroker, emitter, chainId, getAccountIndex }: MiddlewareConfig): (account: GuardedAccount) => Promise<void> {
-  return async (account: GuardedAccount) => {
+export function createGuardedMiddleware ({ policyResolver, approvalBroker, emitter, chainId, getAccountIndex }: MiddlewareConfig): (account: IWalletAccount) => Promise<void> {
+  return async (acct: IWalletAccount) => {
+    const account = acct as GuardedAccount
     const rawSendTransaction = account.sendTransaction.bind(account)
     const rawTransfer = account.transfer.bind(account)
     // Save raw sign before override (used by signTransaction fallback)
-    const rawSign: ((...args: unknown[]) => unknown) | null =
+    const rawSign: ((message: string) => Promise<string>) | null =
       typeof account.sign === 'function' ? account.sign.bind(account) : null
     // Save raw signTransaction before override (preferred for signTransaction if WDK provides it)
     const rawSignTransaction: ((tx: Transaction) => Promise<unknown>) | null =

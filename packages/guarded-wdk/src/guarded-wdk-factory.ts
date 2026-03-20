@@ -1,31 +1,29 @@
 import { EventEmitter } from 'node:events'
 import WDK from '@tetherto/wdk'
+import type { IWalletAccountWithProtocols, FeeRates, MiddlewareFunction } from '@tetherto/wdk'
+import WalletManagerBase from '@tetherto/wdk-wallet'
+import { SwapProtocol, BridgeProtocol, LendingProtocol, FiatProtocol } from '@tetherto/wdk-wallet/protocols'
 import { createGuardedMiddleware, validatePolicies } from './guarded-middleware.js'
 import type { Policy } from './guarded-middleware.js'
 import { SignedApprovalBroker } from './signed-approval-broker.js'
 import type { ApprovalStore } from './approval-store.js'
 
-interface WalletConfig {
-  Manager: new (seed: string, config: unknown) => WalletManager
-  config: unknown
-}
+type ProtocolClass = typeof SwapProtocol | typeof BridgeProtocol | typeof LendingProtocol | typeof FiatProtocol
 
-interface WalletManager {
-  getAccount (index: number): Promise<unknown>
-  getAccountByPath (path: string): Promise<unknown>
-  getFeeRates (): Promise<unknown>
-  dispose (): void
+interface WalletEntry {
+  Manager: typeof WalletManagerBase
+  config: ConstructorParameters<typeof WalletManagerBase>[1]
 }
 
 interface ProtocolEntry {
   label: string
-  Protocol: new (...args: unknown[]) => unknown
-  config: unknown
+  Protocol: ProtocolClass
+  config: ConstructorParameters<ProtocolClass>[1]
 }
 
 interface GuardedWDKConfig {
   seed: string
-  wallets?: Record<string, WalletConfig>
+  wallets?: Record<string, WalletEntry>
   protocols?: Record<string, ProtocolEntry[]>
   approvalBroker?: SignedApprovalBroker
   approvalStore: ApprovalStore
@@ -33,9 +31,9 @@ interface GuardedWDKConfig {
 }
 
 interface GuardedWDKFacade {
-  getAccount (chain: string, index?: number): Promise<unknown>
-  getAccountByPath (chain: string, path: string): Promise<unknown>
-  getFeeRates (chain: string): Promise<unknown>
+  getAccount (chain: string, index?: number): Promise<IWalletAccountWithProtocols>
+  getAccountByPath (chain: string, path: string): Promise<IWalletAccountWithProtocols>
+  getFeeRates (chain: string): Promise<FeeRates>
   getApprovalBroker (): SignedApprovalBroker
   getApprovalStore (): ApprovalStore
   on (type: string, handler: (...args: unknown[]) => void): void
@@ -57,7 +55,7 @@ export async function createGuardedWDK (config: GuardedWDKConfig): Promise<Guard
     throw new Error('approvalStore is required.')
   }
 
-  const wdk: Record<string, (...args: any[]) => any> = new WDK(seed) as any
+  const wdk = new WDK(seed)
   const emitter = new EventEmitter()
 
   await approvalStore.init()
