@@ -97,7 +97,7 @@ AI에게는 `guardedWdk`만 넘긴다. 원본 WDK 인스턴스, seed, privateKey
       selector: '0x573ade81', // 함수 selector (선택)
       args: { ... },          // 인자 조건 (선택)
       valueLimit: '1000',     // msg.value 상한 (선택)
-      decision: 'AUTO'        // AUTO | REQUIRE_APPROVAL | REJECT
+      decision: 'ALLOW'        // ALLOW | REJECT
     }
   ]
 }
@@ -110,9 +110,8 @@ permissions는 **위에서 아래로** 매칭된다. 첫 번째 매치의 decisi
 
 | Decision | 동작 |
 |----------|------|
-| `AUTO` | 즉시 실행 |
-| `REQUIRE_APPROVAL` | ApprovalBroker를 통해 승인 대기 후 실행 |
-| `REJECT` | `PolicyRejectionError` throw |
+| `ALLOW` | 즉시 실행 |
+| `REJECT` | `PolicyRejectionError` throw + rejection_history 저장 |
 
 ### 인자 조건 (args)
 
@@ -138,27 +137,7 @@ args: {
 
 ## ApprovalBroker
 
-`REQUIRE_APPROVAL` decision이 나오면 ApprovalBroker가 외부 승인을 중개한다.
-
-### InMemoryApprovalBroker
-
-테스트/프로토타입용 인메모리 구현체.
-
-```js
-const broker = new InMemoryApprovalBroker()
-
-// 승인 대기 중인 요청에 대해 외부에서 승인
-broker.grant(ticketId, { approver: '0xOwnerAddress' })
-```
-
-흐름:
-1. 정책 평가 → `REQUIRE_APPROVAL`
-2. `broker.request(...)` → 티켓 생성
-3. `broker.waitForApproval(ticketId, 60000)` → 승인 대기 (60초 타임아웃)
-4. 외부에서 `broker.grant(ticketId, artifact)` 호출
-5. 승인되면 `broker.consume(ticketId)` → 트랜잭션 실행
-
-타임아웃 시 `ApprovalTimeoutError`.
+ApprovalBroker는 policy/wallet 승인을 중개한다. tx 레벨 승인은 v0.2.5에서 제거되었다.
 
 ## 이벤트
 
@@ -168,7 +147,6 @@ broker.grant(ticketId, { approver: '0xOwnerAddress' })
 |--------|------|-----------|
 | `IntentProposed` | 트랜잭션 요청 진입 | `requestId`, `tx`, `chain` |
 | `PolicyEvaluated` | 정책 평가 완료 | `requestId`, `decision`, `reason` |
-| `ApprovalRequested` | 승인 대기 시작 | `requestId`, `target`, `selector` |
 | `ApprovalGranted` | 승인 완료 | `requestId`, `approver` |
 | `ExecutionBroadcasted` | 트랜잭션 전송 완료 | `requestId`, `hash`, `fee` |
 | `ExecutionFailed` | 트랜잭션 실패 | `requestId`, `error` |
@@ -228,8 +206,8 @@ await store.savePolicy(0, 1, {
     {
       type: 'call',
       permissions: [
-        { target: '0x87870Bca3F3fD6335C3F4ce8392D69350B4fA4E2', selector: '0x573ade81', args: { 1: { condition: 'LTE', value: '1000000000' } }, decision: 'AUTO' },
-        { target: '0x87870Bca3F3fD6335C3F4ce8392D69350B4fA4E2', selector: '0x573ade81', decision: 'REQUIRE_APPROVAL' }
+        { target: '0x87870Bca3F3fD6335C3F4ce8392D69350B4fA4E2', selector: '0x573ade81', args: { 1: { condition: 'LTE', value: '1000000000' } }, decision: 'ALLOW' },
+        { target: '0x87870Bca3F3fD6335C3F4ce8392D69350B4fA4E2', selector: '0x573ade81', decision: 'REJECT' }
       ]
     }
   ],

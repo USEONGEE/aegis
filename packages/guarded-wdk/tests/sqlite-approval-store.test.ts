@@ -452,6 +452,76 @@ describe('SqliteApprovalStore', () => {
     })
   })
 
+  // --- Rejection History ---
+
+  describe('rejection history', () => {
+    test('saveRejection + listRejections round-trips', async () => {
+      await store.saveRejection({
+        intentHash: 'int-1',
+        accountIndex: 0,
+        chainId: 1,
+        targetHash: '0xabc',
+        reason: 'no matching permission',
+        context: { target: '0xdead' },
+        policyVersion: 1,
+        rejectedAt: 1000
+      })
+      const rejections = await store.listRejections({ accountIndex: 0, chainId: 1 })
+      expect(rejections).toHaveLength(1)
+      expect(rejections[0].intentHash).toBe('int-1')
+      expect(rejections[0].reason).toBe('no matching permission')
+      expect(rejections[0].context).toEqual({ target: '0xdead' })
+      expect(rejections[0].policyVersion).toBe(1)
+    })
+
+    test('listRejections filters by accountIndex and chainId', async () => {
+      await store.saveRejection({ intentHash: 'r1', accountIndex: 0, chainId: 1, targetHash: '0x1', reason: 'r1', context: null, policyVersion: 1, rejectedAt: 1000 })
+      await store.saveRejection({ intentHash: 'r2', accountIndex: 1, chainId: 1, targetHash: '0x2', reason: 'r2', context: null, policyVersion: 1, rejectedAt: 1001 })
+      const result = await store.listRejections({ accountIndex: 0 })
+      expect(result).toHaveLength(1)
+      expect(result[0].intentHash).toBe('r1')
+    })
+
+    test('listRejections respects limit', async () => {
+      for (let i = 0; i < 5; i++) {
+        await store.saveRejection({ intentHash: `r${i}`, accountIndex: 0, chainId: 1, targetHash: `0x${i}`, reason: 'test', context: null, policyVersion: 1, rejectedAt: 1000 + i })
+      }
+      const result = await store.listRejections({ limit: 2 })
+      expect(result).toHaveLength(2)
+    })
+  })
+
+  // --- Policy Versions ---
+
+  describe('policy versions', () => {
+    const accountIndex = 0
+
+    beforeEach(async () => {
+      await store.setMasterSeed('mnemonic')
+      await store.createWallet(accountIndex, 'test-wallet', '0xaddr0')
+    })
+
+    test('E3: first policy creates version=1 with diff=null', async () => {
+      await store.savePolicy(accountIndex, 1, { policies: [{ type: 'call' }], signature: {} }, 'initial policy')
+      const versions = await store.listPolicyVersions(accountIndex, 1)
+      expect(versions).toHaveLength(1)
+      expect(versions[0].version).toBe(1)
+      expect(versions[0].description).toBe('initial policy')
+      expect(versions[0].diff).toBeNull()
+    })
+
+    test('E4: second policy creates version=2 with non-null diff', async () => {
+      await store.savePolicy(accountIndex, 1, { policies: [{ type: 'call', v: 1 }], signature: {} }, 'v1')
+      await store.savePolicy(accountIndex, 1, { policies: [{ type: 'call', v: 2 }], signature: {} }, 'v2')
+      const versions = await store.listPolicyVersions(accountIndex, 1)
+      expect(versions).toHaveLength(2)
+      expect(versions[1].version).toBe(2)
+      expect(versions[1].description).toBe('v2')
+      expect(versions[1].diff).not.toBeNull()
+      expect(versions[1].diff).toHaveProperty('modified')
+    })
+  })
+
   // --- Execution Journal ---
 
   describe('execution journal', () => {
@@ -503,7 +573,7 @@ describe('SqliteApprovalStore', () => {
         targetHash: '0xabc',
         status: 'received'
       })
-      await store.updateJournalStatus('int-1', 'pending_approval', '0xold')
+      await store.updateJournalStatus('int-1', 'rejected', '0xold')
       await store.updateJournalStatus('int-1', 'settled', undefined)
       const entry = await store.getJournalEntry('int-1')
       expect(entry!.status).toBe('settled')

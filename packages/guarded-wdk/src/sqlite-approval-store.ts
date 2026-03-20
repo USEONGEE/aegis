@@ -20,9 +20,12 @@ import {
   type StoredJournal,
   type HistoryQueryOpts,
   type JournalQueryOpts,
-  type SignedApproval
+  type SignedApproval,
+  type RejectionEntry,
+  type RejectionQueryOpts,
+  type PolicyVersionEntry
 } from './approval-store.js'
-import type { PendingApprovalRow, StoredHistoryEntry, CronRow, StoredJournalEntry, SignerRow, MasterSeedRow, WalletRow, PolicyRow } from './store-types.js'
+import type { PendingApprovalRow, StoredHistoryEntry, CronRow, StoredJournalEntry, SignerRow, MasterSeedRow, WalletRow, PolicyRow, RejectionRow, PolicyVersionRow } from './store-types.js'
 
 /**
  * SQLite-backed implementation of ApprovalStore.
@@ -143,6 +146,28 @@ export class SqliteApprovalStore extends ApprovalStore {
         created_at INTEGER NOT NULL,
         updated_at INTEGER NOT NULL
       );
+
+      CREATE TABLE IF NOT EXISTS rejection_history (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        intent_hash TEXT NOT NULL,
+        account_index INTEGER NOT NULL,
+        chain_id INTEGER NOT NULL,
+        target_hash TEXT NOT NULL,
+        reason TEXT NOT NULL,
+        context_json TEXT,
+        policy_version INTEGER NOT NULL,
+        rejected_at INTEGER NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS policy_versions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        account_index INTEGER NOT NULL,
+        chain_id INTEGER NOT NULL,
+        version INTEGER NOT NULL,
+        description TEXT NOT NULL,
+        diff_json TEXT,
+        changed_at INTEGER NOT NULL
+      );
     `)
   }
 
@@ -225,10 +250,13 @@ export class SqliteApprovalStore extends ApprovalStore {
     }
   }
 
-  override async savePolicy (accountIndex: number, chainId: number, input: PolicyInput): Promise<void> {
+  override async savePolicy (accountIndex: number, chainId: number, input: PolicyInput, description: string = ''): Promise<void> {
     const existing = await this.loadPolicy(accountIndex, chainId)
+    const oldPolicies: unknown[] = existing ? existing.policies : []
     const version = existing ? existing.policyVersion + 1 : 1
     const now = Date.now()
+
+    const diff = version === 1 ? null : computePolicyDiff(oldPolicies, input.policies)
 
     this._db!.prepare(`
       INSERT INTO policies (account_index, chain_id, policies_json, signature_json, policy_version, updated_at)
@@ -244,6 +272,18 @@ export class SqliteApprovalStore extends ApprovalStore {
       JSON.stringify(input.policies),
       JSON.stringify(input.signature),
       version,
+      now
+    )
+
+    this._db!.prepare(`
+      INSERT INTO policy_versions (account_index, chain_id, version, description, diff_json, changed_at)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(
+      accountIndex,
+      chainId,
+      version,
+      description,
+      diff !== null ? JSON.stringify(diff) : null,
       now
     )
   }
@@ -531,4 +571,89 @@ export class SqliteApprovalStore extends ApprovalStore {
       updatedAt: j.updated_at
     }))
   }
+
+  // --- Rejection History ---
+
+  override async saveRejection (entry: RejectionEntry): Promise<void> {
+    this._db!.prepare(`
+      INSERT INTO rejection_history (intent_hash, account_index, chain_id, target_hash, reason, context_json, policy_version, rejected_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      entry.intentHash,
+      entry.accountIndex,
+      entry.chainId,
+      entry.targetHash,
+      entry.reason,
+      entry.context !== null && entry.context !== undefined ? JSON.stringify(entry.context) : null,
+      entry.policyVersion,
+      entry.rejectedAt
+    )
+  }
+
+  override async listRejections (opts: RejectionQueryOpts = {}): Promise<RejectionEntry[]> {
+    let sql = 'SELECT * FROM rejection_history WHERE 1=1'
+    const params: (number)[] = []
+    if (opts.accountIndex !== undefined) { sql += ' AND account_index = ?'; params.push(opts.accountIndex) }
+    if (opts.chainId !== undefined) { sql += ' AND chain_id = ?'; params.push(opts.chainId) }
+    sql += ' ORDER BY id ASC'
+    if (opts.limit) { sql += ' LIMIT ?'; params.push(opts.limit) }
+    const rows = this._db!.prepare(sql).all(...params) as RejectionRow[]
+    return rows.map(r => ({
+      intentHash: r.intent_hash,
+      accountIndex: r.account_index,
+      chainId: r.chain_id,
+      targetHash: r.target_hash,
+      reason: r.reason,
+      context: r.context_json ? JSON.parse(r.context_json) : null,
+      policyVersion: r.policy_version,
+      rejectedAt: r.rejected_at
+    }))
+  }
+
+  // --- Policy Versions ---
+
+  override async listPolicyVersions (accountIndex: number, chainId: number): Promise<PolicyVersionEntry[]> {
+    const rows = this._db!.prepare(
+      'SELECT * FROM policy_versions WHERE account_index = ? AND chain_id = ? ORDER BY version ASC'
+    ).all(accountIndex, chainId) as PolicyVersionRow[]
+    return rows.map(v => ({
+      accountIndex: v.account_index,
+      chainId: v.chain_id,
+      version: v.version,
+      description: v.description,
+      diff: v.diff_json ? JSON.parse(v.diff_json) : null,
+      changedAt: v.changed_at
+    }))
+  }
+}
+
+function computePolicyDiff (oldPolicies: unknown[], newPolicies: unknown[]): { added: unknown[]; removed: unknown[]; modified: Array<{ before: unknown; after: unknown }> } {
+  const oldJSON = oldPolicies.map(p => JSON.stringify(p))
+  const newJSON = newPolicies.map(p => JSON.stringify(p))
+
+  const added: unknown[] = []
+  const removed: unknown[] = []
+  const modified: Array<{ before: unknown; after: unknown }> = []
+
+  const matchedNew = new Set<number>()
+
+  for (let i = 0; i < oldPolicies.length; i++) {
+    const exactIdx = newJSON.indexOf(oldJSON[i])
+    if (exactIdx !== -1 && !matchedNew.has(exactIdx)) {
+      matchedNew.add(exactIdx)
+    } else if (i < newPolicies.length && !matchedNew.has(i)) {
+      modified.push({ before: oldPolicies[i], after: newPolicies[i] })
+      matchedNew.add(i)
+    } else {
+      removed.push(oldPolicies[i])
+    }
+  }
+
+  for (let j = 0; j < newPolicies.length; j++) {
+    if (!matchedNew.has(j)) {
+      added.push(newPolicies[j])
+    }
+  }
+
+  return { added, removed, modified }
 }

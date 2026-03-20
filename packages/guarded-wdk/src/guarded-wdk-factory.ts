@@ -90,7 +90,6 @@ export async function createGuardedWDK (config: GuardedWDKConfig): Promise<Guard
         validatePolicies(stored.policies as Policy[])
         return stored.policies as Policy[]
       },
-      approvalBroker,
       emitter,
       chainId: Number(chainKey),
       getAccountIndex: () => currentAccountIndex

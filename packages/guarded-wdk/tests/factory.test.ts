@@ -58,7 +58,9 @@ class MockApprovalStore extends ApprovalStore {
   override async dispose () {}
   override async listWallets () { return [] }
   override async loadPolicy (accountIndex: number, chainId: number) { return (this._policies[`${accountIndex}:${chainId}`] || null) as never }
-  override async savePolicy (accountIndex: number, chainId: number, input: PolicyInput) { this._policies[`${accountIndex}:${chainId}`] = { ...input, accountIndex, chainId, policyVersion: 0, updatedAt: Date.now() } }
+  override async savePolicy (accountIndex: number, chainId: number, input: PolicyInput, _description: string = '') { this._policies[`${accountIndex}:${chainId}`] = { ...input, accountIndex, chainId, policyVersion: 0, updatedAt: Date.now() } }
+  override async saveRejection (_entry: any) {}
+  override async listRejections () { return [] }
   override async getPolicyVersion (_accountIndex: number, _chainId: number) { return 0 }
   override async loadPendingApprovals (_accountIndex: number | null, _type: string | null, _chainId: number | null) { return this._pending as unknown as PendingApprovalRequest[] }
   override async savePendingApproval (_accountIndex: number, request: ApprovalRequest) { this._pending.push(request as ApprovalRequest & Record<string, unknown>) }
@@ -149,7 +151,7 @@ describe('createGuardedWDK', () => {
   test('policyResolver reads from store at runtime', async () => {
     const store = new MockApprovalStore()
     await store.savePolicy(0, 1, {
-      policies: [{ type: 'call', permissions: permissionsToDict([{ decision: 'AUTO' as const }]) }],
+      policies: [{ type: 'call', permissions: permissionsToDict([{ decision: 'ALLOW' as const }]) }],
       signature: {}
     })
 
@@ -166,7 +168,7 @@ describe('createGuardedWDK', () => {
     const store = new MockApprovalStore()
     // Account 0: AUTO for all calls
     await store.savePolicy(0, 1, {
-      policies: [{ type: 'call', permissions: permissionsToDict([{ decision: 'AUTO' as const }]) }],
+      policies: [{ type: 'call', permissions: permissionsToDict([{ decision: 'ALLOW' as const }]) }],
       signature: {}
     })
     // Account 1: empty permissions → REJECT
@@ -206,7 +208,7 @@ describe('createGuardedWDK', () => {
     const store = new MockApprovalStore()
     // Account 2: AUTO policy
     await store.savePolicy(2, 1, {
-      policies: [{ type: 'call', permissions: permissionsToDict([{ decision: 'AUTO' as const }]) }],
+      policies: [{ type: 'call', permissions: permissionsToDict([{ decision: 'ALLOW' as const }]) }],
       signature: {}
     })
 

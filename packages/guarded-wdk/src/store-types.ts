@@ -89,3 +89,27 @@ export interface PolicyRow {
   policy_version: number
   updated_at: number
 }
+
+/** @internal */
+export interface RejectionRow {
+  id?: number
+  intent_hash: string
+  account_index: number
+  chain_id: number
+  target_hash: string
+  reason: string
+  context_json: string | null
+  policy_version: number
+  rejected_at: number
+}
+
+/** @internal */
+export interface PolicyVersionRow {
+  id?: number
+  account_index: number
+  chain_id: number
+  version: number
+  description: string
+  diff_json: string | null
+  changed_at: number
+}

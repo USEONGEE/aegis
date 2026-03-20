@@ -5,7 +5,7 @@ import type { PendingApprovalRow, CronRow } from './store-types.js'
 
 export type ApprovalType = 'tx' | 'policy' | 'policy_reject' | 'device_revoke' | 'wallet_create' | 'wallet_delete'
 
-export type JournalStatus = 'received' | 'pending_approval' | 'settled' | 'signed' | 'failed' | 'rejected'
+export type JournalStatus = 'received' | 'settled' | 'signed' | 'failed' | 'rejected'
 
 export type HistoryAction = 'approved' | 'rejected'
 
@@ -139,6 +139,32 @@ export interface JournalQueryOpts {
   limit?: number
 }
 
+export interface RejectionEntry {
+  intentHash: string
+  accountIndex: number
+  chainId: number
+  targetHash: string
+  reason: string
+  context: unknown
+  policyVersion: number
+  rejectedAt: number
+}
+
+export interface PolicyVersionEntry {
+  accountIndex: number
+  chainId: number
+  version: number
+  description: string
+  diff: unknown
+  changedAt: number
+}
+
+export interface RejectionQueryOpts {
+  accountIndex?: number
+  chainId?: number
+  limit?: number
+}
+
 /**
  * Abstract interface for approval/policy/wallet/cron persistence.
  * Implementations: JsonApprovalStore, SqliteApprovalStore.
@@ -159,7 +185,7 @@ export abstract class ApprovalStore {
   // --- Active Policy ---
 
   async loadPolicy (_accountIndex: number, _chainId: number): Promise<StoredPolicy | null> { throw new Error('Not implemented') }
-  async savePolicy (_accountIndex: number, _chainId: number, _input: PolicyInput): Promise<void> { throw new Error('Not implemented') }
+  async savePolicy (_accountIndex: number, _chainId: number, _input: PolicyInput, _description: string): Promise<void> { throw new Error('Not implemented') }
   async getPolicyVersion (_accountIndex: number, _chainId: number): Promise<number> { throw new Error('Not implemented') }
   async listPolicyChains (_accountIndex: number): Promise<string[]> { throw new Error('Not implemented') }
 
@@ -201,6 +227,15 @@ export abstract class ApprovalStore {
   async saveJournalEntry (_entry: JournalInput): Promise<void> { throw new Error('Not implemented') }
   async updateJournalStatus (_intentHash: string, _status: JournalStatus, _txHash?: string): Promise<void> { throw new Error('Not implemented') }
   async listJournal (_opts: JournalQueryOpts): Promise<StoredJournal[]> { throw new Error('Not implemented') }
+
+  // --- Rejection History ---
+
+  async saveRejection (_entry: RejectionEntry): Promise<void> { throw new Error('Not implemented') }
+  async listRejections (_opts: RejectionQueryOpts): Promise<RejectionEntry[]> { throw new Error('Not implemented') }
+
+  // --- Policy Versions ---
+
+  async listPolicyVersions (_accountIndex: number, _chainId: number): Promise<PolicyVersionEntry[]> { throw new Error('Not implemented') }
 
   // --- Lifecycle ---
 

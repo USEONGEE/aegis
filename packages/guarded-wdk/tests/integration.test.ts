@@ -29,7 +29,7 @@ class MockApprovalStore extends ApprovalStore {
   override async init () {}
   override async dispose () {}
   override async loadPolicy (accountIndex: number, chainId: number) { return (this._policies[`${accountIndex}:${chainId}`] || null) as never }
-  override async savePolicy (accountIndex: number, chainId: number, input: PolicyInput) { this._policies[`${accountIndex}:${chainId}`] = { ...input, accountIndex, chainId, policyVersion: 0, updatedAt: Date.now() } }
+  override async savePolicy (accountIndex: number, chainId: number, input: PolicyInput, _description: string = '') { this._policies[`${accountIndex}:${chainId}`] = { ...input, accountIndex, chainId, policyVersion: 0, updatedAt: Date.now() } }
   override async getPolicyVersion (_accountIndex: number, _chainId: number) { return 0 }
   override async loadPendingApprovals (_accountIndex: number | null, _type: string | null, _chainId: number | null) { return this._pending as unknown as PendingApprovalRequest[] }
   override async savePendingApproval (_accountIndex: number, request: ApprovalRequest) { this._pending.push(request as ApprovalRequest & Record<string, unknown>) }
@@ -83,12 +83,12 @@ function makePolicyArr () {
           target: aavePool,
           selector: repaySelector,
           args: { 1: { condition: 'LTE' as const, value: '1000' } },
-          decision: 'AUTO' as const
+          decision: 'ALLOW' as const
         },
         {
           target: aavePool,
           selector: repaySelector,
-          decision: 'REQUIRE_APPROVAL' as const
+          decision: 'REJECT' as const
         },
         {
           target: usdcAddr,
@@ -97,7 +97,7 @@ function makePolicyArr () {
             0: { condition: 'EQ' as const, value: aavePool },
             1: { condition: 'LTE' as const, value: '5000' }
           },
-          decision: 'AUTO' as const
+          decision: 'ALLOW' as const
         }
       ])
     }
@@ -124,55 +124,22 @@ function makeApproveTx (spender: string, amount: number | bigint) {
   }
 }
 
-/**
- * Helper: create a valid SignedApproval and submit it to the broker.
- */
-function createSignedApprovalAndSubmit (broker: SignedApprovalBroker, keyPair: KeyPair, { requestId, chainId, targetHash, nonce }: { requestId: string; chainId: number; targetHash: string; nonce: number }) {
-  const approval: Record<string, unknown> = {
-    type: 'tx',
-    requestId,
-    chainId,
-    targetHash,
-    approver: keyPair.publicKey,
-    signerId: 'signer-1',
-    policyVersion: 0,
-    expiresAt: Math.floor(Date.now() / 1000) + 300,
-    nonce
-  }
-
-  const { sig: _sig, ...fields } = approval
-  const json = canonicalJSON(fields as unknown as Parameters<typeof canonicalJSON>[0])
-  const hash = createHash('sha256').update(json).digest()
-  approval.sig = sign(hash, keyPair.secretKey)
-
-  return broker.submitApproval(approval as never)
-}
-
 describe('Integration: Guarded Middleware', () => {
   let account: MockAccount
   let emitter: EventEmitter
-  let broker: SignedApprovalBroker
   let policyArr: any
   let store: MockApprovalStore
-  let keyPair: KeyPair
 
   beforeEach(() => {
     account = createMockAccount()
     emitter = new EventEmitter()
     store = new MockApprovalStore()
-    keyPair = generateKeyPair()
-    broker = new SignedApprovalBroker([keyPair.publicKey], store, emitter)
     policyArr = makePolicyArr()
-  })
-
-  afterEach(() => {
-    broker.dispose()
   })
 
   async function applyMiddleware () {
     const middleware = createGuardedMiddleware({
       policyResolver: async () => policyArr,
-      approvalBroker: broker,
       emitter,
       chainId: 1,
       getAccountIndex: () => 0
@@ -180,7 +147,7 @@ describe('Integration: Guarded Middleware', () => {
     await middleware(account as never)
   }
 
-  test('AUTO repay: small amount executes immediately', async () => {
+  test('ALLOW repay: small amount executes immediately', async () => {
     await applyMiddleware()
     const events: string[] = []
     let policyContext: unknown = undefined
@@ -198,44 +165,8 @@ describe('Integration: Guarded Middleware', () => {
     expect(events).toContain('ExecutionBroadcasted')
     expect(policyContext).toBeNull()
 
-    // Wait for settlement polling
     await new Promise(resolve => setTimeout(resolve, 100))
     expect(events).toContain('ExecutionSettled')
-  })
-
-  test('REQUIRE_APPROVAL repay: waits for signed approval then executes', async () => {
-    await applyMiddleware()
-    const events: Array<{ type: string; requestId?: string; targetHash?: string; context?: unknown }> = []
-    emitter.on('ApprovalRequested', (e: { type: string; requestId: string; targetHash: string; context?: unknown }) => events.push(e))
-    emitter.on('ApprovalGranted', (e: { type: string }) => events.push(e))
-    emitter.on('ExecutionBroadcasted', (e: { type: string }) => events.push(e))
-
-    const tx = makeRepayTx(5000)
-
-    // Use listener approach: wait for ApprovalRequested to get requestId and targetHash from the middleware
-    const approvalInfoPromise = new Promise<{ requestId: string; targetHash: string }>(resolve => {
-      emitter.on('ApprovalRequested', (e: { requestId: string; targetHash: string }) => resolve({ requestId: e.requestId, targetHash: e.targetHash }))
-    })
-
-    const txPromise = account.sendTransaction(tx)
-
-    const { requestId, targetHash } = await approvalInfoPromise
-    await createSignedApprovalAndSubmit(broker, keyPair, {
-      requestId,
-      chainId: 1,
-      targetHash,
-      nonce: 2
-    })
-
-    const result = await txPromise
-    expect(result.hash).toBe('0xhash123')
-    const eventTypes = events.map(e => e.type)
-    expect(eventTypes).toContain('ApprovalRequested')
-    expect(eventTypes).toContain('ApprovalGranted')
-    expect(eventTypes).toContain('ExecutionBroadcasted')
-    const approvalEvt = events.find(e => e.type === 'ApprovalRequested')
-    expect(approvalEvt?.context).toBeDefined()
-    expect(approvalEvt?.context).not.toBeNull()
   })
 
   test('REJECT: unknown target throws PolicyRejectionError', async () => {
@@ -265,7 +196,7 @@ describe('Integration: Guarded Middleware', () => {
     expect(() => account.dispose()).toThrow(ForbiddenError)
   })
 
-  test('approve to known spender + bounded amount -> AUTO', async () => {
+  test('approve to known spender + bounded amount -> ALLOW', async () => {
     await applyMiddleware()
     const tx = makeApproveTx(aavePool, 3000)
     const result = await account.sendTransaction(tx)
@@ -316,8 +247,8 @@ describe('Integration: Guarded Middleware', () => {
   test('concurrent sendTransaction: independent policy evaluation', async () => {
     await applyMiddleware()
 
-    const tx1 = makeRepayTx(500) // AUTO
-    const tx2 = { to: '0x0000000000000000000000000000000000000099', value: 0, data: '0xdeadbeef' + '00'.repeat(32) } // REJECT
+    const tx1 = makeRepayTx(500)
+    const tx2 = { to: '0x0000000000000000000000000000000000000099', value: 0, data: '0xdeadbeef' + '00'.repeat(32) }
 
     const [r1, r2] = await Promise.allSettled([
       account.sendTransaction(tx1),
@@ -329,7 +260,7 @@ describe('Integration: Guarded Middleware', () => {
     expect((r2 as PromiseRejectedResult).reason).toBeInstanceOf(PolicyRejectionError)
   })
 
-  test('signTransaction: AUTO repay returns signed tx', async () => {
+  test('signTransaction: ALLOW repay returns signed tx', async () => {
     await applyMiddleware()
 
     const tx = makeRepayTx(500)
@@ -349,81 +280,39 @@ describe('Integration: Guarded Middleware', () => {
     await expect(account.signTransaction(tx)).rejects.toThrow(PolicyRejectionError)
   })
 
-  test('signTransaction: REQUIRE_APPROVAL waits for signed approval', async () => {
-    await applyMiddleware()
-    const events: Array<{ type: string; requestId?: string; targetHash?: string; context?: unknown }> = []
-    emitter.on('ApprovalRequested', (e: { type: string; requestId: string; targetHash: string; context?: unknown }) => events.push(e))
-    emitter.on('TransactionSigned', (e: { type: string }) => events.push(e))
-
-    const tx = makeRepayTx(5000)
-
-    // Use listener approach: wait for ApprovalRequested to get requestId and targetHash from the middleware
-    const approvalInfoPromise = new Promise<{ requestId: string; targetHash: string }>(resolve => {
-      emitter.on('ApprovalRequested', (e: { requestId: string; targetHash: string }) => resolve({ requestId: e.requestId, targetHash: e.targetHash }))
-    })
-
-    const signPromise = account.signTransaction(tx)
-
-    const { requestId, targetHash } = await approvalInfoPromise
-    await createSignedApprovalAndSubmit(broker, keyPair, {
-      requestId,
-      chainId: 1,
-      targetHash,
-      nonce: 2
-    })
-
-    const result = await signPromise as unknown as { signedTx: string; intentHash: string }
-    expect(result.signedTx).toBeDefined()
-    expect(result.signedTx.startsWith('0x')).toBe(true)
-    expect(result.intentHash).toBeDefined()
-    const eventTypes = events.map(e => e.type)
-    expect(eventTypes).toContain('ApprovalRequested')
-    expect(eventTypes).toContain('TransactionSigned')
-    const signApprovalEvt = events.find(e => e.type === 'ApprovalRequested')
-    expect(signApprovalEvt?.context).toBeDefined()
-    expect(signApprovalEvt?.context).not.toBeNull()
-  })
-
   test('policy change at runtime: resolver returns new policies', async () => {
     await applyMiddleware()
 
-    // First call: repay 500 -> AUTO
     const tx = makeRepayTx(500)
     const result = await account.sendTransaction(tx)
     expect(result.hash).toBe('0xhash123')
 
-    // Change policyArr to reject everything
     policyArr.length = 0
     policyArr.push({ type: 'call' as const, permissions: {} })
 
-    // Next call should REJECT
     await expect(account.sendTransaction(tx)).rejects.toThrow(PolicyRejectionError)
   })
 
-  test('wallet-specific policy: different accountIndex uses different policies (F15/E4)', async () => {
-    // Set up: two different policy sets based on accountIndex
+  test('wallet-specific policy: different accountIndex uses different policies', async () => {
     let activeAccountIndex = 0
-    const wallet0Policies = makePolicyArr() // AUTO for repay ≤ 10000
-    const wallet1Policies: Policy[] = [{ type: 'call' as const, permissions: {} }] // REJECT everything
+    const wallet0Policies = makePolicyArr()
+    const wallet1Policies = [{ type: 'call' as const, permissions: {} }]
 
     const middleware = createGuardedMiddleware({
       policyResolver: async () => {
         return activeAccountIndex === 0 ? wallet0Policies : wallet1Policies
       },
-      approvalBroker: broker,
       emitter,
       chainId: 1,
       getAccountIndex: () => activeAccountIndex
     })
     await middleware(account as never)
 
-    // Account 0: repay 500 -> AUTO (allowed by wallet0Policies)
     activeAccountIndex = 0
     const tx = makeRepayTx(500)
     const result = await account.sendTransaction(tx)
     expect(result.hash).toBe('0xhash123')
 
-    // Switch to account 1: repay 500 -> REJECT (wallet1Policies has no permissions)
     activeAccountIndex = 1
     await expect(account.sendTransaction(tx)).rejects.toThrow(PolicyRejectionError)
   })

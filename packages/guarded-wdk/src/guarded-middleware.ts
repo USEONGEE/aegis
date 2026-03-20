@@ -2,12 +2,12 @@ import { randomUUID, createHash } from 'node:crypto'
 import { intentHash } from '@wdk-app/canonical'
 import type { IWalletAccount } from '@tetherto/wdk'
 import { ForbiddenError, PolicyRejectionError } from './errors.js'
-import type { SignedApprovalBroker } from './signed-approval-broker.js'
+import type { RejectionEntry } from './approval-store.js'
 import type { EventEmitter } from 'node:events'
 
 // --- Policy types ---
 
-export type Decision = 'AUTO' | 'REQUIRE_APPROVAL' | 'REJECT'
+export type Decision = 'ALLOW' | 'REJECT'
 
 export interface ArgCondition {
   condition: 'EQ' | 'NEQ' | 'GT' | 'GTE' | 'LT' | 'LTE' | 'ONE_OF' | 'NOT_ONE_OF'
@@ -107,7 +107,6 @@ export interface EvaluationResult {
 
 interface MiddlewareConfig {
   policyResolver: (chainId: number) => Promise<Policy[]>
-  approvalBroker: SignedApprovalBroker
   emitter: EventEmitter
   chainId: number
   getAccountIndex: () => number
@@ -130,7 +129,7 @@ function validatePolicy (policy: Policy): void {
           if (!rule.decision) {
             throw new Error("Each rule must have a 'decision' field.")
           }
-          if (!['AUTO', 'REQUIRE_APPROVAL', 'REJECT'].includes(rule.decision)) {
+          if (!['ALLOW', 'REJECT'].includes(rule.decision)) {
             throw new Error(`Invalid decision: ${rule.decision}`)
           }
           if (rule.args) {
@@ -289,9 +288,7 @@ export function evaluatePolicy (policies: Policy[], chainId: number, tx: Transac
       decision: rule.decision,
       matchedPermission: rule,
       reason: 'matched',
-      context: rule.decision === 'REQUIRE_APPROVAL'
-        ? { target: txTo, selector: txSelector!, effectiveRules: candidates, ruleFailures }
-        : null
+      context: null
     }
   }
 
@@ -327,15 +324,13 @@ async function pollReceipt (account: GuardedAccount, hash: string, emitter: Even
   }
 }
 
-export function createGuardedMiddleware ({ policyResolver, approvalBroker, emitter, chainId, getAccountIndex }: MiddlewareConfig): (account: IWalletAccount) => Promise<void> {
+export function createGuardedMiddleware ({ policyResolver, emitter, chainId, getAccountIndex }: MiddlewareConfig): (account: IWalletAccount) => Promise<void> {
   return async (acct: IWalletAccount) => {
     const account = acct as GuardedAccount
     const rawSendTransaction = account.sendTransaction.bind(account)
     const rawTransfer = account.transfer.bind(account)
-    // Save raw sign before override (used by signTransaction fallback)
     const rawSign: ((message: string) => Promise<string>) | null =
       typeof account.sign === 'function' ? account.sign.bind(account) : null
-    // Save raw signTransaction before override (preferred for signTransaction if WDK provides it)
     const rawSignTransaction: ((tx: Transaction) => Promise<unknown>) | null =
       typeof account.signTransaction === 'function' ? account.signTransaction.bind(account) : null
 
@@ -372,44 +367,8 @@ export function createGuardedMiddleware ({ policyResolver, approvalBroker, emitt
       })
 
       if (decision === 'REJECT') {
+
         throw new PolicyRejectionError(reason, context)
-      }
-
-      if (decision === 'REQUIRE_APPROVAL') {
-        const targetHash = intentHash({
-          chainId,
-          to: tx.to!,
-          data: tx.data!,
-          value: String(tx.value || '0'),
-          timestamp: Date.now()
-        })
-
-        emitter.emit('ApprovalRequested', {
-          type: 'ApprovalRequested',
-          requestId,
-          target: tx.to,
-          selector: tx.data?.slice?.(0, 10),
-          targetHash,
-          context,
-          timestamp: Date.now()
-        })
-
-        const request = await approvalBroker.createRequest('tx', {
-          requestId,
-          chainId,
-          targetHash,
-          accountIndex: getAccountIndex(),
-          content: `Transaction to ${tx.to?.slice(0, 10)}...`
-        })
-
-        const signedApproval = await approvalBroker.waitForApproval(request.requestId, 60000)
-
-        emitter.emit('ApprovalGranted', {
-          type: 'ApprovalGranted',
-          requestId,
-          approver: signedApproval.approver,
-          timestamp: Date.now()
-        })
       }
 
       let result: TransactionResult
@@ -443,9 +402,6 @@ export function createGuardedMiddleware ({ policyResolver, approvalBroker, emitt
       const value = options.token ? 0 : options.amount
       const mockTx: Transaction = { to, value, data: '0x' }
 
-      // TODO: ERC-20 calldata encoding is protocol knowledge that doesn't belong
-      // in middleware. Caller (daemon tool-surface) should construct the tx and
-      // use sendTransaction instead. Remove transfer override when that's done.
       if (options.token) {
         const iface = '0xa9059cbb'
         const recipient = (options.recipient || '').replace('0x', '').padStart(64, '0')
@@ -479,44 +435,8 @@ export function createGuardedMiddleware ({ policyResolver, approvalBroker, emitt
       })
 
       if (decision === 'REJECT') {
+
         throw new PolicyRejectionError(reason, context)
-      }
-
-      if (decision === 'REQUIRE_APPROVAL') {
-        const targetHash = intentHash({
-          chainId,
-          to: mockTx.to!,
-          data: mockTx.data!,
-          value: String(mockTx.value || '0'),
-          timestamp: Date.now()
-        })
-
-        emitter.emit('ApprovalRequested', {
-          type: 'ApprovalRequested',
-          requestId,
-          target: mockTx.to,
-          selector: mockTx.data?.slice?.(0, 10),
-          targetHash,
-          context,
-          timestamp: Date.now()
-        })
-
-        const request = await approvalBroker.createRequest('tx', {
-          requestId,
-          chainId,
-          targetHash,
-          accountIndex: getAccountIndex(),
-          content: `Transfer to ${mockTx.to?.slice(0, 10)}...`
-        })
-
-        const signedApproval = await approvalBroker.waitForApproval(request.requestId, 60000)
-
-        emitter.emit('ApprovalGranted', {
-          type: 'ApprovalGranted',
-          requestId,
-          approver: signedApproval.approver,
-          timestamp: Date.now()
-        })
       }
 
       let result: TransactionResult
@@ -570,6 +490,7 @@ export function createGuardedMiddleware ({ policyResolver, approvalBroker, emitt
       })
 
       if (decision === 'REJECT') {
+
         throw new PolicyRejectionError(reason, context)
       }
 
@@ -581,40 +502,6 @@ export function createGuardedMiddleware ({ policyResolver, approvalBroker, emitt
         timestamp: Date.now()
       })
 
-      if (decision === 'REQUIRE_APPROVAL') {
-        emitter.emit('ApprovalRequested', {
-          type: 'ApprovalRequested',
-          requestId,
-          target: tx.to,
-          selector: tx.data?.slice?.(0, 10),
-          targetHash,
-          context,
-          timestamp: Date.now()
-        })
-
-        const request = await approvalBroker.createRequest('tx', {
-          requestId,
-          chainId,
-          targetHash,
-          accountIndex: getAccountIndex(),
-          content: `Transaction to ${tx.to?.slice(0, 10)}...`
-        })
-
-        const signedApproval = await approvalBroker.waitForApproval(request.requestId, 60000)
-
-        emitter.emit('ApprovalGranted', {
-          type: 'ApprovalGranted',
-          requestId,
-          approver: signedApproval.approver,
-          timestamp: Date.now()
-        })
-      }
-
-      // Sign the transaction:
-      // 1. Prefer rawSignTransaction (original account.signTransaction saved before override)
-      // 2. Fallback to rawSign (original account.sign)
-      // 3. Last resort: deterministic SHA-256 hash (mock/test only)
-      // The signed tx format depends on the WDK implementation; mock uses '0x' + sha256.
       const txPayload = JSON.stringify({
         to: tx.to,
         data: tx.data,
@@ -625,21 +512,17 @@ export function createGuardedMiddleware ({ policyResolver, approvalBroker, emitt
 
       let signedTx: string
       if (rawSignTransaction) {
-        // Use the original account.signTransaction (saved before our override)
         const rawResult = await rawSignTransaction(tx)
         const resultObj = rawResult as { signedTx?: string } | string
         signedTx = typeof resultObj === 'string' ? resultObj
           : (resultObj?.signedTx ?? String(resultObj))
-        // Ensure hex prefix
         if (!signedTx.startsWith('0x')) signedTx = '0x' + signedTx
       } else if (rawSign) {
-        // Fallback: use the raw account.sign method
         const signResult = await Promise.resolve(rawSign(txPayload))
         signedTx = typeof signResult === 'string' ? signResult
           : '0x' + Buffer.from(String(signResult)).toString('hex')
         if (!signedTx.startsWith('0x')) signedTx = '0x' + signedTx
       } else {
-        // Last resort: deterministic hash (mock/test only)
         signedTx = '0x' + createHash('sha256').update(txPayload).digest('hex')
       }
 

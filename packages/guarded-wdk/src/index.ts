@@ -37,7 +37,10 @@ export type {
   JournalInput,
   StoredJournal,
   HistoryQueryOpts,
-  JournalQueryOpts
+  JournalQueryOpts,
+  RejectionEntry,
+  PolicyVersionEntry,
+  RejectionQueryOpts
 } from './approval-store.js'
 export type { VerificationContext } from './approval-verifier.js'
 export type { KeyPair } from './crypto-utils.js'

@@ -20,6 +20,8 @@ interface Waiter {
   timer: ReturnType<typeof setTimeout>
 }
 
+type PendableApprovalType = 'policy' | 'wallet_create' | 'wallet_delete'
+
 /**
  * Unified approval broker for tx, policy, wallet, and device operations.
  */
@@ -52,8 +54,8 @@ export class SignedApprovalBroker {
       createdAt: Date.now()
     }
 
-    // Store pending for actionable requests
-    if (type === 'policy' || type === 'tx' || type === 'wallet_create' || type === 'wallet_delete') {
+    // Store pending for actionable requests (tx path removed — Decision simplified to ALLOW/REJECT)
+    if (type === 'policy' || type === 'wallet_create' || type === 'wallet_delete') {
       const pending: PendingApprovalRequest = walletName
         ? { ...request, walletName }
         : request
@@ -100,17 +102,6 @@ export class SignedApprovalBroker {
     // This guarantees that these operations can only execute after
     // verifyApproval() passes — making unapproved execution structurally impossible.
     switch (type) {
-      case 'tx': {
-        // Resolve waiting tx promise
-        const waiter = this._waiters.get(requestId)
-        if (waiter) {
-          clearTimeout(waiter.timer)
-          waiter.resolve(signedApproval)
-          this._waiters.delete(requestId)
-        }
-        break
-      }
-
       case 'policy': {
         // Remove from pending, apply policy
         await this._store.removePendingApproval(requestId)
@@ -213,21 +204,6 @@ export class SignedApprovalBroker {
       action: type === 'policy_reject' ? 'rejected' : 'approved',
       content: signedApproval.content,
       timestamp: Date.now()
-    })
-  }
-
-  /**
-   * Wait for a signed approval to arrive for a given request.
-   * Returns a Promise that resolves when submitApproval is called with matching requestId.
-   */
-  waitForApproval (requestId: string, timeoutMs: number = 60000): Promise<SignedApproval> {
-    return new Promise<SignedApproval>((resolve, reject) => {
-      const timer = setTimeout(() => {
-        this._waiters.delete(requestId)
-        reject(new ApprovalTimeoutError(requestId))
-      }, timeoutMs)
-
-      this._waiters.set(requestId, { resolve, reject, timer })
     })
   }
 

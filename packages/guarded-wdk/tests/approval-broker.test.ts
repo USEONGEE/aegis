@@ -1,7 +1,6 @@
 import { SignedApprovalBroker } from '../src/signed-approval-broker.js'
 import { ApprovalStore } from '../src/approval-store.js'
 import type { HistoryEntry, HistoryQueryOpts, ApprovalRequest } from '../src/approval-store.js'
-import { ApprovalTimeoutError } from '../src/errors.js'
 import { generateKeyPair, sign } from '../src/crypto-utils.js'
 import type { KeyPair } from '../src/crypto-utils.js'
 import { canonicalJSON } from '@wdk-app/canonical'
@@ -22,7 +21,7 @@ class MockApprovalStore extends ApprovalStore {
   override async init () {}
   override async dispose () {}
   override async loadPolicy (seedId: string, chain: string) { return (this._policies[`${seedId}:${chain}`] || null) as never }
-  override async savePolicy (seedId: string, chain: string, policy: unknown) { this._policies[`${seedId}:${chain}`] = policy }
+  override async savePolicy (seedId: string, chain: string, policy: unknown, _description: string = '') { this._policies[`${seedId}:${chain}`] = policy }
   override async getPolicyVersion (_seedId: string, _chain: string) { return 0 }
   override async loadPendingApprovals (_seedId: string | null, type: string | null, chain: string | null) { return this._pending.filter(p => (!type || p.type === type) && (!chain || (p as any).chain === chain)) as never }
   override async savePendingApproval (_seedId: string, request: ApprovalRequest) { this._pending.push(request as ApprovalRequest & Record<string, unknown>) }
@@ -37,7 +36,7 @@ class MockApprovalStore extends ApprovalStore {
 
 function makeSignedApproval (keyPair: KeyPair, overrides: Record<string, unknown> = {}) {
   const approval: Record<string, unknown> = {
-    type: 'tx',
+    type: 'policy',
     requestId: 'req-1',
     chainId: 1,
     targetHash: '0xabc123',
@@ -74,48 +73,52 @@ describe('SignedApprovalBroker', () => {
     broker.dispose()
   })
 
-  test('createRequest creates a pending request', async () => {
+  test('createRequest creates a pending request for policy type', async () => {
+    const request = await broker.createRequest('policy', {
+      requestId: 'req-1',
+      chainId: 1,
+      targetHash: '0xabc123',
+      accountIndex: 0,
+      content: 'test'
+    })
+    expect(request.requestId).toBe('req-1')
+    expect(request.type).toBe('policy')
+    expect(request.chainId).toBe(1)
+    expect(store._pending.length).toBe(1)
+  })
+
+  test('createRequest does NOT store pending for tx type', async () => {
     const request = await broker.createRequest('tx', {
       requestId: 'req-1',
       chainId: 1,
-      targetHash: '0xabc123'
+      targetHash: '0xabc123',
+      accountIndex: 0,
+      content: 'test'
     })
     expect(request.requestId).toBe('req-1')
-    expect(request.type).toBe('tx')
-    expect(request.chainId).toBe(1)
+    expect(store._pending.length).toBe(0)
   })
 
   test('createRequest generates requestId if not provided', async () => {
-    const request = await broker.createRequest('tx', {
+    const request = await broker.createRequest('policy', {
       chainId: 1,
-      targetHash: '0xabc123'
+      targetHash: '0xabc123',
+      accountIndex: 0,
+      content: 'test'
     })
     expect(request.requestId).toBeTruthy()
     expect(typeof request.requestId).toBe('string')
   })
 
-  test('submitApproval + waitForApproval resolves', async () => {
-    const approval = makeSignedApproval(keyPair)
-    const waitPromise = broker.waitForApproval('req-1', 5000)
-
-    setTimeout(async () => {
-      await broker.submitApproval(approval as never)
-    }, 50)
-
-    const result = await waitPromise
-    expect(result.approver).toBe(keyPair.publicKey)
-    expect(result.requestId).toBe('req-1')
-  })
-
-  test('waitForApproval times out', async () => {
-    await expect(broker.waitForApproval('req-1', 300))
-      .rejects.toThrow(ApprovalTimeoutError)
-  })
-
   test('submitApproval records in history', async () => {
+    await broker.createRequest('policy', {
+      requestId: 'req-1',
+      chainId: 1,
+      targetHash: '0xabc123',
+      accountIndex: 0,
+      content: 'test'
+    })
     const approval = makeSignedApproval(keyPair)
-    broker.waitForApproval('req-1', 5000).catch(() => {})
-
     await broker.submitApproval(approval as never)
 
     expect(store._history.length).toBe(1)
@@ -139,8 +142,14 @@ describe('SignedApprovalBroker', () => {
   })
 
   test('submitApproval rejects replayed nonce', async () => {
+    await broker.createRequest('policy', {
+      requestId: 'req-1',
+      chainId: 1,
+      targetHash: '0xabc123',
+      accountIndex: 0,
+      content: 'test'
+    })
     const approval1 = makeSignedApproval(keyPair, { nonce: 1 })
-    broker.waitForApproval('req-1', 5000).catch(() => {})
     await broker.submitApproval(approval1 as never)
 
     const approval2 = makeSignedApproval(keyPair, { requestId: 'req-2', nonce: 1 })
@@ -148,11 +157,12 @@ describe('SignedApprovalBroker', () => {
   })
 
   test('policy request stored as pending and removed on approval', async () => {
-    const request = await broker.createRequest('policy', {
+    await broker.createRequest('policy', {
       requestId: 'policy-1',
       chainId: 1,
       targetHash: '0xpolicyhash',
-      metadata: { seedId: 'seed-1' }
+      accountIndex: 0,
+      content: 'test'
     })
 
     expect(store._pending.length).toBe(1)
@@ -163,7 +173,6 @@ describe('SignedApprovalBroker', () => {
       targetHash: '0xpolicyhash'
     })
 
-    broker.waitForApproval('policy-1', 5000).catch(() => {})
     await broker.submitApproval(approval as never)
 
     expect(store._pending.length).toBe(0)
@@ -176,24 +185,34 @@ describe('SignedApprovalBroker', () => {
     const approval = makeSignedApproval(keyPair)
     await expect(broker.submitApproval(approval as never)).rejects.toThrow('Approver not in trustedApprovers')
 
+    await broker.createRequest('policy', {
+      requestId: 'req-2',
+      chainId: 1,
+      targetHash: '0xabc123',
+      accountIndex: 0,
+      content: 'test'
+    })
     const approval2 = makeSignedApproval(newKeyPair, { requestId: 'req-2' })
-    broker.waitForApproval('req-2', 5000).catch(() => {})
     await broker.submitApproval(approval2 as never)
     expect(store._history.length).toBe(1)
   })
 
   test('dispose cleans up pending waiters', () => {
-    const promise = broker.waitForApproval('req-1', 60000)
     broker.dispose()
-    return expect(promise).rejects.toThrow('Broker disposed')
   })
 
   test('emits ApprovalVerified event on successful submitApproval', async () => {
     const events: Array<{ type: string; approver: string }> = []
     emitter.on('ApprovalVerified', (e: { type: string; approver: string }) => events.push(e))
 
+    await broker.createRequest('policy', {
+      requestId: 'req-1',
+      chainId: 1,
+      targetHash: '0xabc123',
+      accountIndex: 0,
+      content: 'test'
+    })
     const approval = makeSignedApproval(keyPair)
-    broker.waitForApproval('req-1', 5000).catch(() => {})
     await broker.submitApproval(approval as never)
 
     expect(events.length).toBe(1)
@@ -205,12 +224,12 @@ describe('SignedApprovalBroker', () => {
     const events: Array<{ type: string; requestId: string; timestamp: number }> = []
     emitter.on('ApprovalRejected', (e: { type: string; requestId: string; timestamp: number }) => events.push(e))
 
-    // Create a policy request first so removePending has something to remove
     await broker.createRequest('policy', {
       requestId: 'policy-reject-1',
       chainId: 1,
       targetHash: '0xpolicyhash',
-      metadata: { seedId: 'seed-1' }
+      accountIndex: 0,
+      content: 'test'
     })
 
     const approval = makeSignedApproval(keyPair, {
@@ -219,13 +238,8 @@ describe('SignedApprovalBroker', () => {
       targetHash: '0xpolicyhash'
     })
 
-    const waitPromise = broker.waitForApproval('policy-reject-1', 5000)
     await broker.submitApproval(approval as never)
 
-    // The waiter should be rejected
-    await expect(waitPromise).rejects.toThrow('Policy rejected by owner')
-
-    // ApprovalRejected event should have been emitted
     expect(events.length).toBe(1)
     expect(events[0].type).toBe('ApprovalRejected')
     expect(events[0].requestId).toBe('policy-reject-1')

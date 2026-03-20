@@ -21,9 +21,12 @@ import {
   type StoredJournal,
   type HistoryQueryOpts,
   type JournalQueryOpts,
-  type SignedApproval
+  type SignedApproval,
+  type RejectionEntry,
+  type RejectionQueryOpts,
+  type PolicyVersionEntry
 } from './approval-store.js'
-import type { PendingApprovalRow, StoredHistoryEntry, CronRow, StoredJournalEntry, SignerRow, MasterSeedRow, WalletRow, PolicyRow } from './store-types.js'
+import type { PendingApprovalRow, StoredHistoryEntry, CronRow, StoredJournalEntry, SignerRow, MasterSeedRow, WalletRow, PolicyRow, RejectionRow, PolicyVersionRow } from './store-types.js'
 
 /**
  * JSON file-backed implementation of ApprovalStore.
@@ -76,7 +79,9 @@ export class JsonApprovalStore extends ApprovalStore {
       'crons.json': [],
       'master-seed.json': null,
       'wallets.json': [],
-      'journal.json': []
+      'journal.json': [],
+      'rejection-history.json': [],
+      'policy-versions.json': []
     }
     for (const [name, defaultVal] of Object.entries(defaults)) {
       const existing = await this._read(name)
@@ -201,10 +206,11 @@ export class JsonApprovalStore extends ApprovalStore {
     }
   }
 
-  override async savePolicy (accountIndex: number, chainId: number, input: PolicyInput): Promise<void> {
+  override async savePolicy (accountIndex: number, chainId: number, input: PolicyInput, description: string = ''): Promise<void> {
     const policies = await this._read<Record<string, PolicyRow>>('policies.json') || {}
     const key = `${accountIndex}:${chainId}`
     const existing = policies[key]
+    const oldPolicies: unknown[] = existing ? JSON.parse(existing.policies_json) : []
     const version = existing ? (existing.policy_version || 0) + 1 : 1
     policies[key] = {
       account_index: accountIndex,
@@ -215,6 +221,18 @@ export class JsonApprovalStore extends ApprovalStore {
       updated_at: Date.now()
     }
     await this._write('policies.json', policies)
+
+    const diff = version === 1 ? null : computePolicyDiff(oldPolicies, input.policies)
+    const versions = await this._read<PolicyVersionRow[]>('policy-versions.json') || []
+    versions.push({
+      account_index: accountIndex,
+      chain_id: chainId,
+      version,
+      description,
+      diff_json: diff !== null ? JSON.stringify(diff) : null,
+      changed_at: Date.now()
+    })
+    await this._write('policy-versions.json', versions)
   }
 
   override async getPolicyVersion (accountIndex: number, chainId: number): Promise<number> {
@@ -529,4 +547,92 @@ export class JsonApprovalStore extends ApprovalStore {
       updatedAt: j.updated_at
     }))
   }
+
+  // --- Rejection History ---
+
+  override async saveRejection (entry: RejectionEntry): Promise<void> {
+    const rejections = await this._read<RejectionRow[]>('rejection-history.json') || []
+    rejections.push({
+      intent_hash: entry.intentHash,
+      account_index: entry.accountIndex,
+      chain_id: entry.chainId,
+      target_hash: entry.targetHash,
+      reason: entry.reason,
+      context_json: entry.context !== null && entry.context !== undefined ? JSON.stringify(entry.context) : null,
+      policy_version: entry.policyVersion,
+      rejected_at: entry.rejectedAt
+    })
+    await this._write('rejection-history.json', rejections)
+  }
+
+  override async listRejections (opts: RejectionQueryOpts = {}): Promise<RejectionEntry[]> {
+    const rejections = await this._read<RejectionRow[]>('rejection-history.json') || []
+    let result = rejections
+    if (opts.accountIndex !== undefined) {
+      result = result.filter(r => r.account_index === opts.accountIndex)
+    }
+    if (opts.chainId !== undefined) {
+      result = result.filter(r => r.chain_id === opts.chainId)
+    }
+    if (opts.limit) {
+      result = result.slice(-opts.limit)
+    }
+    return result.map(r => ({
+      intentHash: r.intent_hash,
+      accountIndex: r.account_index,
+      chainId: r.chain_id,
+      targetHash: r.target_hash,
+      reason: r.reason,
+      context: r.context_json ? JSON.parse(r.context_json) : null,
+      policyVersion: r.policy_version,
+      rejectedAt: r.rejected_at
+    }))
+  }
+
+  // --- Policy Versions ---
+
+  override async listPolicyVersions (accountIndex: number, chainId: number): Promise<PolicyVersionEntry[]> {
+    const versions = await this._read<PolicyVersionRow[]>('policy-versions.json') || []
+    return versions
+      .filter(v => v.account_index === accountIndex && v.chain_id === chainId)
+      .map(v => ({
+        accountIndex: v.account_index,
+        chainId: v.chain_id,
+        version: v.version,
+        description: v.description,
+        diff: v.diff_json ? JSON.parse(v.diff_json) : null,
+        changedAt: v.changed_at
+      }))
+  }
+}
+
+function computePolicyDiff (oldPolicies: unknown[], newPolicies: unknown[]): { added: unknown[]; removed: unknown[]; modified: Array<{ before: unknown; after: unknown }> } {
+  const oldJSON = oldPolicies.map(p => JSON.stringify(p))
+  const newJSON = newPolicies.map(p => JSON.stringify(p))
+
+  const added: unknown[] = []
+  const removed: unknown[] = []
+  const modified: Array<{ before: unknown; after: unknown }> = []
+
+  const matchedNew = new Set<number>()
+
+  for (let i = 0; i < oldPolicies.length; i++) {
+    const exactIdx = newJSON.indexOf(oldJSON[i])
+    if (exactIdx !== -1 && !matchedNew.has(exactIdx)) {
+      matchedNew.add(exactIdx)
+    } else if (i < newPolicies.length && !matchedNew.has(i)) {
+      modified.push({ before: oldPolicies[i], after: newPolicies[i] })
+      matchedNew.add(i)
+    } else {
+      removed.push(oldPolicies[i])
+    }
+  }
+
+  for (let j = 0; j < newPolicies.length; j++) {
+    if (!matchedNew.has(j)) {
+      added.push(newPolicies[j])
+    }
+  }
+
+  return { added, removed, modified }
 }
