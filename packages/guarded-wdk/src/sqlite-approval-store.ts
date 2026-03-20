@@ -218,8 +218,8 @@ export class SqliteApprovalStore extends ApprovalStore {
     return {
       accountIndex: row.account_index,
       chainId: row.chain_id,
-      policiesJson: row.policies_json,
-      signatureJson: row.signature_json,
+      policies: JSON.parse(row.policies_json) as unknown[],
+      signature: JSON.parse(row.signature_json) as Record<string, unknown>,
       policyVersion: row.policy_version,
       updatedAt: row.updated_at
     }

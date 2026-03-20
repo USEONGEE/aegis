@@ -58,7 +58,7 @@ class MockApprovalStore extends ApprovalStore {
   override async dispose () {}
   override async listWallets () { return [] }
   override async loadPolicy (accountIndex: number, chainId: number) { return (this._policies[`${accountIndex}:${chainId}`] || null) as never }
-  override async savePolicy (accountIndex: number, chainId: number, input: PolicyInput) { this._policies[`${accountIndex}:${chainId}`] = { ...input, policiesJson: JSON.stringify(input.policies), accountIndex, chainId, policyVersion: 0, updatedAt: Date.now() } }
+  override async savePolicy (accountIndex: number, chainId: number, input: PolicyInput) { this._policies[`${accountIndex}:${chainId}`] = { ...input, accountIndex, chainId, policyVersion: 0, updatedAt: Date.now() } }
   override async getPolicyVersion (_accountIndex: number, _chainId: number) { return 0 }
   override async loadPendingApprovals (_accountIndex: number | null, _type: string | null, _chainId: number | null) { return this._pending as unknown as PendingApprovalRequest[] }
   override async savePendingApproval (_accountIndex: number, request: ApprovalRequest) { this._pending.push(request as ApprovalRequest & Record<string, unknown>) }
@@ -222,7 +222,7 @@ describe('createGuardedWDK', () => {
     await facade.updatePolicies(1, newPolicies)
 
     const saved = await store.loadPolicy(0, 1) as Record<string, unknown>
-    expect(JSON.parse(saved.policiesJson as string)).toEqual(newPolicies.policies)
+    expect(saved.policies).toEqual(newPolicies.policies)
   })
 
   test('loads policies from store on init', async () => {
@@ -299,7 +299,7 @@ describe('createGuardedWDK', () => {
 
     // Verify the policy was actually saved in the store
     const saved = await store.loadPolicy(0, 1) as Record<string, unknown>
-    expect(JSON.parse(saved.policiesJson as string)).toEqual(newPolicies.policies)
+    expect(saved.policies).toEqual(newPolicies.policies)
   })
 
   test('config.policies used as fallback when store has no policy for chain', async () => {

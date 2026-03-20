@@ -48,9 +48,9 @@ function createMockWdk (overrides: Record<string, any> = {}): any {
 
 function createMockStore (overrides: Record<string, any> = {}): any {
   return {
-    loadPolicy: jest.fn<() => Promise<{ policiesJson: string; signatureJson: string; accountIndex: number; chainId: number; policyVersion: number; updatedAt: number }>>().mockResolvedValue({
-      policiesJson: JSON.stringify([{ type: 'auto', maxUsd: 100 }]),
-      signatureJson: '{}',
+    loadPolicy: jest.fn<() => Promise<{ policies: unknown[]; signature: Record<string, unknown>; accountIndex: number; chainId: number; policyVersion: number; updatedAt: number }>>().mockResolvedValue({
+      policies: [{ type: 'auto', maxUsd: 100 }],
+      signature: {},
       accountIndex: 0,
       chainId: 1,
       policyVersion: 1,

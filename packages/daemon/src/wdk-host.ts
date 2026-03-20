@@ -82,8 +82,7 @@ export async function initWDK (config: DaemonConfig, logger: Logger): Promise<WD
       const chainId = Number(chainIdStr)
       const stored = await store.loadPolicy(0, chainId)
       if (stored) {
-        const policiesArr = JSON.parse(stored.policiesJson)
-        restoredPolicies[chainIdStr] = { policies: policiesArr }
+        restoredPolicies[chainIdStr] = { policies: stored.policies }
         logger.info({ accountIndex: 0, chainId }, 'Restored policy from store')
       }
     }

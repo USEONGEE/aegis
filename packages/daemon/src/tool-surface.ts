@@ -277,7 +277,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
 async function swapPoliciesForWallet (store: any, wdk: WDKInstance, accountIndex: number, chainId: number): Promise<void> {
   const stored = await store.loadPolicy(accountIndex, chainId)
   if (stored && wdk.updatePolicies) {
-    await wdk.updatePolicies(chainId, { policies: JSON.parse(stored.policiesJson) }, accountIndex)
+    await wdk.updatePolicies(chainId, { policies: stored.policies }, accountIndex)
   }
 }
 
@@ -510,7 +510,7 @@ export async function executeToolCall (name: string, args: ToolArgs, wdkContext:
       try {
         const chainId = resolveChainId(chain)
         const policy = await store.loadPolicy(accountIndex ?? 0, chainId)
-        return { policies: policy ? JSON.parse(policy.policiesJson) : [] }
+        return { policies: policy ? policy.policies : [] }
       } catch (err: any) {
         logger.error({ err, name: 'policyList' }, 'Tool execution error')
         return { status: 'error', error: err.message }

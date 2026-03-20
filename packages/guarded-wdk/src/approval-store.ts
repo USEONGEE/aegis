@@ -55,11 +55,9 @@ export interface PolicyInput {
   signature: Record<string, unknown>
 }
 
-export interface StoredPolicy {
+export interface StoredPolicy extends PolicyInput {
   accountIndex: number
   chainId: number
-  policiesJson: string
-  signatureJson: string
   policyVersion: number
   updatedAt: number
 }
@@ -103,13 +101,9 @@ export interface CronInput {
   chainId: number | null
 }
 
-export interface StoredCron {
+export interface StoredCron extends CronInput {
   id: string
   accountIndex: number
-  sessionId: string
-  interval: string
-  prompt: string
-  chainId: number | null
   createdAt: number
   lastRunAt: number | null
   isActive: boolean
@@ -123,12 +117,7 @@ export interface JournalInput {
   status: JournalStatus
 }
 
-export interface StoredJournal {
-  intentHash: string
-  accountIndex: number
-  chainId: number
-  targetHash: string
-  status: JournalStatus
+export interface StoredJournal extends JournalInput {
   txHash: string | null
   createdAt: number
   updatedAt: number

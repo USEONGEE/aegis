@@ -126,7 +126,8 @@ describe('SqliteApprovalStore', () => {
       const loaded = await store.loadPolicy(accountIndex, 1)
       expect(loaded!.accountIndex).toBe(accountIndex)
       expect(loaded!.chainId).toBe(1)
-      expect(loaded!.policiesJson).toBe('[{"maxAmount":"1000"}]')
+      expect(loaded!.policies).toEqual([{ maxAmount: '1000' }])
+      expect(loaded!.signature).toEqual({ sig: 'abc' })
       expect(loaded!.policyVersion).toBe(1)
     })
 
@@ -155,18 +156,30 @@ describe('SqliteApprovalStore', () => {
       await store.savePolicy(accountIndex, 900, { policies: [{ a0: 'sol' }], signature: {} })
 
       const p1 = await store.loadPolicy(accountIndex, 1)
-      expect(p1!.policiesJson).toBe('[{"a0":"eth"}]')
+      expect(p1!.policies).toEqual([{ a0: 'eth' }])
       const p2 = await store.loadPolicy(1, 1)
-      expect(p2!.policiesJson).toBe('[{"a1":"eth"}]')
+      expect(p2!.policies).toEqual([{ a1: 'eth' }])
       const p3 = await store.loadPolicy(accountIndex, 900)
-      expect(p3!.policiesJson).toBe('[{"a0":"sol"}]')
+      expect(p3!.policies).toEqual([{ a0: 'sol' }])
     })
 
     test('savePolicy with empty policies array round-trips', async () => {
       await store.savePolicy(accountIndex, 1, { policies: [], signature: {} })
       const loaded = await store.loadPolicy(accountIndex, 1)
-      expect(loaded!.policiesJson).toBe('[]')
-      expect(loaded!.signatureJson).toBe('{}')
+      expect(loaded!.policies).toEqual([])
+      expect(loaded!.signature).toEqual({})
+    })
+
+    test('savePolicy fails if existing row has corrupted JSON (No Fallback)', async () => {
+      // Insert valid policy first, then corrupt the raw JSON in DB
+      await store.savePolicy(accountIndex, 1, { policies: [{ ok: true }], signature: {} })
+      ;(store as any)._db.prepare(
+        'UPDATE policies SET policies_json = ? WHERE account_index = ? AND chain_id = ?'
+      ).run('NOT_VALID_JSON', accountIndex, 1)
+
+      // savePolicy calls loadPolicy internally to get version -> JSON.parse fails
+      await expect(store.savePolicy(accountIndex, 1, { policies: [{ v: 2 }], signature: {} }))
+        .rejects.toThrow()
     })
   })
 

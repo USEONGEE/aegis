@@ -95,8 +95,8 @@ export async function createGuardedWDK (config: GuardedWDKConfig): Promise<Guard
   if (approvalStore) {
     for (const chainKey of Object.keys(wallets || {})) {
       const stored = await approvalStore.loadPolicy(0, Number(chainKey))
-      if (stored && stored.policiesJson) {
-        policiesStore[chainKey] = deepCopy({ ...stored, policies: JSON.parse(stored.policiesJson) }) as Record<string, unknown>
+      if (stored && stored.policies) {
+        policiesStore[chainKey] = deepCopy({ ...stored }) as Record<string, unknown>
       }
     }
   }

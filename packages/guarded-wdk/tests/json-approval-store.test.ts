@@ -126,7 +126,8 @@ describe('JsonApprovalStore', () => {
       const loaded = await store.loadPolicy(accountIndex, 1)
       expect(loaded!.accountIndex).toBe(accountIndex)
       expect(loaded!.chainId).toBe(1)
-      expect(loaded!.policiesJson).toBe('[{"maxAmount":"1000"}]')
+      expect(loaded!.policies).toEqual([{ maxAmount: '1000' }])
+      expect(loaded!.signature).toEqual({ sig: 'abc' })
       expect(loaded!.policyVersion).toBe(1)
     })
 
@@ -151,8 +152,8 @@ describe('JsonApprovalStore', () => {
     test('savePolicy with empty policies array round-trips', async () => {
       await store.savePolicy(accountIndex, 1, { policies: [], signature: {} })
       const loaded = await store.loadPolicy(accountIndex, 1)
-      expect(loaded!.policiesJson).toBe('[]')
-      expect(loaded!.signatureJson).toBe('{}')
+      expect(loaded!.policies).toEqual([])
+      expect(loaded!.signature).toEqual({})
     })
   })
 
