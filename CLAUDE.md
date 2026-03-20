@@ -34,6 +34,12 @@ AI DeFi Agent 서명 엔진 + 제어 인프라.
 - **Codex Session ID**: `/Users/mousebook/Documents/GitHub/WDK-APP/docs/phases/v0.2.0-bip44-wallet`
 - **시작일**: 2026-03-19
 
+### v0.2.1 — Stored extends Input 타입 통일
+- **상태**: Step 1 - PRD
+- **문서**: [docs/phases/v0.2.1-stored-extends-input/](docs/phases/v0.2.1-stored-extends-input/)
+- **Codex Session ID**: `/Users/mousebook/Documents/GitHub/WDK-APP/docs/phases/v0.2.1-stored-extends-input`
+- **시작일**: 2026-03-20
+
 ## 프로젝트 구조
 
 ```
