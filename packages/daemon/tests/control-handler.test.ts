@@ -27,7 +27,6 @@ function createMockBroker (overrides: Record<string, any> = {}): any {
   return {
     submitApproval: jest.fn<() => Promise<undefined>>().mockResolvedValue(undefined),
     setTrustedApprovers: jest.fn(),
-    _trustedApprovers: [] as string[],
     ...overrides
   }
 }
@@ -43,12 +42,6 @@ function createMockStore (overrides: Record<string, any> = {}): any {
   }
 }
 
-function createMockWdk (store: any): any {
-  return {
-    getApprovalStore: jest.fn().mockReturnValue(store)
-  }
-}
-
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -57,13 +50,11 @@ describe('handleControlMessage', () => {
   let logger: MockLogger
   let broker: any
   let store: any
-  let wdk: any
 
   beforeEach(() => {
     logger = createMockLogger()
     broker = createMockBroker()
     store = createMockStore()
-    wdk = createMockWdk(store)
   })
 
   // -------------------------------------------------------------------------
@@ -72,7 +63,7 @@ describe('handleControlMessage', () => {
 
   test('returns error for message with missing type', async () => {
     const msg = { payload: { requestId: 'r1' } } as any
-    const result = await handleControlMessage(msg, broker, logger as any, wdk)
+    const result = await handleControlMessage(msg, broker, logger as any)
 
     expect(result.ok).toBe(false)
     expect(result.error).toBe('Malformed control message')
@@ -80,8 +71,8 @@ describe('handleControlMessage', () => {
   })
 
   test('returns error for message with missing payload', async () => {
-    const msg = { type: 'tx_approval' } as any
-    const result = await handleControlMessage(msg, broker, logger as any, wdk)
+    const msg = { type: 'policy_approval' } as any
+    const result = await handleControlMessage(msg, broker, logger as any)
 
     expect(result.ok).toBe(false)
     expect(result.error).toBe('Malformed control message')
@@ -110,7 +101,7 @@ describe('handleControlMessage', () => {
       }
     }
 
-    const result = await handleControlMessage(msg, broker, logger as any, wdk, undefined, undefined, pairingSession)
+    const result = await handleControlMessage(msg, broker, logger as any, undefined, store, pairingSession)
 
     expect(result.ok).toBe(true)
     expect(result.type).toBe('pairing_confirm')
@@ -119,6 +110,10 @@ describe('handleControlMessage', () => {
   })
 
   test('pairing_confirm: adds identityPubKey to trusted approvers', async () => {
+    // After saveSigner, listSigners returns the newly added signer
+    store.listSigners.mockResolvedValue([
+      { publicKey: '0xnewkey', revokedAt: null }
+    ])
     const pairingSession = {
       pairingToken: 'tok_pair',
       expectedSAS: '5678',
@@ -136,7 +131,7 @@ describe('handleControlMessage', () => {
       }
     }
 
-    await handleControlMessage(msg, broker, logger as any, wdk, undefined, undefined, pairingSession)
+    await handleControlMessage(msg, broker, logger as any, undefined, store, pairingSession)
 
     expect(broker.setTrustedApprovers).toHaveBeenCalledWith(['0xnewkey'])
   })
@@ -147,7 +142,7 @@ describe('handleControlMessage', () => {
       payload: { identityPubKey: '0xkey' }
     }
 
-    const result = await handleControlMessage(msg, broker, logger as any, wdk)
+    const result = await handleControlMessage(msg, broker, logger as any)
 
     expect(result.ok).toBe(false)
     expect(result.type).toBe('pairing_confirm')
@@ -160,52 +155,10 @@ describe('handleControlMessage', () => {
       payload: { signerId: 'dev_003' }
     }
 
-    const result = await handleControlMessage(msg, broker, logger as any, wdk)
+    const result = await handleControlMessage(msg, broker, logger as any)
 
     expect(result.ok).toBe(false)
     expect(result.error).toBe('Missing signerId or identityPubKey')
-  })
-
-  // -------------------------------------------------------------------------
-  // tx_approval
-  // -------------------------------------------------------------------------
-
-  test('tx_approval: calls broker.submitApproval with type "tx"', async () => {
-    const msg: ControlMessage = {
-      type: 'tx_approval',
-      payload: {
-        requestId: 'req_tx_1',
-        signature: '0xsig',
-        approverPubKey: '0xapprover'
-      }
-    }
-
-    const result = await handleControlMessage(msg, broker, logger as any, wdk)
-
-    expect(result.ok).toBe(true)
-    expect(result.type).toBe('tx_approval')
-    expect(result.requestId).toBe('req_tx_1')
-    expect(broker.submitApproval).toHaveBeenCalledWith(expect.objectContaining({
-      type: 'tx',
-      requestId: 'req_tx_1',
-      signature: '0xsig'
-    }), expect.any(Object))
-  })
-
-  test('tx_approval: returns error when broker.submitApproval throws', async () => {
-    broker.submitApproval.mockRejectedValue(new Error('Invalid signature'))
-
-    const msg: ControlMessage = {
-      type: 'tx_approval',
-      payload: { requestId: 'req_tx_2' }
-    }
-
-    const result = await handleControlMessage(msg, broker, logger as any, wdk)
-
-    expect(result.ok).toBe(false)
-    expect(result.type).toBe('tx_approval')
-    expect(result.error).toBe('Invalid signature')
-    expect(logger.error).toHaveBeenCalled()
   })
 
   // -------------------------------------------------------------------------
@@ -221,7 +174,7 @@ describe('handleControlMessage', () => {
       }
     }
 
-    const result = await handleControlMessage(msg, broker, logger as any, wdk)
+    const result = await handleControlMessage(msg, broker, logger as any)
 
     expect(result.ok).toBe(true)
     expect(result.type).toBe('policy_approval')
@@ -243,12 +196,41 @@ describe('handleControlMessage', () => {
       }
     }
 
-    await handleControlMessage(msg, broker, logger as any, wdk, undefined, store)
+    await handleControlMessage(msg, broker, logger as any, undefined, store)
 
     expect(store.savePolicy).toHaveBeenCalledWith(0, 1, {
       policies: [{ type: 'auto', maxUsd: 500 }],
       signature: {}
+    }, '')
+  })
+
+  test('E5: policy_approval passes pending.content as description to savePolicy', async () => {
+    store.loadPendingByRequestId.mockResolvedValue({
+      requestId: 'req_pol_desc',
+      accountIndex: 0,
+      type: 'policy',
+      chainId: 1,
+      targetHash: '0xhash',
+      content: 'Increase daily limit to 500',
+      createdAt: Date.now()
     })
+
+    const msg: ControlMessage = {
+      type: 'policy_approval',
+      payload: {
+        requestId: 'req_pol_desc',
+        chainId: 1,
+        accountIndex: 0,
+        policies: [{ type: 'auto', maxUsd: 500 }]
+      }
+    }
+
+    await handleControlMessage(msg, broker, logger as any, undefined, store)
+
+    expect(store.savePolicy).toHaveBeenCalledWith(0, 1, {
+      policies: [{ type: 'auto', maxUsd: 500 }],
+      signature: {}
+    }, 'Increase daily limit to 500')
   })
 
   test('policy_approval: broker failure prevents savePolicy', async () => {
@@ -264,7 +246,7 @@ describe('handleControlMessage', () => {
       }
     }
 
-    const result = await handleControlMessage(msg, broker, logger as any, wdk, undefined, store)
+    const result = await handleControlMessage(msg, broker, logger as any, undefined, store)
 
     expect(result.ok).toBe(false)
     expect(store.savePolicy).not.toHaveBeenCalled()
@@ -278,7 +260,7 @@ describe('handleControlMessage', () => {
       payload: { requestId: 'req_pol_3' }
     }
 
-    const result = await handleControlMessage(msg, broker, logger as any, wdk)
+    const result = await handleControlMessage(msg, broker, logger as any)
 
     expect(result.ok).toBe(false)
     expect(result.error).toBe('Policy verification failed')
@@ -297,7 +279,7 @@ describe('handleControlMessage', () => {
       }
     }
 
-    const result = await handleControlMessage(msg, broker, logger as any, wdk)
+    const result = await handleControlMessage(msg, broker, logger as any)
 
     expect(result.ok).toBe(true)
     expect(result.type).toBe('policy_reject')
@@ -328,7 +310,7 @@ describe('handleControlMessage', () => {
       }
     }
 
-    const result = await handleControlMessage(msg, broker, logger as any, wdk)
+    const result = await handleControlMessage(msg, broker, logger as any, undefined, store)
 
     expect(result.ok).toBe(true)
     expect(result.type).toBe('device_revoke')
@@ -356,7 +338,7 @@ describe('handleControlMessage', () => {
       }
     }
 
-    await handleControlMessage(msg, broker, logger as any, wdk)
+    await handleControlMessage(msg, broker, logger as any, undefined, store)
 
     expect(broker.setTrustedApprovers).toHaveBeenCalledWith(['0xactive1', '0xactive2'])
   })
@@ -372,7 +354,7 @@ describe('handleControlMessage', () => {
       }
     }
 
-    const result = await handleControlMessage(msg, broker, logger as any, wdk)
+    const result = await handleControlMessage(msg, broker, logger as any)
 
     expect(result.ok).toBe(false)
     expect(result.error).toBe('Revocation denied')
@@ -388,7 +370,7 @@ describe('handleControlMessage', () => {
       payload: { requestId: 'r1' }
     }
 
-    const result = await handleControlMessage(msg, broker, logger as any, wdk)
+    const result = await handleControlMessage(msg, broker, logger as any)
 
     expect(result.ok).toBe(false)
     expect(result.error).toBe('Unknown control type: banana')

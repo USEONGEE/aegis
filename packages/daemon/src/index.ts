@@ -52,7 +52,7 @@ async function main (): Promise<void> {
 
   // 6. Build WDK context (passed to tool execution)
   // relayClient is included so tool-surface can send follow-up messages
-  // (e.g., approval_result after a pending_approval tx completes)
+  // (e.g., control results after tx execution)
   const wdkContext: WDKContext = {
     wdk: wdk!,
     broker,
@@ -84,7 +84,7 @@ async function main (): Promise<void> {
   relayClient.onMessage((type, payload, raw) => {
     switch (type) {
       case 'control':
-        handleControlMessage(payload, broker!, logger, wdk, relayClient, store, pairingSession, queueManager)
+        handleControlMessage(payload, broker!, logger, relayClient, store, pairingSession, queueManager)
           .then((result) => {
             // Forward control result to app via relay (preserving the result's own type)
             relayClient.send('control', result)
@@ -106,9 +106,11 @@ async function main (): Promise<void> {
 
   // Step 07: Forward WDK events to relay for app consumption
   const RELAY_EVENTS = [
-    'IntentProposed', 'PolicyEvaluated', 'ApprovalRequested', 'ApprovalGranted',
+    'IntentProposed', 'PolicyEvaluated',
     'ExecutionBroadcasted', 'ExecutionSettled', 'ExecutionFailed',
-    'PendingPolicyRequested', 'ApprovalVerified', 'ApprovalRejected', 'PolicyApplied', 'SignerRevoked'
+    'TransactionSigned',
+    'PendingPolicyRequested', 'ApprovalVerified', 'ApprovalRejected', 'PolicyApplied', 'SignerRevoked',
+    'WalletCreated', 'WalletDeleted'
   ] as const
 
   if (wdk) {

@@ -42,13 +42,11 @@ interface ApprovalStore {
 /**
  * Execution Journal -- tracks intent lifecycle and prevents duplicate execution.
  *
- * Possible statuses: received, pending_approval, settled, signed, failed, rejected
+ * Possible statuses: received, settled, signed, failed, rejected
  * Typical flows:
- *   received -> settled                          (auto-approved tx)
- *   received -> pending_approval -> settled      (human-approved tx)
- *   received -> pending_approval -> rejected     (denied)
- *   received -> signed                           (auto-approved sign)
- *   received -> pending_approval -> signed       (human-approved sign)
+ *   received -> settled                          (allowed tx)
+ *   received -> rejected                         (policy rejected)
+ *   received -> signed                           (allowed sign)
  *   any -> failed                                (error at any stage)
  *
  * The journal delegates persistence to the ApprovalStore but maintains an
@@ -89,7 +87,7 @@ export class ExecutionJournal {
         this._statusIndex.set(intentHash, status)
 
         // Only index non-terminal entries for dedup
-        if (status !== 'settled' && status !== 'failed' && status !== 'signed') {
+        if (status !== 'settled' && status !== 'failed' && status !== 'signed' && status !== 'rejected') {
           this._hashIndex.set(targetHash, intentHash)
           recovered++
         }
@@ -130,7 +128,7 @@ export class ExecutionJournal {
     this._statusIndex.set(intentHash, status)
 
     // Remove from hash index if terminal
-    if (status === 'settled' || status === 'failed' || status === 'signed') {
+    if (status === 'settled' || status === 'failed' || status === 'signed' || status === 'rejected') {
       for (const [hash, id] of this._hashIndex) {
         if (id === intentHash) {
           this._hashIndex.delete(hash)

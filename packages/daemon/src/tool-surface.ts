@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import { intentHash, policyHash, CHAIN_IDS } from '@wdk-app/canonical'
 import type { Logger } from 'pino'
 import type { WDKInstance } from './wdk-host.js'
@@ -48,6 +49,8 @@ export interface ToolResult {
   pending?: unknown[]
   crons?: unknown[]
   context?: unknown
+  rejections?: unknown[]
+  policyVersions?: unknown[]
 }
 
 interface SendTransactionArgs {
@@ -73,7 +76,7 @@ interface ChainArgs {
 
 interface PolicyRequestArgs {
   chain: string
-  reason: string
+  description: string
   policies: Record<string, unknown>[]
   accountIndex: number
 }
@@ -91,7 +94,18 @@ interface CronIdArgs {
   accountIndex?: number
 }
 
-type ToolArgs = SendTransactionArgs | TransferArgs | ChainArgs | PolicyRequestArgs | RegisterCronArgs | CronIdArgs | Record<string, unknown>
+interface RejectionListArgs {
+  accountIndex: number
+  chain: string
+  limit?: number
+}
+
+interface PolicyVersionListArgs {
+  accountIndex: number
+  chain: string
+}
+
+type ToolArgs = SendTransactionArgs | TransferArgs | ChainArgs | PolicyRequestArgs | RegisterCronArgs | CronIdArgs | RejectionListArgs | PolicyVersionListArgs | Record<string, unknown>
 
 // ---------------------------------------------------------------------------
 // 9 Agent Tool Definitions (OpenAI function calling JSON schema)
@@ -188,7 +202,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'object',
         properties: {
           chain: { type: 'string', description: 'Target chain identifier' },
-          reason: { type: 'string', description: 'Human-readable reason for the policy change' },
+          description: { type: 'string', description: 'Human-readable description for the policy change' },
           policies: {
             type: 'array',
             description: 'Array of policy objects to apply',
@@ -196,7 +210,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
           },
           accountIndex: { type: 'number', description: 'BIP-44 account index' }
         },
-        required: ['chain', 'reason', 'policies', 'accountIndex']
+        required: ['chain', 'description', 'policies', 'accountIndex']
       }
     }
   },
@@ -263,6 +277,37 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         required: ['chain', 'to', 'data', 'value', 'accountIndex']
       }
     }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'listRejections',
+      description: 'List transaction rejection history for the specified chain and account.',
+      parameters: {
+        type: 'object',
+        properties: {
+          chain: { type: 'string', description: 'Target chain identifier' },
+          accountIndex: { type: 'number', description: 'BIP-44 account index' },
+          limit: { type: 'number', description: 'Maximum number of entries to return' }
+        },
+        required: ['chain', 'accountIndex']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'listPolicyVersions',
+      description: 'List policy version history for the specified chain and account.',
+      parameters: {
+        type: 'object',
+        properties: {
+          chain: { type: 'string', description: 'Target chain identifier' },
+          accountIndex: { type: 'number', description: 'BIP-44 account index' }
+        },
+        required: ['chain', 'accountIndex']
+      }
+    }
   }
 ]
 
@@ -286,101 +331,36 @@ export async function executeToolCall (name: string, args: ToolArgs, wdkContext:
       const chainId = resolveChainId(chain)
       const hash = intentHash({ chainId, to, data, value, timestamp: Date.now() })
 
-      // Deduplicate via journal
       if (journal && journal.isDuplicate(hash)) {
         logger.info({ hash }, 'Duplicate intent detected, skipping.')
         return { status: 'duplicate', intentHash: hash }
       }
 
-      // Track in journal
       if (journal) {
         journal.track(hash, { accountIndex: acctIdx, chainId, targetHash: hash })
       }
 
       try {
-        const account = await wdk.getAccount(chain, acctIdx)
+        const account: any = await wdk.getAccount(chain, acctIdx)
+        const result = await account.sendTransaction({ to, data, value })
 
-        // Race sendTransaction against the ApprovalRequested event.
-        const approvalBroker = wdk.getApprovalBroker ? wdk.getApprovalBroker() : null
-
-        let approvalListener: ((evt: any) => void) | undefined
-        const approvalPromise: Promise<any> = approvalBroker
-          ? new Promise((resolve) => {
-            approvalListener = (evt: any) => resolve(evt)
-            wdk.on('ApprovalRequested', approvalListener!)
-          })
-          : new Promise<never>(() => {}) // never resolves if no broker
-
-        const txPromise = account.sendTransaction({ to, data, value })
-
-        const result = await Promise.race([
-          txPromise.then((res: any) => ({ kind: 'completed' as const, res })),
-          approvalPromise.then((evt: any) => ({ kind: 'approval_requested' as const, evt }))
-        ])
-
-        // Clean up listener
-        if (approvalListener) wdk.off('ApprovalRequested', approvalListener)
-
-        if (result.kind === 'completed') {
-          // AUTO or no-policy path -- tx executed synchronously
-          if (journal) journal.updateStatus(hash, 'settled', result.res?.hash)
-          return {
-            status: 'executed',
-            hash: result.res?.hash || null,
-            fee: result.res?.fee || null,
-            intentHash: hash
-          }
-        }
-
-        // REQUIRE_APPROVAL -- return immediately, let background tx complete after approval
-        const requestId = result.evt?.requestId || hash
-        if (journal) journal.updateStatus(hash, 'pending_approval')
-
-        txPromise
-          .then((txResult: any) => {
-            if (journal) journal.updateStatus(hash, 'settled', txResult?.hash)
-            logger.info({ requestId, hash: txResult?.hash }, 'Background tx completed after approval')
-
-            if (wdkContext.relayClient) {
-              wdkContext.relayClient.send('control', {
-                type: 'approval_result',
-                requestId,
-                intentHash: hash,
-                status: 'executed',
-                txHash: txResult?.hash || null,
-                fee: txResult?.fee || null
-              })
-            }
-          })
-          .catch((bgErr: Error) => {
-            if (journal) journal.updateStatus(hash, 'failed')
-            logger.error({ err: bgErr, requestId }, 'Background tx failed after approval')
-
-            if (wdkContext.relayClient) {
-              wdkContext.relayClient.send('control', {
-                type: 'approval_error',
-                requestId,
-                intentHash: hash,
-                error: bgErr.message
-              })
-            }
-          })
-
+        if (journal) journal.updateStatus(hash, 'settled', result?.hash)
         return {
-          status: 'pending_approval',
-          requestId,
-          intentHash: hash,
-          context: result.evt?.context ?? null
+          status: 'executed',
+          hash: result?.hash || null,
+          fee: result?.fee || null,
+          intentHash: hash
         }
       } catch (err: any) {
         if (err.name === 'PolicyRejectionError') {
           if (journal) journal.updateStatus(hash, 'rejected')
+          try {
+            const pv = await store.getPolicyVersion(acctIdx, chainId)
+            await store.saveRejection({ intentHash: hash, accountIndex: acctIdx, chainId, targetHash: hash, reason: err.message, context: err.context ?? null, policyVersion: pv, rejectedAt: Date.now() })
+          } catch (rejErr: any) {
+            logger.error({ err: rejErr }, 'Failed to save rejection history')
+          }
           return { status: 'rejected', reason: err.message, intentHash: hash, context: err.context ?? null }
-        }
-
-        if (err.name === 'ApprovalTimeoutError') {
-          if (journal) journal.updateStatus(hash, 'failed')
-          return { status: 'approval_timeout', requestId: err.requestId || hash, intentHash: hash }
         }
 
         if (journal) journal.updateStatus(hash, 'failed')
@@ -396,72 +376,28 @@ export async function executeToolCall (name: string, args: ToolArgs, wdkContext:
       const { chain, token, to, amount, accountIndex: acctIdx } = args as TransferArgs
 
       try {
-        const chainId = resolveChainId(chain)
-        const account = await wdk.getAccount(chain, acctIdx)
-        const txData = encodeTransferData(token, to, amount)
-        const txValue = token.toLowerCase() === 'eth' ? amount : '0'
+        const account: any = await wdk.getAccount(chain, acctIdx)
+        const result = await account.sendTransaction({ to, data: encodeTransferData(token, to, amount), value: token.toLowerCase() === 'eth' ? amount : '0' })
 
-        // Race sendTransaction against the ApprovalRequested event (same pattern as sendTransaction)
-        const approvalBroker = wdk.getApprovalBroker ? wdk.getApprovalBroker() : null
-
-        let approvalListener: ((evt: any) => void) | undefined
-        const approvalPromise: Promise<any> = approvalBroker
-          ? new Promise((resolve) => {
-            approvalListener = (evt: any) => resolve(evt)
-            wdk.on('ApprovalRequested', approvalListener!)
-          })
-          : new Promise<never>(() => {})
-
-        const txPromise = account.sendTransaction({ to, data: txData, value: txValue })
-
-        const result = await Promise.race([
-          txPromise.then((res: any) => ({ kind: 'completed' as const, res })),
-          approvalPromise.then((evt: any) => ({ kind: 'approval_requested' as const, evt }))
-        ])
-
-        if (approvalListener) wdk.off('ApprovalRequested', approvalListener)
-
-        if (result.kind === 'completed') {
-          return {
-            status: 'executed',
-            hash: result.res?.hash || null,
-            fee: result.res?.fee || null,
-            token,
-            amount
-          }
+        return {
+          status: 'executed',
+          hash: result?.hash || null,
+          fee: result?.fee || null,
+          token,
+          amount
         }
-
-        // REQUIRE_APPROVAL path
-        const requestId = result.evt?.requestId
-
-        txPromise
-          .then((txResult: any) => {
-            logger.info({ requestId, hash: txResult?.hash }, 'Background transfer completed')
-            if (wdkContext.relayClient) {
-              wdkContext.relayClient.send('control', {
-                type: 'approval_result',
-                requestId,
-                status: 'executed',
-                txHash: txResult?.hash || null,
-                token,
-                amount
-              })
-            }
-          })
-          .catch((bgErr: Error) => {
-            logger.error({ err: bgErr, requestId }, 'Background transfer failed')
-            if (wdkContext.relayClient) {
-              wdkContext.relayClient.send('control', {
-                type: 'approval_error',
-                requestId,
-                error: bgErr.message
-              })
-            }
-          })
-
-        return { status: 'pending_approval', requestId, token, amount, context: result.evt?.context ?? null }
       } catch (err: any) {
         if (err.name === 'PolicyRejectionError') {
+          try {
+            const chainId = resolveChainId(chain)
+            const txData = encodeTransferData(token, to, amount)
+            const txValue = token.toLowerCase() === 'eth' ? amount : '0'
+            const rejHash = intentHash({ chainId, to, data: txData, value: txValue, timestamp: Date.now() })
+            const pv = await store.getPolicyVersion(acctIdx, chainId)
+            await store.saveRejection({ intentHash: rejHash, accountIndex: acctIdx, chainId, targetHash: rejHash, reason: err.message, context: err.context ?? null, policyVersion: pv, rejectedAt: Date.now() })
+          } catch (rejErr: any) {
+            logger.error({ err: rejErr }, 'Failed to save rejection history')
+          }
           return { status: 'rejected', reason: err.message, context: err.context ?? null }
         }
         logger.error({ err, name: 'transfer' }, 'Tool execution error')
@@ -475,7 +411,7 @@ export async function executeToolCall (name: string, args: ToolArgs, wdkContext:
     case 'getBalance': {
       const { chain } = args as ChainArgs
       try {
-        const account = await wdk.getAccount(chain, accountIndex ?? 0)
+        const account: any = await wdk.getAccount(chain, accountIndex ?? 0)
         const balances = await account.getBalance()
         return { balances: balances || [] }
       } catch (err: any) {
@@ -518,7 +454,7 @@ export async function executeToolCall (name: string, args: ToolArgs, wdkContext:
     // 6. policyRequest
     // -----------------------------------------------------------------------
     case 'policyRequest': {
-      const { chain, reason, policies, accountIndex: acctIdx } = args as PolicyRequestArgs
+      const { chain, description, policies, accountIndex: acctIdx } = args as PolicyRequestArgs
       try {
         const chainId = resolveChainId(chain)
         const hash = policyHash(policies as any)
@@ -527,7 +463,7 @@ export async function executeToolCall (name: string, args: ToolArgs, wdkContext:
           chainId,
           targetHash: hash,
           accountIndex: acctIdx,
-          content: reason
+          content: description
         })
 
         return { status: 'pending', policyHash: hash }
@@ -592,105 +528,71 @@ export async function executeToolCall (name: string, args: ToolArgs, wdkContext:
       const chainId = resolveChainId(chain)
       const hash = intentHash({ chainId, to, data, value, timestamp: Date.now() })
 
-      // Deduplicate via journal
       if (journal && journal.isDuplicate(hash)) {
         logger.info({ hash }, 'Duplicate intent detected, skipping.')
         return { status: 'duplicate', intentHash: hash }
       }
 
-      // Track in journal
       if (journal) {
         journal.track(hash, { accountIndex: acctIdx, chainId, targetHash: hash })
       }
 
       try {
-        const account = await wdk.getAccount(chain, acctIdx)
+        const account: any = await wdk.getAccount(chain, acctIdx)
+        const result = await account.signTransaction({ to, data, value })
 
-        // Race signTransaction against the ApprovalRequested event.
-        const approvalBroker = wdk.getApprovalBroker ? wdk.getApprovalBroker() : null
-
-        let approvalListener: ((evt: any) => void) | undefined
-        const approvalPromise: Promise<any> = approvalBroker
-          ? new Promise((resolve) => {
-            approvalListener = (evt: any) => resolve(evt)
-            wdk.on('ApprovalRequested', approvalListener!)
-          })
-          : new Promise<never>(() => {})
-
-        const signPromise = account.signTransaction({ to, data, value })
-
-        const result = await Promise.race([
-          signPromise.then((res: any) => ({ kind: 'completed' as const, res })),
-          approvalPromise.then((evt: any) => ({ kind: 'approval_requested' as const, evt }))
-        ])
-
-        // Clean up listener
-        if (approvalListener) wdk.off('ApprovalRequested', approvalListener)
-
-        if (result.kind === 'completed') {
-          // AUTO or no-policy path -- tx signed synchronously
-          if (journal) journal.updateStatus(hash, 'signed')
-          return {
-            status: 'signed',
-            signedTx: result.res?.signedTx || null,
-            intentHash: result.res?.intentHash || hash,
-            requestId: result.res?.requestId || hash
-          }
-        }
-
-        // REQUIRE_APPROVAL -- return immediately, let background sign complete after approval
-        const requestId = result.evt?.requestId || hash
-        if (journal) journal.updateStatus(hash, 'pending_approval')
-
-        signPromise
-          .then((signResult: any) => {
-            if (journal) journal.updateStatus(hash, 'signed')
-            logger.info({ requestId, intentHash: hash }, 'Background sign completed after approval')
-
-            if (wdkContext.relayClient) {
-              wdkContext.relayClient.send('control', {
-                type: 'sign_result',
-                requestId,
-                intentHash: hash,
-                status: 'signed',
-                signedTx: signResult?.signedTx || null
-              })
-            }
-          })
-          .catch((bgErr: Error) => {
-            if (journal) journal.updateStatus(hash, 'failed')
-            logger.error({ err: bgErr, requestId }, 'Background sign failed after approval')
-
-            if (wdkContext.relayClient) {
-              wdkContext.relayClient.send('control', {
-                type: 'sign_error',
-                requestId,
-                intentHash: hash,
-                error: bgErr.message
-              })
-            }
-          })
-
+        if (journal) journal.updateStatus(hash, 'signed')
         return {
-          status: 'pending_approval',
-          requestId,
-          intentHash: hash,
-          context: result.evt?.context ?? null
+          status: 'signed',
+          signedTx: result?.signedTx || null,
+          intentHash: result?.intentHash || hash,
+          requestId: result?.requestId || hash
         }
       } catch (err: any) {
         if (err.name === 'PolicyRejectionError') {
           if (journal) journal.updateStatus(hash, 'rejected')
+          try {
+            const pv = await store.getPolicyVersion(acctIdx, chainId)
+            await store.saveRejection({ intentHash: hash, accountIndex: acctIdx, chainId, targetHash: hash, reason: err.message, context: err.context ?? null, policyVersion: pv, rejectedAt: Date.now() })
+          } catch (rejErr: any) {
+            logger.error({ err: rejErr }, 'Failed to save rejection history')
+          }
           return { status: 'rejected', reason: err.message, intentHash: hash, context: err.context ?? null }
-        }
-
-        if (err.name === 'ApprovalTimeoutError') {
-          if (journal) journal.updateStatus(hash, 'failed')
-          return { status: 'approval_timeout', requestId: err.requestId || hash, intentHash: hash }
         }
 
         if (journal) journal.updateStatus(hash, 'failed')
         logger.error({ err, name: 'signTransaction' }, 'Tool execution error')
         return { status: 'error', error: err.message, intentHash: hash }
+      }
+    }
+
+    // -----------------------------------------------------------------------
+    // 11. listRejections
+    // -----------------------------------------------------------------------
+    case 'listRejections': {
+      const { chain, accountIndex: acctIdx, limit } = args as RejectionListArgs
+      try {
+        const chainId = resolveChainId(chain)
+        const rejections = await store.listRejections({ accountIndex: acctIdx, chainId, limit })
+        return { rejections }
+      } catch (err: any) {
+        logger.error({ err, name: 'listRejections' }, 'Tool execution error')
+        return { status: 'error', error: err.message }
+      }
+    }
+
+    // -----------------------------------------------------------------------
+    // 12. listPolicyVersions
+    // -----------------------------------------------------------------------
+    case 'listPolicyVersions': {
+      const { chain, accountIndex: acctIdx } = args as PolicyVersionListArgs
+      try {
+        const chainId = resolveChainId(chain)
+        const policyVersions = await store.listPolicyVersions(acctIdx, chainId)
+        return { policyVersions }
+      } catch (err: any) {
+        logger.error({ err, name: 'listPolicyVersions' }, 'Tool execution error')
+        return { status: 'error', error: err.message }
       }
     }
 

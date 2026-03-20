@@ -64,6 +64,10 @@ function createMockStore (overrides: Record<string, any> = {}): any {
       { id: 'cron_1', interval: '5m', prompt: 'check balance' }
     ]),
     removeCron: jest.fn<() => Promise<undefined>>().mockResolvedValue(undefined),
+    saveRejection: jest.fn<() => Promise<undefined>>().mockResolvedValue(undefined),
+    getPolicyVersion: jest.fn<() => Promise<number>>().mockResolvedValue(1),
+    listRejections: jest.fn<() => Promise<unknown[]>>().mockResolvedValue([]),
+    listPolicyVersions: jest.fn<() => Promise<unknown[]>>().mockResolvedValue([]),
     ...overrides
   }
 }
@@ -100,8 +104,8 @@ function buildContext (overrides: Record<string, any> = {}): WDKContext {
 // ---------------------------------------------------------------------------
 
 describe('TOOL_DEFINITIONS', () => {
-  test('exports exactly 10 tool definitions', () => {
-    expect(TOOL_DEFINITIONS).toHaveLength(10)
+  test('exports exactly 12 tool definitions', () => {
+    expect(TOOL_DEFINITIONS).toHaveLength(12)
   })
 
   test('every tool has a valid function schema', () => {
@@ -175,9 +179,47 @@ describe('executeToolCall', () => {
     expect(result.status).toBe('rejected')
     expect(result.reason).toBe('Amount exceeds daily limit')
     expect(result).toHaveProperty('context')
+
+    // F7/F8: verify saveRejection was called with correct intentHash
+    expect(ctx.store.saveRejection).toHaveBeenCalledTimes(1)
+    const savedRejection = ctx.store.saveRejection.mock.calls[0][0]
+    expect(savedRejection.intentHash).toBe(result.intentHash)
+    expect(savedRejection.reason).toBe('Amount exceeds daily limit')
+    expect(savedRejection.policyVersion).toBe(1)
   })
 
-  // 4. transfer -- AUTO policy
+  // 3b. transfer -- PolicyRejectionError + saveRejection (E6)
+  test('transfer rejection calls saveRejection with proper hash', async () => {
+    const ctx = buildContext()
+    const policyErr = new Error('no matching permission')
+    policyErr.name = 'PolicyRejectionError'
+
+    const mockAccount = {
+      sendTransaction: jest.fn<() => Promise<never>>().mockRejectedValue(policyErr)
+    }
+    ;(ctx.wdk as any).getAccount.mockResolvedValue(mockAccount)
+
+    const result = await executeToolCall('transfer', {
+      chain: 'ethereum',
+      token: 'USDC',
+      to: '0xrecipient',
+      amount: '100',
+      accountIndex: 0
+    }, ctx)
+
+    expect(result.status).toBe('rejected')
+    expect(ctx.store.saveRejection).toHaveBeenCalledTimes(1)
+    const saved = ctx.store.saveRejection.mock.calls[0][0]
+    expect(saved.reason).toBe('no matching permission')
+    expect(saved.intentHash).toBeDefined()
+    expect(typeof saved.intentHash).toBe('string')
+    expect(saved.intentHash.startsWith('0x')).toBe(true)
+    expect(saved.intentHash.length).toBe(66) // 0x + 64 hex chars (SHA-256)
+    expect(saved.targetHash).toBe(saved.intentHash) // transfer: intentHash === targetHash
+    expect(saved.chainId).toBe(1)
+  })
+
+  // 4. transfer -- ALLOW policy
   test('transfer returns { status: "executed" } for AUTO policy', async () => {
     const ctx = buildContext()
 
@@ -238,7 +280,7 @@ describe('executeToolCall', () => {
 
     const result = await executeToolCall('policyRequest', {
       chain: 'ethereum',
-      reason: 'Increase daily limit',
+      description: 'Increase daily limit',
       policies: [{ type: 'auto', maxUsd: 500 }],
       accountIndex: 0
     }, ctx)
@@ -434,27 +476,43 @@ describe('executeToolCall', () => {
     }))
   })
 
-  // 19. sendTransaction -- ApprovalTimeoutError (no context)
-  test('sendTransaction returns { status: "approval_timeout" } without context', async () => {
-    const ctx = buildContext()
-    const timeoutErr = new Error('Approval timed out')
-    timeoutErr.name = 'ApprovalTimeoutError'
-    ;(timeoutErr as any).requestId = 'req_timeout'
+  // 19. listRejections returns rejections from store
+  test('listRejections returns rejections from store', async () => {
+    const ctx = buildContext({
+      store: {
+        listRejections: jest.fn<() => Promise<any[]>>().mockResolvedValue([
+          { intentHash: 'r1', accountIndex: 0, chainId: 1, targetHash: '0x1', reason: 'no match', context: null, policyVersion: 1, rejectedAt: 1000 }
+        ])
+      }
+    })
 
-    const mockAccount = {
-      sendTransaction: jest.fn<() => Promise<never>>().mockRejectedValue(timeoutErr)
-    }
-    ;(ctx.wdk as any).getAccount.mockResolvedValue(mockAccount)
-
-    const result = await executeToolCall('sendTransaction', {
+    const result = await executeToolCall('listRejections', {
       chain: 'ethereum',
-      to: '0xdead',
-      data: '0x',
-      value: '0',
       accountIndex: 0
     }, ctx)
 
-    expect(result.status).toBe('approval_timeout')
-    expect(result).not.toHaveProperty('context')
+    expect(result.rejections).toHaveLength(1)
+    expect((result.rejections as any[])[0].reason).toBe('no match')
+    expect(ctx.store.listRejections).toHaveBeenCalledWith({ accountIndex: 0, chainId: 1, limit: undefined })
+  })
+
+  // 20. listPolicyVersions returns versions from store
+  test('listPolicyVersions returns versions from store', async () => {
+    const ctx = buildContext({
+      store: {
+        listPolicyVersions: jest.fn<() => Promise<any[]>>().mockResolvedValue([
+          { accountIndex: 0, chainId: 1, version: 1, description: 'initial', diff: null, changedAt: 1000 }
+        ])
+      }
+    })
+
+    const result = await executeToolCall('listPolicyVersions', {
+      chain: 'ethereum',
+      accountIndex: 0
+    }, ctx)
+
+    expect(result.policyVersions).toHaveLength(1)
+    expect((result.policyVersions as any[])[0].description).toBe('initial')
+    expect(ctx.store.listPolicyVersions).toHaveBeenCalledWith(0, 1)
   })
 })

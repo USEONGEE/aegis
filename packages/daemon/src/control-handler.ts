@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 import type { Logger } from 'pino'
-import type { WDKInstance } from './wdk-host.js'
+import type { SignedApproval, VerificationContext, StoredSigner } from '@wdk-app/guarded-wdk'
+import { SqliteApprovalStore, SignedApprovalBroker } from '@wdk-app/guarded-wdk'
 import type { RelayClient } from './relay-client.js'
 import type { MessageQueueManager } from './message-queue.js'
 
@@ -40,16 +41,8 @@ export interface ControlResult {
   wasProcessing?: boolean
 }
 
-interface ApprovalStoreWriter {
-  loadPendingByRequestId (requestId: string): Promise<{ requestId: string; accountIndex: number; type: string; chainId: number; targetHash: string; content: string; createdAt: number } | null>
-  getPolicyVersion (accountIndex: number, chainId: number): Promise<number>
-  savePolicy (accountIndex: number, chainId: number, input: { policies: unknown[]; signature: Record<string, unknown> }): Promise<void>
-}
-
 /**
  * Tracks the daemon's pending pairing session.
- * Created when daemon starts pairing (QR code displayed),
- * consumed when pairing_confirm arrives from the app.
  */
 export interface PairingSession {
   pairingToken: string
@@ -59,21 +52,39 @@ export interface PairingSession {
   createdAt: number
 }
 
-interface SignedApprovalBroker {
-  submitApproval (approval: Record<string, unknown>, context?: Record<string, unknown>): Promise<void>
-  setTrustedApprovers (approvers: string[]): void
-  _trustedApprovers?: string[]
+// ---------------------------------------------------------------------------
+// Wire payload → SignedApproval mapping
+// ---------------------------------------------------------------------------
+
+/**
+ * Map wire payload fields to guarded-wdk SignedApproval shape.
+ * Wire uses `signature`/`approverPubKey`, guarded-wdk uses `sig`/`approver`.
+ */
+function toSignedApproval (payload: ControlPayload, type: string): SignedApproval {
+  return {
+    type: type as SignedApproval['type'],
+    requestId: (payload.requestId || '') as string,
+    chainId: (payload.chainId || 0) as number,
+    targetHash: (payload.targetHash || '') as string,
+    approver: (payload.approverPubKey || '') as string,
+    signerId: (payload.signerId || '') as string,
+    accountIndex: (payload.accountIndex || 0) as number,
+    policyVersion: (payload.policyVersion || 0) as number,
+    expiresAt: (payload.expiresAt || 0) as number,
+    nonce: (payload.nonce || 0) as number,
+    sig: (payload.signature || '') as string,
+    content: (payload.content || '') as string
+  }
 }
+
+// ---------------------------------------------------------------------------
+// Handler
+// ---------------------------------------------------------------------------
 
 /**
  * Handle control channel messages from the Relay.
  *
- * Control messages carry SignedApproval envelopes from the RN App (owner).
- * The daemon dispatches them to the SignedApprovalBroker for verification
- * and action.
- *
  * Supported msg.type values:
- *   - tx_approval      -> broker.submitApproval (resolves pending tx)
  *   - policy_approval  -> broker.submitApproval (applies policy)
  *   - policy_reject    -> broker.submitApproval (rejects policy request)
  *   - device_revoke    -> broker.submitApproval (revokes a signer)
@@ -82,9 +93,8 @@ export async function handleControlMessage (
   msg: ControlMessage,
   broker: SignedApprovalBroker,
   logger: Logger,
-  wdk?: WDKInstance | null,
   relayClient?: RelayClient,
-  approvalStore?: ApprovalStoreWriter | null,
+  approvalStore?: InstanceType<typeof SqliteApprovalStore> | null,
   pairingSession?: PairingSession | null,
   queueManager?: MessageQueueManager | null
 ): Promise<ControlResult> {
@@ -99,55 +109,20 @@ export async function handleControlMessage (
 
   switch (type) {
     // -----------------------------------------------------------------------
-    // tx_approval -- owner approved a pending transaction
-    // -----------------------------------------------------------------------
-    case 'tx_approval': {
-      try {
-        const signedApproval: Record<string, unknown> = {
-          ...payload,
-          type: 'tx'
-        }
-
-        // Build verification context from server-side pending (not client payload)
-        const context: Record<string, unknown> = {}
-        if (approvalStore && payload.requestId) {
-          const pending = await approvalStore.loadPendingByRequestId(payload.requestId)
-          if (pending) {
-            context.expectedTargetHash = pending.targetHash
-            const policyVersion = await approvalStore.getPolicyVersion(pending.accountIndex, pending.chainId)
-            context.currentPolicyVersion = policyVersion
-            logger.debug({ requestId: payload.requestId, targetHash: pending.targetHash, policyVersion }, 'TX context loaded from server-side pending')
-          } else {
-            logger.warn({ requestId: payload.requestId }, 'No pending request found for tx_approval')
-          }
-        }
-
-        await broker.submitApproval(signedApproval, context)
-
-        logger.info({ requestId: payload.requestId }, 'TX approval submitted successfully')
-        return { ok: true, type: 'tx_approval', requestId: payload.requestId }
-      } catch (err: any) {
-        logger.error({ err, requestId: payload.requestId }, 'TX approval verification failed')
-        return { ok: false, type: 'tx_approval', requestId: payload.requestId, error: err.message }
-      }
-    }
-
-    // -----------------------------------------------------------------------
     // policy_approval -- owner approved a pending policy change
     // -----------------------------------------------------------------------
     case 'policy_approval': {
       try {
-        const signedApproval: Record<string, unknown> = {
-          ...payload,
-          type: 'policy'
-        }
+        const signedApproval = toSignedApproval(payload, 'policy')
 
-        // Build verification context from server-side pending (not client payload)
-        const context: Record<string, unknown> = {}
+        // Build verification context + capture description BEFORE submitApproval
+        const context: VerificationContext = {}
+        let description = ''
         if (approvalStore && payload.requestId) {
           const pending = await approvalStore.loadPendingByRequestId(payload.requestId)
           if (pending) {
             context.expectedTargetHash = pending.targetHash
+            description = pending.content
             logger.debug({ requestId: payload.requestId, targetHash: pending.targetHash }, 'Policy context loaded from server-side pending')
           } else {
             logger.warn({ requestId: payload.requestId }, 'No pending request found for policy_approval')
@@ -160,16 +135,17 @@ export async function handleControlMessage (
           await approvalStore.savePolicy(
             payload.accountIndex as number,
             payload.chainId as number,
-            { policies: payload.policies as unknown[], signature: {} }
+            { policies: payload.policies as unknown[], signature: {} },
+            description
           )
           logger.info({ chainId: payload.chainId, accountIndex: payload.accountIndex }, 'Policy saved to store')
         }
 
         logger.info({ requestId: payload.requestId }, 'Policy approval submitted successfully')
         return { ok: true, type: 'policy_approval', requestId: payload.requestId }
-      } catch (err: any) {
+      } catch (err: unknown) {
         logger.error({ err, requestId: payload.requestId }, 'Policy approval verification failed')
-        return { ok: false, type: 'policy_approval', requestId: payload.requestId, error: err.message }
+        return { ok: false, type: 'policy_approval', requestId: payload.requestId, error: (err as Error).message }
       }
     }
 
@@ -178,18 +154,14 @@ export async function handleControlMessage (
     // -----------------------------------------------------------------------
     case 'policy_reject': {
       try {
-        const signedApproval: Record<string, unknown> = {
-          ...payload,
-          type: 'policy_reject'
-        }
-
+        const signedApproval = toSignedApproval(payload, 'policy_reject')
         await broker.submitApproval(signedApproval)
 
         logger.info({ requestId: payload.requestId }, 'Policy rejection submitted successfully')
         return { ok: true, type: 'policy_reject', requestId: payload.requestId }
-      } catch (err: any) {
+      } catch (err: unknown) {
         logger.error({ err, requestId: payload.requestId }, 'Policy rejection verification failed')
-        return { ok: false, type: 'policy_reject', requestId: payload.requestId, error: err.message }
+        return { ok: false, type: 'policy_reject', requestId: payload.requestId, error: (err as Error).message }
       }
     }
 
@@ -198,24 +170,19 @@ export async function handleControlMessage (
     // -----------------------------------------------------------------------
     case 'device_revoke': {
       try {
-        const signedApproval: Record<string, unknown> = {
-          ...payload,
-          type: 'device_revoke'
-        }
+        const signedApproval = toSignedApproval(payload, 'device_revoke')
 
-        // Compute expectedTargetHash = SHA-256(signerId) for verification.
         const signerId = payload.signerId
-        const context: Record<string, unknown> = {}
+        const context: VerificationContext = {}
         if (signerId) {
           context.expectedTargetHash = '0x' + createHash('sha256').update(signerId).digest('hex')
         }
 
         await broker.submitApproval(signedApproval, context)
 
-        // After revocation, update the broker's trusted approvers list
-        const store = wdk?.getApprovalStore?.() || null
-        if (store) {
-          const signers: Array<{ publicKey: string; revokedAt: number | null }> = await store.listSigners()
+        // After revocation, update trusted approvers from store (source of truth)
+        if (approvalStore) {
+          const signers: StoredSigner[] = await approvalStore.listSigners()
           const active: string[] = signers
             .filter(d => d.revokedAt === null || d.revokedAt === undefined)
             .map(d => d.publicKey)
@@ -225,9 +192,9 @@ export async function handleControlMessage (
 
         logger.info({ requestId: payload.requestId }, 'Signer revocation submitted successfully')
         return { ok: true, type: 'device_revoke', requestId: payload.requestId }
-      } catch (err: any) {
+      } catch (err: unknown) {
         logger.error({ err, requestId: payload.requestId }, 'Signer revocation verification failed')
-        return { ok: false, type: 'device_revoke', requestId: payload.requestId, error: err.message }
+        return { ok: false, type: 'device_revoke', requestId: payload.requestId, error: (err as Error).message }
       }
     }
 
@@ -236,18 +203,14 @@ export async function handleControlMessage (
     // -----------------------------------------------------------------------
     case 'wallet_create': {
       try {
-        const signedApproval: Record<string, unknown> = {
-          ...payload,
-          type: 'wallet_create'
-        }
-
+        const signedApproval = toSignedApproval(payload, 'wallet_create')
         await broker.submitApproval(signedApproval)
 
         logger.info({ requestId: payload.requestId, accountIndex: payload.accountIndex }, 'Wallet creation approval submitted successfully')
         return { ok: true, type: 'wallet_create', requestId: payload.requestId }
-      } catch (err: any) {
+      } catch (err: unknown) {
         logger.error({ err, requestId: payload.requestId }, 'Wallet creation approval verification failed')
-        return { ok: false, type: 'wallet_create', requestId: payload.requestId, error: err.message }
+        return { ok: false, type: 'wallet_create', requestId: payload.requestId, error: (err as Error).message }
       }
     }
 
@@ -256,18 +219,14 @@ export async function handleControlMessage (
     // -----------------------------------------------------------------------
     case 'wallet_delete': {
       try {
-        const signedApproval: Record<string, unknown> = {
-          ...payload,
-          type: 'wallet_delete'
-        }
-
+        const signedApproval = toSignedApproval(payload, 'wallet_delete')
         await broker.submitApproval(signedApproval)
 
         logger.info({ requestId: payload.requestId, accountIndex: payload.accountIndex }, 'Wallet deletion approval submitted successfully')
         return { ok: true, type: 'wallet_delete', requestId: payload.requestId }
-      } catch (err: any) {
+      } catch (err: unknown) {
         logger.error({ err, requestId: payload.requestId }, 'Wallet deletion approval verification failed')
-        return { ok: false, type: 'wallet_delete', requestId: payload.requestId, error: err.message }
+        return { ok: false, type: 'wallet_delete', requestId: payload.requestId, error: (err as Error).message }
       }
     }
 
@@ -282,7 +241,6 @@ export async function handleControlMessage (
           return { ok: false, type: 'pairing_confirm', error: 'Missing signerId or identityPubKey' }
         }
 
-        // --- Gap 3: Verify pairingToken before trusting ---
         if (!pairingToken) {
           logger.warn({ signerId }, 'Pairing rejected: missing pairingToken')
           return { ok: false, type: 'pairing_confirm', error: 'Missing pairingToken' }
@@ -293,14 +251,12 @@ export async function handleControlMessage (
           return { ok: false, type: 'pairing_confirm', error: 'No active pairing session' }
         }
 
-        // Constant-time comparison for pairingToken
         const tokenValid = pairingToken === pairingSession.pairingToken
         if (!tokenValid) {
           logger.warn({ signerId }, 'Pairing rejected: invalid pairingToken')
           return { ok: false, type: 'pairing_confirm', error: 'Invalid pairingToken' }
         }
 
-        // --- Gap 16: SAS verification before registering as trusted ---
         if (!sas) {
           logger.warn({ signerId }, 'Pairing rejected: missing SAS')
           return { ok: false, type: 'pairing_confirm', error: 'Missing SAS for verification' }
@@ -313,43 +269,40 @@ export async function handleControlMessage (
 
         logger.info({ signerId, sas }, 'Pairing token and SAS verified successfully')
 
-        // Register the new signer in the approval store (only after verification)
-        const store = wdk?.getApprovalStore?.() || null
-        if (store) {
-          await store.saveSigner(signerId, identityPubKey)
+        // Register signer in store and update trusted approvers
+        if (approvalStore) {
+          await approvalStore.saveSigner(signerId as string, identityPubKey as string)
           logger.info({ signerId }, 'Signer registered in store')
+
+          // Re-read from store (source of truth) and update broker
+          const signers: StoredSigner[] = await approvalStore.listSigners()
+          const active: string[] = signers
+            .filter(d => d.revokedAt === null || d.revokedAt === undefined)
+            .map(d => d.publicKey)
+          broker.setTrustedApprovers(active)
+          logger.info({ identityPubKey }, 'Trusted approvers updated from store')
         }
 
-        // Add to trusted approvers so future approvals are accepted
-        if (broker && identityPubKey) {
-          const current: string[] = broker._trustedApprovers || []
-          if (!current.includes(identityPubKey)) {
-            broker.setTrustedApprovers([...current, identityPubKey])
-          }
-          logger.info({ identityPubKey }, 'Added to trusted approvers')
-        }
-
-        // --- Gap 11 / Step 05: E2E session key establishment via ECDH ---
+        // E2E session key establishment via ECDH
         if (encryptionPubKey && relayClient) {
           try {
             const nacl = await import('tweetnacl')
-            const peerPubKeyBytes = Buffer.from(encryptionPubKey, 'base64')
-            // Compute ECDH shared secret: nacl.box.before(peerPubKey, ourSecretKey)
+            const peerPubKeyBytes = Buffer.from(encryptionPubKey as string, 'base64')
             const sharedSecret = nacl.default
               ? nacl.default.box.before(peerPubKeyBytes, pairingSession.daemonEncryptionSecretKey)
-              : (nacl as any).box.before(peerPubKeyBytes, pairingSession.daemonEncryptionSecretKey)
+              : (nacl as Record<string, unknown> & { box: { before: (pk: Uint8Array, sk: Uint8Array) => Uint8Array } }).box.before(peerPubKeyBytes, pairingSession.daemonEncryptionSecretKey)
             relayClient.setSessionKey(sharedSecret)
             logger.info('E2E session key established via ECDH after pairing')
-          } catch (e2eErr: any) {
+          } catch (e2eErr: unknown) {
             logger.error({ err: e2eErr }, 'Failed to establish E2E session key (pairing still succeeded)')
           }
         }
 
         logger.info({ signerId, sas }, 'Pairing confirmed successfully')
-        return { ok: true, type: 'pairing_confirm', signerId }
-      } catch (err: any) {
+        return { ok: true, type: 'pairing_confirm', signerId: signerId as string }
+      } catch (err: unknown) {
         logger.error({ err }, 'Pairing confirmation failed')
-        return { ok: false, type: 'pairing_confirm', error: err.message }
+        return { ok: false, type: 'pairing_confirm', error: (err as Error).message }
       }
     }
 
