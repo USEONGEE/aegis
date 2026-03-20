@@ -9,7 +9,9 @@ interface CreateRequestOptions {
   chainId: number
   targetHash: string
   requestId?: string
-  metadata?: Record<string, unknown>
+  accountIndex: number
+  content: string
+  walletName?: string
 }
 
 interface Waiter {
@@ -19,8 +21,7 @@ interface Waiter {
 }
 
 /**
- * Unified approval broker for tx, policy, and device operations.
- * Replaces InMemoryApprovalBroker with signature-based verification.
+ * Unified approval broker for tx, policy, wallet, and device operations.
  */
 export class SignedApprovalBroker {
   private _trustedApprovers: string[]
@@ -37,25 +38,26 @@ export class SignedApprovalBroker {
 
   /**
    * Create an approval request. Returns a request object.
-   * Stores as pending if type is 'policy' or tx.
+   * Stores as pending for tx, policy, wallet_create, wallet_delete.
    */
-  async createRequest (type: ApprovalType, { chainId, targetHash, requestId, metadata }: CreateRequestOptions): Promise<ApprovalRequest> {
+  async createRequest (type: ApprovalType, { chainId, targetHash, requestId, accountIndex, content, walletName }: CreateRequestOptions): Promise<ApprovalRequest> {
     const id = requestId || randomUUID()
     const request: ApprovalRequest = {
       requestId: id,
       type,
       chainId,
       targetHash,
-      metadata,
+      accountIndex,
+      content,
       createdAt: Date.now()
     }
 
-    // Store pending for policy requests
-    if (type === 'policy' || type === 'tx') {
-      const seedId = metadata?.seedId as string | undefined
-      if (seedId) {
-        await this._store.savePendingApproval(seedId, request)
-      }
+    // Store pending for actionable requests
+    if (type === 'policy' || type === 'tx' || type === 'wallet_create' || type === 'wallet_delete') {
+      const pending: PendingApprovalRequest = walletName
+        ? { ...request, walletName }
+        : request
+      await this._store.savePendingApproval(accountIndex, pending)
     }
 
     if (this._emitter) {
@@ -145,10 +147,9 @@ export class SignedApprovalBroker {
       }
 
       case 'device_revoke': {
-        // Extract signerId from metadata -- no fallback to requestId
-        const signerId = (signedApproval.metadata as Record<string, unknown> | undefined)?.signerId as string | undefined
+        const signerId = signedApproval.signerId
         if (!signerId) {
-          throw new Error('device_revoke requires metadata.signerId')
+          throw new Error('device_revoke requires signerId')
         }
         await this._store.revokeSigner(signerId)
         if (this._emitter) {
@@ -160,11 +161,45 @@ export class SignedApprovalBroker {
         }
         break
       }
+
+      case 'wallet_create': {
+        const accountIndex = signedApproval.accountIndex
+        // Read wallet name from pending request (single source of truth)
+        const pending = await this._store.loadPendingByRequestId(requestId)
+        const name = (pending as PendingApprovalRequest | null)?.walletName || `Wallet ${accountIndex}`
+        // Address should be derived externally and passed via control flow
+        // For now, use a placeholder that the daemon will replace
+        await this._store.createWallet(accountIndex, name, '')
+        await this._store.removePendingApproval(requestId)
+        if (this._emitter) {
+          this._emitter.emit('WalletCreated', {
+            type: 'WalletCreated',
+            accountIndex,
+            name,
+            timestamp: Date.now()
+          })
+        }
+        break
+      }
+
+      case 'wallet_delete': {
+        const accountIndex = signedApproval.accountIndex
+        await this._store.removePendingApproval(requestId)
+        await this._store.deleteWallet(accountIndex)
+        if (this._emitter) {
+          this._emitter.emit('WalletDeleted', {
+            type: 'WalletDeleted',
+            accountIndex,
+            timestamp: Date.now()
+          })
+        }
+        break
+      }
     }
 
     // Record in history
     await this._store.appendHistory({
-      seedId: ((signedApproval.metadata as Record<string, unknown> | undefined)?.seedId as string) || '',
+      accountIndex: signedApproval.accountIndex,
       type,
       requestId,
       chainId: signedApproval.chainId,
@@ -172,6 +207,7 @@ export class SignedApprovalBroker {
       approver: signedApproval.approver,
       signerId: signedApproval.signerId,
       action: type === 'policy_reject' ? 'rejected' : 'approved',
+      content: signedApproval.content,
       timestamp: Date.now()
     })
   }
@@ -194,8 +230,8 @@ export class SignedApprovalBroker {
   /**
    * Get pending approval requests.
    */
-  async getPendingApprovals (seedId: string, type: string | null, chainId: number | null): Promise<PendingApprovalRequest[]> {
-    return this._store.loadPendingApprovals(seedId, type, chainId)
+  async getPendingApprovals (accountIndex: number | null, type: string | null, chainId: number | null): Promise<PendingApprovalRequest[]> {
+    return this._store.loadPendingApprovals(accountIndex, type, chainId)
   }
 
   /**

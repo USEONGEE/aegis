@@ -13,7 +13,9 @@ export {
   UntrustedApproverError,
   SignerRevokedError,
   ApprovalExpiredError,
-  ReplayError
+  ReplayError,
+  WalletNotFoundError,
+  NoMasterSeedError
 } from './errors.js'
 
 // Re-export types
@@ -30,7 +32,8 @@ export type {
   StoredSigner,
   CronInput,
   StoredCron,
-  StoredSeed,
+  MasterSeed,
+  StoredWallet,
   JournalInput,
   StoredJournal,
   HistoryQueryOpts,

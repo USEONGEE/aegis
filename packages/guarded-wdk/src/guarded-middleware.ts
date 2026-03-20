@@ -67,7 +67,6 @@ export interface SignTransactionResult {
   signedTx: string
   intentHash: string
   requestId: string
-  intentId: string
 }
 
 interface TransactionReceipt {
@@ -118,6 +117,7 @@ interface MiddlewareConfig {
   approvalBroker: SignedApprovalBroker
   emitter: EventEmitter
   chainId: number
+  accountIndexRef: () => number
 }
 
 function validatePolicy (policy: Policy): void {
@@ -337,7 +337,7 @@ async function pollReceipt (account: GuardedAccount, hash: string, emitter: Even
   }
 }
 
-export function createGuardedMiddleware ({ policiesRef, approvalBroker, emitter, chainId }: MiddlewareConfig): (account: GuardedAccount) => Promise<void> {
+export function createGuardedMiddleware ({ policiesRef, approvalBroker, emitter, chainId, accountIndexRef }: MiddlewareConfig): (account: GuardedAccount) => Promise<void> {
   return async (account: GuardedAccount) => {
     const rawSendTransaction = account.sendTransaction.bind(account)
     const rawTransfer = account.transfer.bind(account)
@@ -389,7 +389,8 @@ export function createGuardedMiddleware ({ policiesRef, approvalBroker, emitter,
           chainId,
           to: tx.to!,
           data: tx.data!,
-          value: String(tx.value || '0')
+          value: String(tx.value || '0'),
+          timestamp: Date.now()
         })
 
         emitter.emit('ApprovalRequested', {
@@ -406,11 +407,8 @@ export function createGuardedMiddleware ({ policiesRef, approvalBroker, emitter,
           requestId,
           chainId,
           targetHash,
-          metadata: {
-            walletAddress: await account.getAddress(),
-            target: tx.to,
-            selector: tx.data?.slice?.(0, 10)
-          }
+          accountIndex: accountIndexRef(),
+          content: `Transaction to ${tx.to?.slice(0, 10)}...`
         })
 
         const signedApproval = await approvalBroker.waitForApproval(request.requestId, 60000)
@@ -495,7 +493,8 @@ export function createGuardedMiddleware ({ policiesRef, approvalBroker, emitter,
           chainId,
           to: mockTx.to!,
           data: mockTx.data!,
-          value: String(mockTx.value || '0')
+          value: String(mockTx.value || '0'),
+          timestamp: Date.now()
         })
 
         emitter.emit('ApprovalRequested', {
@@ -512,10 +511,8 @@ export function createGuardedMiddleware ({ policiesRef, approvalBroker, emitter,
           requestId,
           chainId,
           targetHash,
-          metadata: {
-            target: mockTx.to,
-            selector: mockTx.data?.slice?.(0, 10)
-          }
+          accountIndex: accountIndexRef(),
+          content: `Transfer to ${mockTx.to?.slice(0, 10)}...`
         })
 
         const signedApproval = await approvalBroker.waitForApproval(request.requestId, 60000)
@@ -557,7 +554,6 @@ export function createGuardedMiddleware ({ policiesRef, approvalBroker, emitter,
     account.signTransaction = async (tx: Transaction): Promise<SignTransactionResult> => {
       const policies = policiesRef()
       const requestId = randomUUID()
-      const intentId = randomUUID()
 
       emitter.emit('IntentProposed', {
         type: 'IntentProposed',
@@ -587,7 +583,8 @@ export function createGuardedMiddleware ({ policiesRef, approvalBroker, emitter,
         chainId,
         to: tx.to!,
         data: tx.data!,
-        value: String(tx.value || '0')
+        value: String(tx.value || '0'),
+        timestamp: Date.now()
       })
 
       if (decision === 'REQUIRE_APPROVAL') {
@@ -605,11 +602,8 @@ export function createGuardedMiddleware ({ policiesRef, approvalBroker, emitter,
           requestId,
           chainId,
           targetHash,
-          metadata: {
-            walletAddress: await account.getAddress(),
-            target: tx.to,
-            selector: tx.data?.slice?.(0, 10)
-          }
+          accountIndex: accountIndexRef(),
+          content: `Transaction to ${tx.to?.slice(0, 10)}...`
         })
 
         const signedApproval = await approvalBroker.waitForApproval(request.requestId, 60000)
@@ -658,7 +652,6 @@ export function createGuardedMiddleware ({ policiesRef, approvalBroker, emitter,
       emitter.emit('TransactionSigned', {
         type: 'TransactionSigned',
         requestId,
-        intentId,
         intentHash: targetHash,
         timestamp: Date.now()
       })
@@ -666,8 +659,7 @@ export function createGuardedMiddleware ({ policiesRef, approvalBroker, emitter,
       return {
         signedTx,
         intentHash: targetHash,
-        requestId,
-        intentId
+        requestId
       }
     }
   }

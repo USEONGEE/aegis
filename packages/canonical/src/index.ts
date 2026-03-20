@@ -20,6 +20,7 @@ export interface IntentInput {
   to: string
   data: string
   value?: string | number | null
+  timestamp: number
 }
 
 /**
@@ -71,10 +72,11 @@ function normalizeValue(val: string | number | null | undefined): string {
  * Fields: chain, to (lowercase), data (lowercase), value (decimal string).
  * Keys sorted alphabetically -> SHA-256 hex with 0x prefix.
  */
-export function intentHash({ chainId, to, data, value }: IntentInput): string {
+export function intentHash({ chainId, to, data, value, timestamp }: IntentInput): string {
   const normalized: Record<string, string | number> = {
     chainId,
     data: normalizeAddress(data),
+    timestamp,
     to: normalizeAddress(to),
     value: normalizeValue(value)
   }

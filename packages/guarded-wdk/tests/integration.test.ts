@@ -3,9 +3,8 @@ import { EventEmitter } from 'node:events'
 import { createGuardedMiddleware, evaluatePolicy, validatePolicies, permissionsToDict, type ChainPolicies } from '../src/guarded-middleware.js'
 import { SignedApprovalBroker } from '../src/signed-approval-broker.js'
 import { ApprovalStore } from '../src/approval-store.js'
-import type { HistoryEntry, HistoryQueryOpts, ApprovalRequest } from '../src/approval-store.js'
+import type { HistoryEntry, HistoryQueryOpts, ApprovalRequest, PolicyInput, PendingApprovalRequest } from '../src/approval-store.js'
 import { ForbiddenError, PolicyRejectionError } from '../src/errors.js'
-import { intentHash } from '@wdk-app/canonical'
 import { generateKeyPair, sign } from '../src/crypto-utils.js'
 import type { KeyPair } from '../src/crypto-utils.js'
 import { createHash } from 'node:crypto'
@@ -29,11 +28,11 @@ class MockApprovalStore extends ApprovalStore {
 
   override async init () {}
   override async dispose () {}
-  override async loadPolicy (seedId: string, chain: string) { return (this._policies[`${seedId}:${chain}`] || null) as never }
-  override async savePolicy (seedId: string, chain: string, policy: unknown) { this._policies[`${seedId}:${chain}`] = policy }
-  override async getPolicyVersion (_seedId: string, _chain: string) { return 0 }
-  override async loadPendingApprovals (_seedId: string | null, _type: string | null, _chain: string | null) { return this._pending as never }
-  override async savePendingApproval (_seedId: string, request: ApprovalRequest) { this._pending.push(request as ApprovalRequest & Record<string, unknown>) }
+  override async loadPolicy (accountIndex: number, chainId: number) { return (this._policies[`${accountIndex}:${chainId}`] || null) as never }
+  override async savePolicy (accountIndex: number, chainId: number, input: PolicyInput) { this._policies[`${accountIndex}:${chainId}`] = { ...input, policiesJson: JSON.stringify(input.policies), accountIndex, chainId, policyVersion: 0, updatedAt: Date.now() } }
+  override async getPolicyVersion (_accountIndex: number, _chainId: number) { return 0 }
+  override async loadPendingApprovals (_accountIndex: number | null, _type: string | null, _chainId: number | null) { return this._pending as unknown as PendingApprovalRequest[] }
+  override async savePendingApproval (_accountIndex: number, request: ApprovalRequest) { this._pending.push(request as ApprovalRequest & Record<string, unknown>) }
   override async removePendingApproval (requestId: string) { this._pending = this._pending.filter(p => p.requestId !== requestId) }
   override async appendHistory (entry: HistoryEntry) { this._history.push(entry) }
   override async getHistory (_opts?: HistoryQueryOpts) { return this._history as HistoryEntry[] }
@@ -180,7 +179,8 @@ describe('Integration: Guarded Middleware', () => {
       policiesRef: () => policies,
       approvalBroker: broker,
       emitter,
-      chainId: 1
+      chainId: 1,
+      accountIndexRef: () => 0
     })
     await middleware(account as never)
   }
@@ -210,46 +210,25 @@ describe('Integration: Guarded Middleware', () => {
 
   test('REQUIRE_APPROVAL repay: waits for signed approval then executes', async () => {
     await applyMiddleware()
-    const events: Array<{ type: string; requestId?: string; context?: unknown }> = []
-    emitter.on('ApprovalRequested', (e: { type: string; requestId: string; context?: unknown }) => events.push(e))
+    const events: Array<{ type: string; requestId?: string; targetHash?: string; context?: unknown }> = []
+    emitter.on('ApprovalRequested', (e: { type: string; requestId: string; targetHash: string; context?: unknown }) => events.push(e))
     emitter.on('ApprovalGranted', (e: { type: string }) => events.push(e))
     emitter.on('ExecutionBroadcasted', (e: { type: string }) => events.push(e))
 
     const tx = makeRepayTx(5000)
 
-    const targetHashForTx = intentHash({
-      chainId: 1,
-      to: tx.to,
-      data: tx.data,
-      value: tx.value || '0'
-    })
-
-    // Submit signed approval after a short delay
-    setTimeout(async () => {
-      try {
-        await createSignedApprovalAndSubmit(broker, keyPair, {
-          requestId: events.find(e => e.type === 'ApprovalRequested')?.requestId || '',
-          chainId: 1,
-          targetHash: targetHashForTx,
-          nonce: 1
-        })
-      } catch {
-        // If requestId not ready, we'll handle via listener
-      }
-    }, 50)
-
-    // Use listener approach: wait for ApprovalRequested, then submit
-    const requestIdPromise = new Promise<string>(resolve => {
-      emitter.on('ApprovalRequested', (e: { requestId: string }) => resolve(e.requestId))
+    // Use listener approach: wait for ApprovalRequested to get requestId and targetHash from the middleware
+    const approvalInfoPromise = new Promise<{ requestId: string; targetHash: string }>(resolve => {
+      emitter.on('ApprovalRequested', (e: { requestId: string; targetHash: string }) => resolve({ requestId: e.requestId, targetHash: e.targetHash }))
     })
 
     const txPromise = account.sendTransaction(tx)
 
-    const requestId = await requestIdPromise
+    const { requestId, targetHash } = await approvalInfoPromise
     await createSignedApprovalAndSubmit(broker, keyPair, {
       requestId,
       chainId: 1,
-      targetHash: targetHashForTx,
+      targetHash,
       nonce: 2
     })
 
@@ -359,14 +338,13 @@ describe('Integration: Guarded Middleware', () => {
     await applyMiddleware()
 
     const tx = makeRepayTx(500)
-    const result = await account.signTransaction(tx) as unknown as { signedTx: string; intentHash: string; requestId: string; intentId: string }
+    const result = await account.signTransaction(tx) as unknown as { signedTx: string; intentHash: string; requestId: string }
 
     expect(result.signedTx).toBeDefined()
     expect(result.signedTx.startsWith('0x')).toBe(true)
     expect(result.intentHash).toBeDefined()
     expect(result.intentHash.startsWith('0x')).toBe(true)
     expect(result.requestId).toBeDefined()
-    expect(result.intentId).toBeDefined()
   })
 
   test('signTransaction: REJECT throws PolicyRejectionError', async () => {
@@ -378,31 +356,24 @@ describe('Integration: Guarded Middleware', () => {
 
   test('signTransaction: REQUIRE_APPROVAL waits for signed approval', async () => {
     await applyMiddleware()
-    const events: Array<{ type: string; requestId?: string; context?: unknown }> = []
-    emitter.on('ApprovalRequested', (e: { type: string; requestId: string; context?: unknown }) => events.push(e))
+    const events: Array<{ type: string; requestId?: string; targetHash?: string; context?: unknown }> = []
+    emitter.on('ApprovalRequested', (e: { type: string; requestId: string; targetHash: string; context?: unknown }) => events.push(e))
     emitter.on('TransactionSigned', (e: { type: string }) => events.push(e))
 
     const tx = makeRepayTx(5000)
 
-    const targetHashForTx = intentHash({
-      chainId: 1,
-      to: tx.to,
-      data: tx.data,
-      value: tx.value || '0'
-    })
-
-    // Use listener approach: wait for ApprovalRequested, then submit
-    const requestIdPromise = new Promise<string>(resolve => {
-      emitter.on('ApprovalRequested', (e: { requestId: string }) => resolve(e.requestId))
+    // Use listener approach: wait for ApprovalRequested to get requestId and targetHash from the middleware
+    const approvalInfoPromise = new Promise<{ requestId: string; targetHash: string }>(resolve => {
+      emitter.on('ApprovalRequested', (e: { requestId: string; targetHash: string }) => resolve({ requestId: e.requestId, targetHash: e.targetHash }))
     })
 
     const signPromise = account.signTransaction(tx)
 
-    const requestId = await requestIdPromise
+    const { requestId, targetHash } = await approvalInfoPromise
     await createSignedApprovalAndSubmit(broker, keyPair, {
       requestId,
       chainId: 1,
-      targetHash: targetHashForTx,
+      targetHash,
       nonce: 2
     })
 

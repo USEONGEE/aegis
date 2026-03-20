@@ -15,13 +15,14 @@ import {
   type JournalInput,
   type CronInput,
   type StoredCron,
-  type StoredSeed,
+  type MasterSeed,
+  type StoredWallet,
   type StoredJournal,
   type HistoryQueryOpts,
   type JournalQueryOpts,
   type SignedApproval
 } from './approval-store.js'
-import type { PendingApprovalRow, StoredHistoryEntry, CronRow, StoredJournalEntry, SignerRow, SeedRow, PolicyRow } from './store-types.js'
+import type { PendingApprovalRow, StoredHistoryEntry, CronRow, StoredJournalEntry, SignerRow, MasterSeedRow, WalletRow, PolicyRow } from './store-types.js'
 
 /**
  * SQLite-backed implementation of ApprovalStore.
@@ -57,43 +58,50 @@ export class SqliteApprovalStore extends ApprovalStore {
 
   private _createTables (): void {
     this._db!.exec(`
-      CREATE TABLE IF NOT EXISTS seeds (
-        id TEXT PRIMARY KEY,
-        name TEXT NOT NULL,
+      CREATE TABLE IF NOT EXISTS master_seed (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
         mnemonic TEXT NOT NULL,
-        created_at INTEGER NOT NULL,
-        is_active INTEGER NOT NULL DEFAULT 0
+        created_at INTEGER NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS wallets (
+        account_index INTEGER PRIMARY KEY,
+        name TEXT NOT NULL,
+        address TEXT NOT NULL,
+        created_at INTEGER NOT NULL
       );
 
       CREATE TABLE IF NOT EXISTS policies (
-        seed_id TEXT NOT NULL REFERENCES seeds(id),
+        account_index INTEGER NOT NULL REFERENCES wallets(account_index),
         chain_id INTEGER NOT NULL,
         policies_json TEXT NOT NULL,
         signature_json TEXT NOT NULL,
         policy_version INTEGER NOT NULL DEFAULT 1,
         updated_at INTEGER NOT NULL,
-        PRIMARY KEY (seed_id, chain_id)
+        PRIMARY KEY (account_index, chain_id)
       );
 
       CREATE TABLE IF NOT EXISTS pending_requests (
         request_id TEXT PRIMARY KEY,
-        seed_id TEXT NOT NULL REFERENCES seeds(id),
+        account_index INTEGER NOT NULL,
         type TEXT NOT NULL,
         chain_id INTEGER NOT NULL,
         target_hash TEXT NOT NULL,
-        metadata_json TEXT,
+        content TEXT NOT NULL DEFAULT '',
+        wallet_name TEXT,
         created_at INTEGER NOT NULL
       );
 
       CREATE TABLE IF NOT EXISTS approval_history (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        seed_id TEXT NOT NULL REFERENCES seeds(id),
+        account_index INTEGER NOT NULL,
         type TEXT NOT NULL,
         chain_id INTEGER,
         target_hash TEXT NOT NULL,
         approver TEXT NOT NULL,
         signer_id TEXT NOT NULL,
         action TEXT NOT NULL,
+        content TEXT,
         signed_approval_json TEXT,
         timestamp INTEGER NOT NULL
       );
@@ -115,7 +123,7 @@ export class SqliteApprovalStore extends ApprovalStore {
 
       CREATE TABLE IF NOT EXISTS crons (
         id TEXT PRIMARY KEY,
-        seed_id TEXT NOT NULL REFERENCES seeds(id),
+        account_index INTEGER NOT NULL REFERENCES wallets(account_index),
         session_id TEXT NOT NULL,
         interval TEXT NOT NULL,
         prompt TEXT NOT NULL,
@@ -126,8 +134,8 @@ export class SqliteApprovalStore extends ApprovalStore {
       );
 
       CREATE TABLE IF NOT EXISTS execution_journal (
-        intent_id TEXT PRIMARY KEY,
-        seed_id TEXT NOT NULL REFERENCES seeds(id),
+        intent_hash TEXT PRIMARY KEY,
+        account_index INTEGER NOT NULL,
         chain_id INTEGER NOT NULL,
         target_hash TEXT NOT NULL,
         status TEXT NOT NULL,
@@ -138,15 +146,77 @@ export class SqliteApprovalStore extends ApprovalStore {
     `)
   }
 
-  // --- Active Policy ---
+  // --- Master Seed ---
 
-  override async loadPolicy (seedId: string, chainId: number): Promise<StoredPolicy | null> {
-    const row = this._db!.prepare(
-      'SELECT * FROM policies WHERE seed_id = ? AND chain_id = ?'
-    ).get(seedId, chainId) as PolicyRow | undefined
+  override async getMasterSeed (): Promise<MasterSeed | null> {
+    const row = this._db!.prepare('SELECT * FROM master_seed WHERE id = 1').get() as MasterSeedRow | undefined
     if (!row) return null
     return {
-      seedId: row.seed_id,
+      mnemonic: row.mnemonic,
+      createdAt: row.created_at
+    }
+  }
+
+  override async setMasterSeed (mnemonic: string): Promise<void> {
+    this._db!.prepare(`
+      INSERT OR REPLACE INTO master_seed (id, mnemonic, created_at)
+      VALUES (1, ?, ?)
+    `).run(mnemonic, Date.now())
+  }
+
+  // --- Wallets ---
+
+  override async listWallets (): Promise<StoredWallet[]> {
+    const rows = this._db!.prepare('SELECT * FROM wallets ORDER BY account_index').all() as WalletRow[]
+    return rows.map(row => ({
+      accountIndex: row.account_index,
+      name: row.name,
+      address: row.address,
+      createdAt: row.created_at
+    }))
+  }
+
+  override async getWallet (accountIndex: number): Promise<StoredWallet | null> {
+    const row = this._db!.prepare('SELECT * FROM wallets WHERE account_index = ?').get(accountIndex) as WalletRow | undefined
+    if (!row) return null
+    return {
+      accountIndex: row.account_index,
+      name: row.name,
+      address: row.address,
+      createdAt: row.created_at
+    }
+  }
+
+  override async createWallet (accountIndex: number, name: string, address: string): Promise<StoredWallet> {
+    const now = Date.now()
+    this._db!.prepare(`
+      INSERT INTO wallets (account_index, name, address, created_at)
+      VALUES (?, ?, ?, ?)
+    `).run(accountIndex, name, address, now)
+    return { accountIndex, name, address, createdAt: now }
+  }
+
+  override async deleteWallet (accountIndex: number): Promise<void> {
+    const deleteTx = this._db!.transaction(() => {
+      this._db!.prepare('DELETE FROM policies WHERE account_index = ?').run(accountIndex)
+      this._db!.prepare('DELETE FROM pending_requests WHERE account_index = ?').run(accountIndex)
+      this._db!.prepare('DELETE FROM crons WHERE account_index = ?').run(accountIndex)
+      this._db!.prepare('DELETE FROM execution_journal WHERE account_index = ?').run(accountIndex)
+      // approval_history is preserved
+      this._db!.prepare('DELETE FROM wallets WHERE account_index = ?').run(accountIndex)
+    })
+    deleteTx()
+  }
+
+  // --- Active Policy ---
+
+  override async loadPolicy (accountIndex: number, chainId: number): Promise<StoredPolicy | null> {
+    const row = this._db!.prepare(
+      'SELECT * FROM policies WHERE account_index = ? AND chain_id = ?'
+    ).get(accountIndex, chainId) as PolicyRow | undefined
+    if (!row) return null
+    return {
+      accountIndex: row.account_index,
       chainId: row.chain_id,
       policiesJson: row.policies_json,
       signatureJson: row.signature_json,
@@ -155,21 +225,21 @@ export class SqliteApprovalStore extends ApprovalStore {
     }
   }
 
-  override async savePolicy (seedId: string, chainId: number, input: PolicyInput): Promise<void> {
-    const existing = await this.loadPolicy(seedId, chainId)
+  override async savePolicy (accountIndex: number, chainId: number, input: PolicyInput): Promise<void> {
+    const existing = await this.loadPolicy(accountIndex, chainId)
     const version = existing ? existing.policyVersion + 1 : 1
     const now = Date.now()
 
     this._db!.prepare(`
-      INSERT INTO policies (seed_id, chain_id, policies_json, signature_json, policy_version, updated_at)
+      INSERT INTO policies (account_index, chain_id, policies_json, signature_json, policy_version, updated_at)
       VALUES (?, ?, ?, ?, ?, ?)
-      ON CONFLICT (seed_id, chain_id) DO UPDATE SET
+      ON CONFLICT (account_index, chain_id) DO UPDATE SET
         policies_json = excluded.policies_json,
         signature_json = excluded.signature_json,
         policy_version = excluded.policy_version,
         updated_at = excluded.updated_at
     `).run(
-      seedId,
+      accountIndex,
       chainId,
       JSON.stringify(input.policies),
       JSON.stringify(input.signature),
@@ -178,36 +248,37 @@ export class SqliteApprovalStore extends ApprovalStore {
     )
   }
 
-  override async getPolicyVersion (seedId: string, chainId: number): Promise<number> {
+  override async getPolicyVersion (accountIndex: number, chainId: number): Promise<number> {
     const row = this._db!.prepare(
-      'SELECT policy_version FROM policies WHERE seed_id = ? AND chain_id = ?'
-    ).get(seedId, chainId) as { policy_version: number } | undefined
+      'SELECT policy_version FROM policies WHERE account_index = ? AND chain_id = ?'
+    ).get(accountIndex, chainId) as { policy_version: number } | undefined
     return row ? row.policy_version : 0
   }
 
-  override async listPolicyChains (seedId: string): Promise<string[]> {
+  override async listPolicyChains (accountIndex: number): Promise<string[]> {
     const rows = this._db!.prepare(
-      'SELECT chain_id FROM policies WHERE seed_id = ?'
-    ).all(seedId) as { chain_id: number }[]
+      'SELECT chain_id FROM policies WHERE account_index = ?'
+    ).all(accountIndex) as { chain_id: number }[]
     return rows.map(r => String(r.chain_id))
   }
 
   // --- Pending Requests ---
 
-  override async loadPendingApprovals (seedId: string | null, type: string | null, chainId: number | null): Promise<PendingApprovalRequest[]> {
+  override async loadPendingApprovals (accountIndex: number | null, type: string | null, chainId: number | null): Promise<PendingApprovalRequest[]> {
     let sql = 'SELECT * FROM pending_requests WHERE 1=1'
     const params: (string | number | null)[] = []
-    if (seedId) { sql += ' AND seed_id = ?'; params.push(seedId) }
+    if (accountIndex !== null && accountIndex !== undefined) { sql += ' AND account_index = ?'; params.push(accountIndex) }
     if (type) { sql += ' AND type = ?'; params.push(type) }
     if (chainId !== null && chainId !== undefined) { sql += ' AND chain_id = ?'; params.push(chainId) }
     const rows = this._db!.prepare(sql).all(...params) as PendingApprovalRow[]
     return rows.map(p => ({
       requestId: p.request_id,
-      seedId: p.seed_id,
+      accountIndex: p.account_index,
       type: p.type as ApprovalType,
       chainId: p.chain_id,
       targetHash: p.target_hash,
-      metadata: p.metadata_json ? JSON.parse(p.metadata_json) as Record<string, unknown> : undefined,
+      content: p.content,
+      walletName: p.wallet_name ?? undefined,
       createdAt: p.created_at
     }))
   }
@@ -219,26 +290,29 @@ export class SqliteApprovalStore extends ApprovalStore {
     if (!row) return null
     return {
       requestId: row.request_id,
-      seedId: row.seed_id,
+      accountIndex: row.account_index,
       type: row.type as ApprovalType,
       chainId: row.chain_id,
       targetHash: row.target_hash,
-      metadata: row.metadata_json ? JSON.parse(row.metadata_json) as Record<string, unknown> : undefined,
+      content: row.content,
+      walletName: row.wallet_name ?? undefined,
       createdAt: row.created_at
     }
   }
 
-  override async savePendingApproval (seedId: string, request: ApprovalRequest): Promise<void> {
+  override async savePendingApproval (accountIndex: number, request: ApprovalRequest): Promise<void> {
+    const walletName = (request as PendingApprovalRequest).walletName ?? null
     this._db!.prepare(`
-      INSERT INTO pending_requests (request_id, seed_id, type, chain_id, target_hash, metadata_json, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO pending_requests (request_id, account_index, type, chain_id, target_hash, content, wallet_name, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       request.requestId,
-      seedId,
+      accountIndex,
       request.type,
       request.chainId,
       request.targetHash,
-      request.metadata ? JSON.stringify(request.metadata) : null,
+      request.content,
+      walletName,
       request.createdAt || Date.now()
     )
   }
@@ -251,16 +325,17 @@ export class SqliteApprovalStore extends ApprovalStore {
 
   override async appendHistory (entry: HistoryEntry): Promise<void> {
     this._db!.prepare(`
-      INSERT INTO approval_history (seed_id, type, chain_id, target_hash, approver, signer_id, action, signed_approval_json, timestamp)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO approval_history (account_index, type, chain_id, target_hash, approver, signer_id, action, content, signed_approval_json, timestamp)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
-      entry.seedId,
+      entry.accountIndex,
       entry.type,
       entry.chainId ?? null,
       entry.targetHash,
       entry.approver,
       entry.signerId,
       entry.action,
+      entry.content ?? null,
       entry.signedApproval ? JSON.stringify(entry.signedApproval) : null,
       entry.timestamp
     )
@@ -269,20 +344,21 @@ export class SqliteApprovalStore extends ApprovalStore {
   override async getHistory (opts: HistoryQueryOpts = {}): Promise<HistoryEntry[]> {
     let sql = 'SELECT * FROM approval_history WHERE 1=1'
     const params: (string | number)[] = []
-    if (opts.seedId) { sql += ' AND seed_id = ?'; params.push(opts.seedId) }
+    if (opts.accountIndex !== undefined) { sql += ' AND account_index = ?'; params.push(opts.accountIndex) }
     if (opts.type) { sql += ' AND type = ?'; params.push(opts.type) }
     if (opts.chainId !== undefined) { sql += ' AND chain_id = ?'; params.push(opts.chainId) }
     sql += ' ORDER BY id ASC'
     if (opts.limit) { sql += ' LIMIT ?'; params.push(opts.limit) }
     const rows = this._db!.prepare(sql).all(...params) as StoredHistoryEntry[]
     return rows.map(h => ({
-      seedId: h.seed_id,
+      accountIndex: h.account_index,
       type: h.type,
       chainId: h.chain_id,
       targetHash: h.target_hash,
       approver: h.approver,
       signerId: h.signer_id,
       action: h.action,
+      content: h.content ?? undefined,
       signedApproval: h.signed_approval_json ? JSON.parse(h.signed_approval_json) as SignedApproval : undefined,
       timestamp: h.timestamp
     }))
@@ -352,13 +428,13 @@ export class SqliteApprovalStore extends ApprovalStore {
 
   // --- Cron ---
 
-  override async listCrons (seedId?: string): Promise<StoredCron[]> {
-    const rows = seedId
-      ? this._db!.prepare('SELECT * FROM crons WHERE seed_id = ?').all(seedId) as CronRow[]
+  override async listCrons (accountIndex?: number): Promise<StoredCron[]> {
+    const rows = accountIndex !== undefined
+      ? this._db!.prepare('SELECT * FROM crons WHERE account_index = ?').all(accountIndex) as CronRow[]
       : this._db!.prepare('SELECT * FROM crons').all() as CronRow[]
     return rows.map(c => ({
       id: c.id,
-      seedId: c.seed_id,
+      accountIndex: c.account_index,
       sessionId: c.session_id,
       interval: c.interval,
       prompt: c.prompt,
@@ -369,14 +445,14 @@ export class SqliteApprovalStore extends ApprovalStore {
     }))
   }
 
-  override async saveCron (seedId: string, cron: CronInput): Promise<string> {
+  override async saveCron (accountIndex: number, cron: CronInput): Promise<string> {
     const id = randomUUID()
     this._db!.prepare(`
-      INSERT INTO crons (id, seed_id, session_id, interval, prompt, chain_id, created_at, is_active)
+      INSERT INTO crons (id, account_index, session_id, interval, prompt, chain_id, created_at, is_active)
       VALUES (?, ?, ?, ?, ?, ?, ?, 1)
     `).run(
       id,
-      seedId,
+      accountIndex,
       cron.sessionId,
       cron.interval,
       cron.prompt,
@@ -394,102 +470,14 @@ export class SqliteApprovalStore extends ApprovalStore {
     this._db!.prepare('UPDATE crons SET last_run_at = ? WHERE id = ?').run(timestamp, cronId)
   }
 
-  // --- Seeds ---
-
-  override async listSeeds (): Promise<StoredSeed[]> {
-    const rows = this._db!.prepare('SELECT * FROM seeds ORDER BY created_at ASC').all() as SeedRow[]
-    return rows.map(row => ({
-      id: row.id,
-      name: row.name,
-      mnemonic: row.mnemonic,
-      createdAt: row.created_at,
-      isActive: row.is_active === 1
-    }))
-  }
-
-  override async getSeed (seedId: string): Promise<StoredSeed | null> {
-    const row = this._db!.prepare('SELECT * FROM seeds WHERE id = ?').get(seedId) as SeedRow | undefined
-    if (!row) return null
-    return {
-      id: row.id,
-      name: row.name,
-      mnemonic: row.mnemonic,
-      createdAt: row.created_at,
-      isActive: row.is_active === 1
-    }
-  }
-
-  override async addSeed (name: string, mnemonic: string): Promise<StoredSeed> {
-    const id = randomUUID()
-    const now = Date.now()
-    const count = (this._db!.prepare('SELECT COUNT(*) AS cnt FROM seeds').get() as { cnt: number }).cnt
-    const isActive = count === 0 ? 1 : 0
-
-    this._db!.prepare(`
-      INSERT INTO seeds (id, name, mnemonic, created_at, is_active)
-      VALUES (?, ?, ?, ?, ?)
-    `).run(id, name, mnemonic, now, isActive)
-
-    return { id, name, mnemonic, createdAt: now, isActive: isActive === 1 }
-  }
-
-  override async removeSeed (seedId: string): Promise<void> {
-    const removeTx = this._db!.transaction(() => {
-      // Check if this seed is active
-      const seed = this._db!.prepare('SELECT is_active FROM seeds WHERE id = ?').get(seedId) as { is_active: number } | undefined
-      if (!seed) return
-
-      // Remove related data
-      this._db!.prepare('DELETE FROM policies WHERE seed_id = ?').run(seedId)
-      this._db!.prepare('DELETE FROM pending_requests WHERE seed_id = ?').run(seedId)
-      this._db!.prepare('DELETE FROM approval_history WHERE seed_id = ?').run(seedId)
-      this._db!.prepare('DELETE FROM crons WHERE seed_id = ?').run(seedId)
-      this._db!.prepare('DELETE FROM execution_journal WHERE seed_id = ?').run(seedId)
-      this._db!.prepare('DELETE FROM seeds WHERE id = ?').run(seedId)
-
-      // If it was the active seed, make first remaining seed active
-      if (seed.is_active) {
-        this._db!.prepare('UPDATE seeds SET is_active = 0').run()
-        const first = this._db!.prepare('SELECT id FROM seeds ORDER BY created_at ASC LIMIT 1').get() as { id: string } | undefined
-        if (first) {
-          this._db!.prepare('UPDATE seeds SET is_active = 1 WHERE id = ?').run(first.id)
-        }
-      }
-    })
-    removeTx()
-  }
-
-  override async setActiveSeed (seedId: string): Promise<void> {
-    const seed = this._db!.prepare('SELECT id FROM seeds WHERE id = ?').get(seedId) as { id: string } | undefined
-    if (!seed) throw new Error(`Seed not found: ${seedId}`)
-
-    const setActiveTx = this._db!.transaction(() => {
-      this._db!.prepare('UPDATE seeds SET is_active = 0').run()
-      this._db!.prepare('UPDATE seeds SET is_active = 1 WHERE id = ?').run(seedId)
-    })
-    setActiveTx()
-  }
-
-  override async getActiveSeed (): Promise<StoredSeed | null> {
-    const row = this._db!.prepare('SELECT * FROM seeds WHERE is_active = 1').get() as SeedRow | undefined
-    if (!row) return null
-    return {
-      id: row.id,
-      name: row.name,
-      mnemonic: row.mnemonic,
-      createdAt: row.created_at,
-      isActive: row.is_active === 1
-    }
-  }
-
   // --- Execution Journal ---
 
-  override async getJournalEntry (intentId: string): Promise<StoredJournal | null> {
-    const row = this._db!.prepare('SELECT * FROM execution_journal WHERE intent_id = ?').get(intentId) as StoredJournalEntry | undefined
+  override async getJournalEntry (intentHash: string): Promise<StoredJournal | null> {
+    const row = this._db!.prepare('SELECT * FROM execution_journal WHERE intent_hash = ?').get(intentHash) as StoredJournalEntry | undefined
     if (!row) return null
     return {
-      intentId: row.intent_id,
-      seedId: row.seed_id,
+      intentHash: row.intent_hash,
+      accountIndex: row.account_index,
       chainId: row.chain_id,
       targetHash: row.target_hash,
       status: row.status,
@@ -502,11 +490,11 @@ export class SqliteApprovalStore extends ApprovalStore {
   override async saveJournalEntry (entry: JournalInput): Promise<void> {
     const now = Date.now()
     this._db!.prepare(`
-      INSERT INTO execution_journal (intent_id, seed_id, chain_id, target_hash, status, tx_hash, created_at, updated_at)
+      INSERT INTO execution_journal (intent_hash, account_index, chain_id, target_hash, status, tx_hash, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
-      entry.intentId,
-      entry.seedId,
+      entry.intentHash,
+      entry.accountIndex,
       entry.chainId,
       entry.targetHash,
       entry.status,
@@ -516,25 +504,25 @@ export class SqliteApprovalStore extends ApprovalStore {
     )
   }
 
-  override async updateJournalStatus (intentId: string, status: JournalStatus, txHash?: string): Promise<void> {
+  override async updateJournalStatus (intentHash: string, status: JournalStatus, txHash?: string): Promise<void> {
     this._db!.prepare(`
       UPDATE execution_journal SET status = ?, tx_hash = COALESCE(?, tx_hash), updated_at = ?
-      WHERE intent_id = ?
-    `).run(status, txHash !== undefined ? txHash : null, Date.now(), intentId)
+      WHERE intent_hash = ?
+    `).run(status, txHash !== undefined ? txHash : null, Date.now(), intentHash)
   }
 
   override async listJournal (opts: JournalQueryOpts = {}): Promise<StoredJournal[]> {
     let sql = 'SELECT * FROM execution_journal WHERE 1=1'
     const params: (string | number)[] = []
-    if (opts.seedId) { sql += ' AND seed_id = ?'; params.push(opts.seedId) }
+    if (opts.accountIndex !== undefined) { sql += ' AND account_index = ?'; params.push(opts.accountIndex) }
     if (opts.status) { sql += ' AND status = ?'; params.push(opts.status) }
     if (opts.chainId !== undefined) { sql += ' AND chain_id = ?'; params.push(opts.chainId) }
     sql += ' ORDER BY created_at ASC'
     if (opts.limit) { sql += ' LIMIT ?'; params.push(opts.limit) }
     const rows = this._db!.prepare(sql).all(...params) as StoredJournalEntry[]
     return rows.map(j => ({
-      intentId: j.intent_id,
-      seedId: j.seed_id,
+      intentHash: j.intent_hash,
+      accountIndex: j.account_index,
       chainId: j.chain_id,
       targetHash: j.target_hash,
       status: j.status,

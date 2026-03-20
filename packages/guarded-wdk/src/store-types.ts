@@ -7,24 +7,26 @@ import type { ApprovalType, HistoryAction, JournalStatus } from './approval-stor
 /** @internal snake_case representation for store implementations. */
 export interface PendingApprovalRow {
   request_id: string
-  seed_id: string
+  account_index: number
   type: string
   chain_id: number
   target_hash: string
-  metadata_json: string | null
+  content: string
+  wallet_name: string | null
   created_at: number
 }
 
 /** @internal */
 export interface StoredHistoryEntry {
   id?: number
-  seed_id: string
+  account_index: number
   type: ApprovalType
   chain_id: number | null
   target_hash: string
   approver: string
   signer_id: string
   action: HistoryAction
+  content: string | null
   signed_approval_json: string | null
   timestamp: number
 }
@@ -32,7 +34,7 @@ export interface StoredHistoryEntry {
 /** @internal */
 export interface CronRow {
   id: string
-  seed_id: string
+  account_index: number
   session_id: string
   interval: string
   prompt: string
@@ -44,8 +46,8 @@ export interface CronRow {
 
 /** @internal */
 export interface StoredJournalEntry {
-  intent_id: string
-  seed_id: string
+  intent_hash: string
+  account_index: number
   chain_id: number
   target_hash: string
   status: JournalStatus
@@ -64,17 +66,23 @@ export interface SignerRow {
 }
 
 /** @internal */
-export interface SeedRow {
-  id: string
-  name: string
+export interface MasterSeedRow {
+  id: number
   mnemonic: string
   created_at: number
-  is_active: number
+}
+
+/** @internal */
+export interface WalletRow {
+  account_index: number
+  name: string
+  address: string
+  created_at: number
 }
 
 /** @internal */
 export interface PolicyRow {
-  seed_id: string
+  account_index: number
   chain_id: number
   policies_json: string
   signature_json: string

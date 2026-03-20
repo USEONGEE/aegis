@@ -37,7 +37,7 @@ interface GuardedWDKFacade {
   getAccount (chain: string, index?: number): Promise<unknown>
   getAccountByPath (chain: string, path: string): Promise<unknown>
   getFeeRates (chain: string): Promise<unknown>
-  updatePolicies (chainId: number, newPolicies: { policies: unknown[] } & Record<string, unknown>): Promise<void>
+  updatePolicies (chainId: number, newPolicies: { policies: unknown[] } & Record<string, unknown>, accountIndex?: number): Promise<void>
   getApprovalBroker (): SignedApprovalBroker
   getApprovalStore (): ApprovalStore | null
   on (type: string, handler: (...args: unknown[]) => void): void
@@ -81,6 +81,7 @@ export async function createGuardedWDK (config: GuardedWDKConfig): Promise<Guard
   // If store has policies for a chain, those take precedence over config.policies.
   // config.policies is only used as fallback for chains not found in the store.
   let policiesStore: Record<string, Record<string, unknown>> = {}
+  let currentAccountIndex = 0
 
   // 1. Start with config.policies as baseline (fallback)
   if (policies) {
@@ -90,11 +91,12 @@ export async function createGuardedWDK (config: GuardedWDKConfig): Promise<Guard
   }
 
   // 2. Overlay with store-loaded policies (store takes precedence)
+  // Boot with accountIndex 0 as default. Runtime swap loads per-wallet from DB.
   if (approvalStore) {
     for (const chainKey of Object.keys(wallets || {})) {
-      const stored = await approvalStore.loadPolicy(seed, Number(chainKey))
-      if (stored && stored.policies_json) {
-        policiesStore[chainKey] = deepCopy({ ...stored, policies: JSON.parse(stored.policies_json) }) as Record<string, unknown>
+      const stored = await approvalStore.loadPolicy(0, Number(chainKey))
+      if (stored && stored.policiesJson) {
+        policiesStore[chainKey] = deepCopy({ ...stored, policies: JSON.parse(stored.policiesJson) }) as Record<string, unknown>
       }
     }
   }
@@ -120,12 +122,14 @@ export async function createGuardedWDK (config: GuardedWDKConfig): Promise<Guard
       policiesRef: () => policiesStore as ChainPolicies,
       approvalBroker,
       emitter,
-      chainId: Number(chainKey)
+      chainId: Number(chainKey),
+      accountIndexRef: () => currentAccountIndex
     }))
   }
 
   return {
     async getAccount (chain: string, index: number = 0) {
+      currentAccountIndex = index
       const account = await wdk.getAccount(chain, index)
       Object.freeze(account)
       return account
@@ -141,7 +145,7 @@ export async function createGuardedWDK (config: GuardedWDKConfig): Promise<Guard
       return wdk.getFeeRates(chain)
     },
 
-    async updatePolicies (chainId: number, newPolicies: { policies: unknown[] } & Record<string, unknown>) {
+    async updatePolicies (chainId: number, newPolicies: { policies: unknown[] } & Record<string, unknown>, acctIndex: number = 0) {
       if (!newPolicies || typeof newPolicies !== 'object') {
         throw new Error('newPolicies must be an object.')
       }
@@ -153,7 +157,7 @@ export async function createGuardedWDK (config: GuardedWDKConfig): Promise<Guard
       // Write-through: persist to store first, then update memory cache.
       // If store write fails, memory is not updated (consistent state).
       if (approvalStore) {
-        await approvalStore.savePolicy(seed, chainId, {
+        await approvalStore.savePolicy(acctIndex, chainId, {
           policies: newPolicies.policies,
           signature: (newPolicies as Record<string, unknown>).signature as Record<string, unknown> || {}
         })

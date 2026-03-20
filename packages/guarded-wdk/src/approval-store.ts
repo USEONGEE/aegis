@@ -3,11 +3,27 @@ import type { PendingApprovalRow, CronRow } from './store-types.js'
 
 // --- Domain interfaces ---
 
-export type ApprovalType = 'tx' | 'policy' | 'policy_reject' | 'device_revoke'
+export type ApprovalType = 'tx' | 'policy' | 'policy_reject' | 'device_revoke' | 'wallet_create' | 'wallet_delete'
 
 export type JournalStatus = 'received' | 'pending_approval' | 'settled' | 'signed' | 'failed' | 'rejected'
 
 export type HistoryAction = 'approved' | 'rejected'
+
+// --- Master Seed & Wallet ---
+
+export interface MasterSeed {
+  mnemonic: string
+  createdAt: number
+}
+
+export interface StoredWallet {
+  accountIndex: number
+  name: string
+  address: string
+  createdAt: number
+}
+
+// --- Approval ---
 
 export interface SignedApproval {
   type: ApprovalType
@@ -16,11 +32,12 @@ export interface SignedApproval {
   targetHash: string
   approver: string
   signerId: string
+  accountIndex: number
   policyVersion: number
   expiresAt: number
   nonce: number
   sig: string
-  metadata?: Record<string, unknown>
+  content: string
 }
 
 export interface ApprovalRequest {
@@ -28,7 +45,8 @@ export interface ApprovalRequest {
   type: ApprovalType
   chainId: number
   targetHash: string
-  metadata?: Record<string, unknown>
+  accountIndex: number
+  content: string
   createdAt: number
 }
 
@@ -38,7 +56,7 @@ export interface PolicyInput {
 }
 
 export interface StoredPolicy {
-  seedId: string
+  accountIndex: number
   chainId: number
   policiesJson: string
   signatureJson: string
@@ -47,13 +65,13 @@ export interface StoredPolicy {
 }
 
 export interface PendingApprovalRequest extends ApprovalRequest {
-  seedId: string
+  walletName?: string
 }
 
 // PendingApprovalRow: see store-types.ts (@internal)
 
 export interface HistoryEntry {
-  seedId: string
+  accountIndex: number
   requestId?: string
   type: ApprovalType
   chainId?: number | null
@@ -61,6 +79,7 @@ export interface HistoryEntry {
   approver: string
   signerId: string
   action: HistoryAction
+  content?: string
   signedApproval?: SignedApproval
   timestamp: number
 }
@@ -86,7 +105,7 @@ export interface CronInput {
 
 export interface StoredCron {
   id: string
-  seedId: string
+  accountIndex: number
   sessionId: string
   interval: string
   prompt: string
@@ -96,25 +115,17 @@ export interface StoredCron {
   isActive: boolean
 }
 
-export interface StoredSeed {
-  id: string
-  name: string
-  mnemonic: string
-  createdAt: number
-  isActive: boolean
-}
-
 export interface JournalInput {
-  intentId: string
-  seedId: string
+  intentHash: string
+  accountIndex: number
   chainId: number
   targetHash: string
   status: JournalStatus
 }
 
 export interface StoredJournal {
-  intentId: string
-  seedId: string
+  intentHash: string
+  accountIndex: number
   chainId: number
   targetHash: string
   status: JournalStatus
@@ -126,36 +137,48 @@ export interface StoredJournal {
 // StoredJournalEntry moved to store-types.ts (@internal)
 
 export interface HistoryQueryOpts {
-  seedId?: string
+  accountIndex?: number
   type?: ApprovalType
   chainId?: number
   limit?: number
 }
 
 export interface JournalQueryOpts {
-  seedId?: string
+  accountIndex?: number
   status?: JournalStatus
   chainId?: number
   limit?: number
 }
 
 /**
- * Abstract interface for approval/policy/seed/cron persistence.
+ * Abstract interface for approval/policy/wallet/cron persistence.
  * Implementations: JsonApprovalStore, SqliteApprovalStore.
  */
 export abstract class ApprovalStore {
+  // --- Master Seed ---
+
+  async getMasterSeed (): Promise<MasterSeed | null> { throw new Error('Not implemented') }
+  async setMasterSeed (_mnemonic: string): Promise<void> { throw new Error('Not implemented') }
+
+  // --- Wallets ---
+
+  async listWallets (): Promise<StoredWallet[]> { throw new Error('Not implemented') }
+  async getWallet (_accountIndex: number): Promise<StoredWallet | null> { throw new Error('Not implemented') }
+  async createWallet (_accountIndex: number, _name: string, _address: string): Promise<StoredWallet> { throw new Error('Not implemented') }
+  async deleteWallet (_accountIndex: number): Promise<void> { throw new Error('Not implemented') }
+
   // --- Active Policy ---
 
-  async loadPolicy (_seedId: string, _chainId: number): Promise<StoredPolicy | null> { throw new Error('Not implemented') }
-  async savePolicy (_seedId: string, _chainId: number, _input: PolicyInput): Promise<void> { throw new Error('Not implemented') }
-  async getPolicyVersion (_seedId: string, _chainId: number): Promise<number> { throw new Error('Not implemented') }
-  async listPolicyChains (_seedId: string): Promise<string[]> { throw new Error('Not implemented') }
+  async loadPolicy (_accountIndex: number, _chainId: number): Promise<StoredPolicy | null> { throw new Error('Not implemented') }
+  async savePolicy (_accountIndex: number, _chainId: number, _input: PolicyInput): Promise<void> { throw new Error('Not implemented') }
+  async getPolicyVersion (_accountIndex: number, _chainId: number): Promise<number> { throw new Error('Not implemented') }
+  async listPolicyChains (_accountIndex: number): Promise<string[]> { throw new Error('Not implemented') }
 
   // --- Pending Requests ---
 
-  async loadPendingApprovals (_seedId: string | null, _type: string | null, _chainId: number | null): Promise<PendingApprovalRequest[]> { throw new Error('Not implemented') }
+  async loadPendingApprovals (_accountIndex: number | null, _type: string | null, _chainId: number | null): Promise<PendingApprovalRequest[]> { throw new Error('Not implemented') }
   async loadPendingByRequestId (_requestId: string): Promise<PendingApprovalRequest | null> { throw new Error('Not implemented') }
-  async savePendingApproval (_seedId: string, _request: ApprovalRequest): Promise<void> { throw new Error('Not implemented') }
+  async savePendingApproval (_accountIndex: number, _request: ApprovalRequest): Promise<void> { throw new Error('Not implemented') }
   async removePendingApproval (_requestId: string): Promise<void> { throw new Error('Not implemented') }
 
   // --- History ---
@@ -178,25 +201,16 @@ export abstract class ApprovalStore {
 
   // --- Cron ---
 
-  async listCrons (_seedId?: string): Promise<StoredCron[]> { throw new Error('Not implemented') }
-  async saveCron (_seedId: string, _cron: CronInput): Promise<string> { throw new Error('Not implemented') }
+  async listCrons (_accountIndex?: number): Promise<StoredCron[]> { throw new Error('Not implemented') }
+  async saveCron (_accountIndex: number, _cron: CronInput): Promise<string> { throw new Error('Not implemented') }
   async removeCron (_cronId: string): Promise<void> { throw new Error('Not implemented') }
   async updateCronLastRun (_cronId: string, _timestamp: number): Promise<void> { throw new Error('Not implemented') }
 
-  // --- Seeds ---
-
-  async listSeeds (): Promise<StoredSeed[]> { throw new Error('Not implemented') }
-  async getSeed (_seedId: string): Promise<StoredSeed | null> { throw new Error('Not implemented') }
-  async addSeed (_name: string, _mnemonic: string): Promise<StoredSeed> { throw new Error('Not implemented') }
-  async removeSeed (_seedId: string): Promise<void> { throw new Error('Not implemented') }
-  async setActiveSeed (_seedId: string): Promise<void> { throw new Error('Not implemented') }
-  async getActiveSeed (): Promise<StoredSeed | null> { throw new Error('Not implemented') }
-
   // --- Execution Journal ---
 
-  async getJournalEntry (_intentId: string): Promise<StoredJournal | null> { throw new Error('Not implemented') }
+  async getJournalEntry (_intentHash: string): Promise<StoredJournal | null> { throw new Error('Not implemented') }
   async saveJournalEntry (_entry: JournalInput): Promise<void> { throw new Error('Not implemented') }
-  async updateJournalStatus (_intentId: string, _status: JournalStatus, _txHash?: string): Promise<void> { throw new Error('Not implemented') }
+  async updateJournalStatus (_intentHash: string, _status: JournalStatus, _txHash?: string): Promise<void> { throw new Error('Not implemented') }
   async listJournal (_opts: JournalQueryOpts): Promise<StoredJournal[]> { throw new Error('Not implemented') }
 
   // --- Lifecycle ---

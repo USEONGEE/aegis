@@ -55,3 +55,17 @@ export class ReplayError extends Error {
     this.name = 'ReplayError'
   }
 }
+
+export class WalletNotFoundError extends Error {
+  constructor (accountIndex: number) {
+    super(`Wallet not found: accountIndex ${accountIndex}`)
+    this.name = 'WalletNotFoundError'
+  }
+}
+
+export class NoMasterSeedError extends Error {
+  constructor () {
+    super('No master seed configured. Run initial setup first.')
+    this.name = 'NoMasterSeedError'
+  }
+}

@@ -2,7 +2,7 @@ import { createGuardedWDK } from '../src/guarded-wdk-factory.js'
 import { SignedApprovalBroker } from '../src/signed-approval-broker.js'
 import { permissionsToDict } from '../src/guarded-middleware.js'
 import { ApprovalStore } from '../src/approval-store.js'
-import type { HistoryEntry, HistoryQueryOpts, ApprovalRequest, StoredSeed } from '../src/approval-store.js'
+import type { HistoryEntry, HistoryQueryOpts, ApprovalRequest, PolicyInput, PendingApprovalRequest } from '../src/approval-store.js'
 
 // Mock WDK and WalletManager
 class MockWalletManager {
@@ -56,12 +56,13 @@ class MockApprovalStore extends ApprovalStore {
 
   override async init () {}
   override async dispose () {}
-  override async loadPolicy (seedId: string, chain: string) { return (this._policies[`${seedId}:${chain}`] || null) as never }
-  override async savePolicy (seedId: string, chain: string, policy: unknown) { this._policies[`${seedId}:${chain}`] = policy }
-  override async getPolicyVersion (_seedId: string, _chain: string) { return 0 }
-  override async loadPending (_seedId: string | null, _type: string | null, _chain: string | null) { return this._pending as never }
-  override async savePending (_seedId: string, request: ApprovalRequest) { this._pending.push(request as ApprovalRequest & Record<string, unknown>) }
-  override async removePending (requestId: string) { this._pending = this._pending.filter(p => p.requestId !== requestId) }
+  override async listWallets () { return [] }
+  override async loadPolicy (accountIndex: number, chainId: number) { return (this._policies[`${accountIndex}:${chainId}`] || null) as never }
+  override async savePolicy (accountIndex: number, chainId: number, input: PolicyInput) { this._policies[`${accountIndex}:${chainId}`] = { ...input, policiesJson: JSON.stringify(input.policies), accountIndex, chainId, policyVersion: 0, updatedAt: Date.now() } }
+  override async getPolicyVersion (_accountIndex: number, _chainId: number) { return 0 }
+  override async loadPendingApprovals (_accountIndex: number | null, _type: string | null, _chainId: number | null) { return this._pending as unknown as PendingApprovalRequest[] }
+  override async savePendingApproval (_accountIndex: number, request: ApprovalRequest) { this._pending.push(request as ApprovalRequest & Record<string, unknown>) }
+  override async removePendingApproval (requestId: string) { this._pending = this._pending.filter(p => p.requestId !== requestId) }
   override async appendHistory (entry: HistoryEntry) { this._history.push(entry) }
   override async getHistory (_opts?: HistoryQueryOpts) { return this._history as HistoryEntry[] }
   override async isSignerRevoked (_signerId: string) { return false }
@@ -213,7 +214,6 @@ describe('createGuardedWDK', () => {
 
   test('updatePolicies persists to store', async () => {
     const store = new MockApprovalStore()
-    const seed = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about'
     const facade = await createGuardedWDK(makeConfig({ approvalStore: store }))
 
     const newPolicies = {
@@ -221,19 +221,19 @@ describe('createGuardedWDK', () => {
     }
     await facade.updatePolicies(1, newPolicies)
 
-    const saved = await store.loadPolicy(seed, 1) as Record<string, unknown>
-    expect((saved as Record<string, unknown>).policies).toEqual(newPolicies.policies)
+    const saved = await store.loadPolicy(0, 1) as Record<string, unknown>
+    expect(JSON.parse(saved.policiesJson as string)).toEqual(newPolicies.policies)
   })
 
   test('loads policies from store on init', async () => {
     const store = new MockApprovalStore()
-    const seed = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about'
-    await store.savePolicy(seed, 1, {
-      policies: [{ type: 'call', permissions: permissionsToDict([{ decision: 'AUTO' as const }]) }]
+    await store.savePolicy(0, 1, {
+      policies: [{ type: 'call', permissions: permissionsToDict([{ decision: 'AUTO' as const }]) }],
+      signature: {}
     })
 
     // Create without explicit policies -- should load from store
-    const facade = await createGuardedWDK(makeConfig({ policies: undefined }))
+    const facade = await createGuardedWDK(makeConfig({ approvalStore: store, policies: undefined }))
 
     // Facade created successfully with store-loaded policies
     expect(typeof facade.getAccount).toBe('function')
@@ -241,15 +241,15 @@ describe('createGuardedWDK', () => {
 
   test('store policies take precedence over config.policies', async () => {
     const store = new MockApprovalStore()
-    const seed = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about'
 
     // Pre-populate store with AUTO policy for chain 1
     const storePolicies = {
       policies: [{ type: 'call', permissions: permissionsToDict([
         { target: '0x1234567890abcdef1234567890abcdef12345678', selector: '0x573ade81', decision: 'AUTO' as const }
-      ]) }]
+      ]) }],
+      signature: {}
     }
-    await store.savePolicy(seed, 1, storePolicies)
+    await store.savePolicy(0, 1, storePolicies)
 
     // Config provides REJECT policy for chain 1 -- should be ignored because store has chain 1
     const configPolicies = {
@@ -269,7 +269,7 @@ describe('createGuardedWDK', () => {
     }))
 
     // Verify store policy (AUTO) was used, not config policy (REJECT)
-    const savedInStore = await store.loadPolicy(seed, 1) as Record<string, unknown>
+    const savedInStore = await store.loadPolicy(0, 1) as Record<string, unknown>
     expect(savedInStore).not.toBeNull()
     // Facade should work (store policy loaded)
     expect(typeof facade.getAccount).toBe('function')
@@ -277,14 +277,13 @@ describe('createGuardedWDK', () => {
 
   test('write-through: updatePolicies persists to store before updating memory', async () => {
     const store = new MockApprovalStore()
-    const seed = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about'
 
     // Track call order
     const callOrder: string[] = []
     const originalSave = store.savePolicy.bind(store)
-    store.savePolicy = async (seedId: string, chain: string, policy: unknown) => {
+    store.savePolicy = async (accountIndex: number, chainId: number, input: PolicyInput) => {
       callOrder.push('store.savePolicy')
-      return originalSave(seedId, chain, policy)
+      return originalSave(accountIndex, chainId, input)
     }
 
     const facade = await createGuardedWDK(makeConfig({ approvalStore: store }))
@@ -299,8 +298,8 @@ describe('createGuardedWDK', () => {
     expect(callOrder).toContain('store.savePolicy')
 
     // Verify the policy was actually saved in the store
-    const saved = await store.loadPolicy(seed, 1) as Record<string, unknown>
-    expect((saved as Record<string, unknown>).policies).toEqual(newPolicies.policies)
+    const saved = await store.loadPolicy(0, 1) as Record<string, unknown>
+    expect(JSON.parse(saved.policiesJson as string)).toEqual(newPolicies.policies)
   })
 
   test('config.policies used as fallback when store has no policy for chain', async () => {
