@@ -95,6 +95,10 @@ export class SignedApprovalBroker {
     }
 
     // Type-specific post-processing
+    // NOTE: domain operations (createWallet, deleteWallet, revokeSigner) are
+    // intentionally inside the broker, not delegated to the caller.
+    // This guarantees that these operations can only execute after
+    // verifyApproval() passes — making unapproved execution structurally impossible.
     switch (type) {
       case 'tx': {
         // Resolve waiting tx promise

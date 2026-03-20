@@ -1,6 +1,6 @@
 import { jest } from '@jest/globals'
 import { EventEmitter } from 'node:events'
-import { createGuardedMiddleware, evaluatePolicy, validatePolicies, permissionsToDict, type ChainPolicies } from '../src/guarded-middleware.js'
+import { createGuardedMiddleware, evaluatePolicy, validatePolicies, permissionsToDict } from '../src/guarded-middleware.js'
 import { SignedApprovalBroker } from '../src/signed-approval-broker.js'
 import { ApprovalStore } from '../src/approval-store.js'
 import type { HistoryEntry, HistoryQueryOpts, ApprovalRequest, PolicyInput, PendingApprovalRequest } from '../src/approval-store.js'
@@ -73,39 +73,35 @@ function createMockAccount (): MockAccount {
   }
 }
 
-function makePolicies () {
-  return {
-    1: {
-      policies: [
-        { type: 'timestamp' as const, validAfter: 1000000000, validUntil: 2000000000 },
+function makePolicyArr () {
+  return [
+    { type: 'timestamp' as const, validAfter: 1000000000, validUntil: 2000000000 },
+    {
+      type: 'call' as const,
+      permissions: permissionsToDict([
         {
-          type: 'call' as const,
-          permissions: permissionsToDict([
-            {
-              target: aavePool,
-              selector: repaySelector,
-              args: { 1: { condition: 'LTE' as const, value: '1000' } },
-              decision: 'AUTO' as const
-            },
-            {
-              target: aavePool,
-              selector: repaySelector,
-              decision: 'REQUIRE_APPROVAL' as const
-            },
-            {
-              target: usdcAddr,
-              selector: approveSelector,
-              args: {
-                0: { condition: 'EQ' as const, value: aavePool },
-                1: { condition: 'LTE' as const, value: '5000' }
-              },
-              decision: 'AUTO' as const
-            }
-          ])
+          target: aavePool,
+          selector: repaySelector,
+          args: { 1: { condition: 'LTE' as const, value: '1000' } },
+          decision: 'AUTO' as const
+        },
+        {
+          target: aavePool,
+          selector: repaySelector,
+          decision: 'REQUIRE_APPROVAL' as const
+        },
+        {
+          target: usdcAddr,
+          selector: approveSelector,
+          args: {
+            0: { condition: 'EQ' as const, value: aavePool },
+            1: { condition: 'LTE' as const, value: '5000' }
+          },
+          decision: 'AUTO' as const
         }
-      ]
+      ])
     }
-  }
+  ]
 }
 
 function makeRepayTx (amount: number | bigint) {
@@ -156,8 +152,7 @@ describe('Integration: Guarded Middleware', () => {
   let account: MockAccount
   let emitter: EventEmitter
   let broker: SignedApprovalBroker
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let policies: any
+  let policyArr: any
   let store: MockApprovalStore
   let keyPair: KeyPair
 
@@ -167,7 +162,7 @@ describe('Integration: Guarded Middleware', () => {
     store = new MockApprovalStore()
     keyPair = generateKeyPair()
     broker = new SignedApprovalBroker([keyPair.publicKey], store, emitter)
-    policies = makePolicies()
+    policyArr = makePolicyArr()
   })
 
   afterEach(() => {
@@ -176,11 +171,11 @@ describe('Integration: Guarded Middleware', () => {
 
   async function applyMiddleware () {
     const middleware = createGuardedMiddleware({
-      policiesRef: () => policies,
+      policyResolver: async () => policyArr,
       approvalBroker: broker,
       emitter,
       chainId: 1,
-      accountIndexRef: () => 0
+      getAccountIndex: () => 0
     })
     await middleware(account as never)
   }
@@ -389,7 +384,7 @@ describe('Integration: Guarded Middleware', () => {
     expect(signApprovalEvt?.context).not.toBeNull()
   })
 
-  test('updatePolicies snapshot: old policy preserved for in-flight', async () => {
+  test('policy change at runtime: resolver returns new policies', async () => {
     await applyMiddleware()
 
     // First call: repay 500 -> AUTO
@@ -397,10 +392,39 @@ describe('Integration: Guarded Middleware', () => {
     const result = await account.sendTransaction(tx)
     expect(result.hash).toBe('0xhash123')
 
-    // Update policies to reject everything
-    policies[1] = { policies: [{ type: 'call' as const, permissions: {} }] }
+    // Change policyArr to reject everything
+    policyArr.length = 0
+    policyArr.push({ type: 'call' as const, permissions: {} })
 
     // Next call should REJECT
+    await expect(account.sendTransaction(tx)).rejects.toThrow(PolicyRejectionError)
+  })
+
+  test('wallet-specific policy: different accountIndex uses different policies (F15/E4)', async () => {
+    // Set up: two different policy sets based on accountIndex
+    let activeAccountIndex = 0
+    const wallet0Policies = makePolicyArr() // AUTO for repay ≤ 10000
+    const wallet1Policies: Policy[] = [{ type: 'call' as const, permissions: {} }] // REJECT everything
+
+    const middleware = createGuardedMiddleware({
+      policyResolver: async () => {
+        return activeAccountIndex === 0 ? wallet0Policies : wallet1Policies
+      },
+      approvalBroker: broker,
+      emitter,
+      chainId: 1,
+      getAccountIndex: () => activeAccountIndex
+    })
+    await middleware(account as never)
+
+    // Account 0: repay 500 -> AUTO (allowed by wallet0Policies)
+    activeAccountIndex = 0
+    const tx = makeRepayTx(500)
+    const result = await account.sendTransaction(tx)
+    expect(result.hash).toBe('0xhash123')
+
+    // Switch to account 1: repay 500 -> REJECT (wallet1Policies has no permissions)
+    activeAccountIndex = 1
     await expect(account.sendTransaction(tx)).rejects.toThrow(PolicyRejectionError)
   })
 })

@@ -1,7 +1,7 @@
 import { EventEmitter } from 'node:events'
 import WDK from '@tetherto/wdk'
 import { createGuardedMiddleware, validatePolicies } from './guarded-middleware.js'
-import type { Policy, ChainPolicies } from './guarded-middleware.js'
+import type { Policy } from './guarded-middleware.js'
 import { SignedApprovalBroker } from './signed-approval-broker.js'
 import type { ApprovalStore } from './approval-store.js'
 
@@ -27,9 +27,8 @@ interface GuardedWDKConfig {
   seed: string
   wallets?: Record<string, WalletConfig>
   protocols?: Record<string, ProtocolEntry[]>
-  policies?: Record<string, { policies: unknown[] } & Record<string, unknown>>
   approvalBroker?: SignedApprovalBroker
-  approvalStore?: ApprovalStore
+  approvalStore: ApprovalStore
   trustedApprovers?: string[]
 }
 
@@ -37,16 +36,11 @@ interface GuardedWDKFacade {
   getAccount (chain: string, index?: number): Promise<unknown>
   getAccountByPath (chain: string, path: string): Promise<unknown>
   getFeeRates (chain: string): Promise<unknown>
-  updatePolicies (chainId: number, newPolicies: { policies: unknown[] } & Record<string, unknown>, accountIndex?: number): Promise<void>
   getApprovalBroker (): SignedApprovalBroker
-  getApprovalStore (): ApprovalStore | null
+  getApprovalStore (): ApprovalStore
   on (type: string, handler: (...args: unknown[]) => void): void
   off (type: string, handler: (...args: unknown[]) => void): void
   dispose (): void
-}
-
-function deepCopy<T> (obj: T): T {
-  return JSON.parse(JSON.stringify(obj))
 }
 
 export async function createGuardedWDK (config: GuardedWDKConfig): Promise<GuardedWDKFacade> {
@@ -54,58 +48,31 @@ export async function createGuardedWDK (config: GuardedWDKConfig): Promise<Guard
     seed,
     wallets,
     protocols,
-    policies,
     approvalBroker: externalBroker,
     approvalStore,
     trustedApprovers
   } = config
 
-  const wdk = new WDK(seed) as InstanceType<typeof WDK> & Record<string, (...args: unknown[]) => unknown>
+  if (!approvalStore) {
+    throw new Error('approvalStore is required.')
+  }
+
+  const wdk: Record<string, (...args: any[]) => any> = new WDK(seed) as any
   const emitter = new EventEmitter()
 
-  // Create or use provided approval broker
+  await approvalStore.init()
+
   let approvalBroker: SignedApprovalBroker
   if (externalBroker) {
     approvalBroker = externalBroker
-  } else if (approvalStore) {
+  } else {
     if (!trustedApprovers || !Array.isArray(trustedApprovers) || trustedApprovers.length === 0) {
       throw new Error('trustedApprovers must be a non-empty array when approvalStore is provided.')
     }
-    await approvalStore.init()
     approvalBroker = new SignedApprovalBroker(trustedApprovers, approvalStore, emitter)
-  } else {
-    throw new Error('Either approvalBroker or approvalStore must be provided.')
   }
 
-  // Hydrate memory cache from store (store is source of truth).
-  // If store has policies for a chain, those take precedence over config.policies.
-  // config.policies is only used as fallback for chains not found in the store.
-  let policiesStore: Record<string, Record<string, unknown>> = {}
   let currentAccountIndex = 0
-
-  // 1. Start with config.policies as baseline (fallback)
-  if (policies) {
-    for (const [chainKey, policyConfig] of Object.entries(policies)) {
-      policiesStore[chainKey] = deepCopy(policyConfig) as Record<string, unknown>
-    }
-  }
-
-  // 2. Overlay with store-loaded policies (store takes precedence)
-  // Boot with accountIndex 0 as default. Runtime swap loads per-wallet from DB.
-  if (approvalStore) {
-    for (const chainKey of Object.keys(wallets || {})) {
-      const stored = await approvalStore.loadPolicy(0, Number(chainKey))
-      if (stored && stored.policies) {
-        policiesStore[chainKey] = deepCopy({ ...stored }) as Record<string, unknown>
-      }
-    }
-  }
-
-  for (const policyConfig of Object.values(policiesStore)) {
-    if (policyConfig.policies) {
-      validatePolicies(policyConfig.policies as Policy[])
-    }
-  }
 
   for (const [chainKey, wallet] of Object.entries(wallets || {})) {
     wdk.registerWallet(chainKey, wallet.Manager, wallet.config)
@@ -119,11 +86,16 @@ export async function createGuardedWDK (config: GuardedWDKConfig): Promise<Guard
 
   for (const chainKey of Object.keys(wallets || {})) {
     wdk.registerMiddleware(chainKey, createGuardedMiddleware({
-      policiesRef: () => policiesStore as ChainPolicies,
+      policyResolver: async (chainId: number) => {
+        const stored = await approvalStore.loadPolicy(currentAccountIndex, chainId)
+        if (!stored) return []
+        validatePolicies(stored.policies as Policy[])
+        return stored.policies as Policy[]
+      },
       approvalBroker,
       emitter,
       chainId: Number(chainKey),
-      accountIndexRef: () => currentAccountIndex
+      getAccountIndex: () => currentAccountIndex
     }))
   }
 
@@ -136,6 +108,12 @@ export async function createGuardedWDK (config: GuardedWDKConfig): Promise<Guard
     },
 
     async getAccountByPath (chain: string, path: string) {
+      // Parse accountIndex from BIP-44 path (m/44'/60'/N'/0/0)
+      const parts = path.split('/')
+      if (parts.length >= 4) {
+        const idx = parseInt(parts[3].replace("'", ''), 10)
+        if (!isNaN(idx)) currentAccountIndex = idx
+      }
       const account = await wdk.getAccountByPath(chain, path)
       Object.freeze(account)
       return account
@@ -145,35 +123,12 @@ export async function createGuardedWDK (config: GuardedWDKConfig): Promise<Guard
       return wdk.getFeeRates(chain)
     },
 
-    async updatePolicies (chainId: number, newPolicies: { policies: unknown[] } & Record<string, unknown>, acctIndex: number = 0) {
-      if (!newPolicies || typeof newPolicies !== 'object') {
-        throw new Error('newPolicies must be an object.')
-      }
-      if (!Array.isArray(newPolicies.policies)) {
-        throw new Error("newPolicies must have a 'policies' array.")
-      }
-      validatePolicies(newPolicies.policies as Policy[])
-
-      // Write-through: persist to store first, then update memory cache.
-      // If store write fails, memory is not updated (consistent state).
-      if (approvalStore) {
-        await approvalStore.savePolicy(acctIndex, chainId, {
-          policies: newPolicies.policies,
-          signature: (newPolicies as Record<string, unknown>).signature as Record<string, unknown> || {}
-        })
-      }
-      policiesStore = {
-        ...policiesStore,
-        [chainId]: deepCopy(newPolicies) as Record<string, unknown>
-      }
-    },
-
     getApprovalBroker () {
       return approvalBroker
     },
 
     getApprovalStore () {
-      return approvalStore || null
+      return approvalStore
     },
 
     on (type: string, handler: (...args: unknown[]) => void) {

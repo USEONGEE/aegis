@@ -6,7 +6,7 @@ import type { EventEmitter } from 'node:events'
 
 // --- Policy types ---
 
-type Decision = 'AUTO' | 'REQUIRE_APPROVAL' | 'REJECT'
+export type Decision = 'AUTO' | 'REQUIRE_APPROVAL' | 'REJECT'
 
 export interface ArgCondition {
   condition: 'EQ' | 'NEQ' | 'GT' | 'GTE' | 'LT' | 'LTE' | 'ONE_OF' | 'NOT_ONE_OF'
@@ -38,13 +38,6 @@ export interface TimestampPolicy {
 }
 
 export type Policy = CallPolicy | TimestampPolicy
-
-export interface ChainPolicyConfig {
-  policies: Policy[]
-  [key: string]: unknown
-}
-
-export type ChainPolicies = Record<number, ChainPolicyConfig>
 
 interface Transaction {
   to?: string
@@ -113,11 +106,11 @@ export interface EvaluationResult {
 }
 
 interface MiddlewareConfig {
-  policiesRef: () => ChainPolicies
+  policyResolver: (chainId: number) => Promise<Policy[]>
   approvalBroker: SignedApprovalBroker
   emitter: EventEmitter
   chainId: number
-  accountIndexRef: () => number
+  getAccountIndex: () => number
 }
 
 function validatePolicy (policy: Policy): void {
@@ -226,13 +219,10 @@ function matchArgs (data: string, argConditions: Record<string, ArgCondition>): 
   return failures
 }
 
-export function evaluatePolicy (chainPolicies: ChainPolicies, chainId: number, tx: Transaction): EvaluationResult {
-  const config = chainPolicies[chainId]
-  if (!config || !config.policies) {
+export function evaluatePolicy (policies: Policy[], chainId: number, tx: Transaction): EvaluationResult {
+  if (!policies || policies.length === 0) {
     return { decision: 'REJECT', matchedPermission: null, reason: 'no policies for chain', context: null }
   }
-
-  const { policies } = config
 
   for (const policy of policies) {
     if (policy.type === 'timestamp') {
@@ -246,7 +236,7 @@ export function evaluatePolicy (chainPolicies: ChainPolicies, chainId: number, t
     }
   }
 
-  const callPolicy = (policies as Policy[]).find((p): p is CallPolicy => p.type === 'call')
+  const callPolicy = policies.find((p): p is CallPolicy => p.type === 'call')
   if (!callPolicy) {
     return { decision: 'REJECT', matchedPermission: null, reason: 'no call policy', context: null }
   }
@@ -337,7 +327,7 @@ async function pollReceipt (account: GuardedAccount, hash: string, emitter: Even
   }
 }
 
-export function createGuardedMiddleware ({ policiesRef, approvalBroker, emitter, chainId, accountIndexRef }: MiddlewareConfig): (account: GuardedAccount) => Promise<void> {
+export function createGuardedMiddleware ({ policyResolver, approvalBroker, emitter, chainId, getAccountIndex }: MiddlewareConfig): (account: GuardedAccount) => Promise<void> {
   return async (account: GuardedAccount) => {
     const rawSendTransaction = account.sendTransaction.bind(account)
     const rawTransfer = account.transfer.bind(account)
@@ -357,7 +347,7 @@ export function createGuardedMiddleware ({ policiesRef, approvalBroker, emitter,
     })
 
     account.sendTransaction = async (tx: Transaction): Promise<TransactionResult> => {
-      const policies = policiesRef()
+      const policyArr = await policyResolver(chainId)
       const requestId = randomUUID()
 
       emitter.emit('IntentProposed', {
@@ -368,7 +358,7 @@ export function createGuardedMiddleware ({ policiesRef, approvalBroker, emitter,
         timestamp: Date.now()
       })
 
-      const { decision, matchedPermission, reason, context } = evaluatePolicy(policies, chainId, tx)
+      const { decision, matchedPermission, reason, context } = evaluatePolicy(policyArr, chainId, tx)
 
       emitter.emit('PolicyEvaluated', {
         type: 'PolicyEvaluated',
@@ -407,7 +397,7 @@ export function createGuardedMiddleware ({ policiesRef, approvalBroker, emitter,
           requestId,
           chainId,
           targetHash,
-          accountIndex: accountIndexRef(),
+          accountIndex: getAccountIndex(),
           content: `Transaction to ${tx.to?.slice(0, 10)}...`
         })
 
@@ -452,6 +442,9 @@ export function createGuardedMiddleware ({ policiesRef, approvalBroker, emitter,
       const value = options.token ? 0 : options.amount
       const mockTx: Transaction = { to, value, data: '0x' }
 
+      // TODO: ERC-20 calldata encoding is protocol knowledge that doesn't belong
+      // in middleware. Caller (daemon tool-surface) should construct the tx and
+      // use sendTransaction instead. Remove transfer override when that's done.
       if (options.token) {
         const iface = '0xa9059cbb'
         const recipient = (options.recipient || '').replace('0x', '').padStart(64, '0')
@@ -461,7 +454,7 @@ export function createGuardedMiddleware ({ policiesRef, approvalBroker, emitter,
         mockTx.value = 0
       }
 
-      const policies = policiesRef()
+      const policyArr = await policyResolver(chainId)
       const requestId = randomUUID()
 
       emitter.emit('IntentProposed', {
@@ -472,7 +465,7 @@ export function createGuardedMiddleware ({ policiesRef, approvalBroker, emitter,
         timestamp: Date.now()
       })
 
-      const { decision, matchedPermission, reason, context } = evaluatePolicy(policies, chainId, mockTx)
+      const { decision, matchedPermission, reason, context } = evaluatePolicy(policyArr, chainId, mockTx)
 
       emitter.emit('PolicyEvaluated', {
         type: 'PolicyEvaluated',
@@ -511,7 +504,7 @@ export function createGuardedMiddleware ({ policiesRef, approvalBroker, emitter,
           requestId,
           chainId,
           targetHash,
-          accountIndex: accountIndexRef(),
+          accountIndex: getAccountIndex(),
           content: `Transfer to ${mockTx.to?.slice(0, 10)}...`
         })
 
@@ -552,7 +545,7 @@ export function createGuardedMiddleware ({ policiesRef, approvalBroker, emitter,
     }
 
     account.signTransaction = async (tx: Transaction): Promise<SignTransactionResult> => {
-      const policies = policiesRef()
+      const policyArr = await policyResolver(chainId)
       const requestId = randomUUID()
 
       emitter.emit('IntentProposed', {
@@ -563,7 +556,7 @@ export function createGuardedMiddleware ({ policiesRef, approvalBroker, emitter,
         timestamp: Date.now()
       })
 
-      const { decision, matchedPermission, reason, context } = evaluatePolicy(policies, chainId, tx)
+      const { decision, matchedPermission, reason, context } = evaluatePolicy(policyArr, chainId, tx)
 
       emitter.emit('PolicyEvaluated', {
         type: 'PolicyEvaluated',
@@ -602,7 +595,7 @@ export function createGuardedMiddleware ({ policiesRef, approvalBroker, emitter,
           requestId,
           chainId,
           targetHash,
-          accountIndex: accountIndexRef(),
+          accountIndex: getAccountIndex(),
           content: `Transaction to ${tx.to?.slice(0, 10)}...`
         })
 

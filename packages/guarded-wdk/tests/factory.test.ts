@@ -71,24 +71,10 @@ class MockApprovalStore extends ApprovalStore {
   override async updateNonce (approver: string, signerId: string, nonce: number) { this._nonces[`${approver}:${signerId}`] = nonce }
 }
 
-const validPolicies = {
-  1: {
-    policies: [
-      {
-        type: 'call' as const,
-        permissions: permissionsToDict([
-          { target: '0x1234567890abcdef1234567890abcdef12345678', selector: '0x573ade81', decision: 'AUTO' as const }
-        ])
-      }
-    ]
-  }
-}
-
 function makeConfig (overrides: Record<string, unknown> = {}) {
   return {
     seed: 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about',
     wallets: { 1: { Manager: MockWalletManager, config: {} } },
-    policies: validPolicies,
     approvalStore: new MockApprovalStore(),
     trustedApprovers: ['0x' + 'ab'.repeat(32)],
     ...overrides
@@ -102,7 +88,6 @@ describe('createGuardedWDK', () => {
     expect(typeof facade.getAccount).toBe('function')
     expect(typeof facade.getAccountByPath).toBe('function')
     expect(typeof facade.getFeeRates).toBe('function')
-    expect(typeof facade.updatePolicies).toBe('function')
     expect(typeof facade.getApprovalBroker).toBe('function')
     expect(typeof facade.getApprovalStore).toBe('function')
     expect(typeof facade.on).toBe('function')
@@ -126,54 +111,6 @@ describe('createGuardedWDK', () => {
     expect(Object.isFrozen(account)).toBe(true)
   })
 
-  test('F19: updatePolicies changes policy', async () => {
-    const facade = await createGuardedWDK(makeConfig({
-      policies: { 1: { policies: [{ type: 'call', permissions: {} }] } }
-    }))
-
-    await facade.updatePolicies(1, {
-      policies: [
-        {
-          type: 'call',
-          permissions: permissionsToDict([
-            { target: '0x1234567890abcdef1234567890abcdef12345678', selector: '0x573ade81', decision: 'AUTO' }
-          ])
-        }
-      ]
-    })
-
-    expect(true).toBe(true)
-  })
-
-  test('F20: updatePolicies is immutable snapshot', async () => {
-    const facade = await createGuardedWDK(makeConfig())
-
-    const mutablePolicies = {
-      policies: [{ type: 'call', permissions: permissionsToDict([{ decision: 'AUTO' as const }]) }]
-    }
-    await facade.updatePolicies(1, mutablePolicies)
-
-    // Mutate the external object
-    const targets = Object.keys(mutablePolicies.policies[0].permissions)
-    if (targets.length > 0) {
-      const selectors = Object.keys(mutablePolicies.policies[0].permissions[targets[0]])
-      if (selectors.length > 0) {
-        mutablePolicies.policies[0].permissions[targets[0]][selectors[0]][0].decision = 'REJECT'
-      }
-    }
-
-    // Internal should not be affected
-    expect(true).toBe(true)
-  })
-
-  test('E10: updatePolicies rejects malformed policy', async () => {
-    const facade = await createGuardedWDK(makeConfig())
-
-    await expect(facade.updatePolicies(1, {} as never)).rejects.toThrow('policies')
-    await expect(facade.updatePolicies(1, { policies: [{ type: 'unknown' }] })).rejects.toThrow('Unsupported')
-    await expect(facade.updatePolicies(1, null as never)).rejects.toThrow()
-  })
-
   test('getApprovalBroker returns SignedApprovalBroker instance', async () => {
     const facade = await createGuardedWDK(makeConfig())
     const broker = facade.getApprovalBroker()
@@ -191,139 +128,103 @@ describe('createGuardedWDK', () => {
     const externalBroker = new SignedApprovalBroker(['0x' + 'ab'.repeat(32)], store)
     const facade = await createGuardedWDK(makeConfig({
       approvalBroker: externalBroker,
-      approvalStore: undefined,
       trustedApprovers: undefined
     }))
     expect(facade.getApprovalBroker()).toBe(externalBroker)
-    expect(facade.getApprovalStore()).toBeNull()
+    expect(facade.getApprovalStore()).toBeInstanceOf(MockApprovalStore)
   })
 
-  test('throws if neither approvalBroker nor approvalStore provided', async () => {
+  test('throws if approvalStore not provided', async () => {
     await expect(createGuardedWDK(makeConfig({
-      approvalBroker: undefined,
-      approvalStore: undefined,
-      trustedApprovers: undefined
-    }))).rejects.toThrow('Either approvalBroker or approvalStore must be provided.')
+      approvalStore: undefined
+    }) as any)).rejects.toThrow('approvalStore is required.')
   })
 
-  test('throws if approvalStore without trustedApprovers', async () => {
+  test('throws if approvalStore without trustedApprovers and no external broker', async () => {
     await expect(createGuardedWDK(makeConfig({
       trustedApprovers: undefined
     }))).rejects.toThrow('trustedApprovers must be a non-empty array')
   })
 
-  test('updatePolicies persists to store', async () => {
-    const store = new MockApprovalStore()
-    const facade = await createGuardedWDK(makeConfig({ approvalStore: store }))
-
-    const newPolicies = {
-      policies: [{ type: 'call', permissions: permissionsToDict([{ decision: 'AUTO' as const }]) }]
-    }
-    await facade.updatePolicies(1, newPolicies)
-
-    const saved = await store.loadPolicy(0, 1) as Record<string, unknown>
-    expect(saved.policies).toEqual(newPolicies.policies)
-  })
-
-  test('loads policies from store on init', async () => {
+  test('policyResolver reads from store at runtime', async () => {
     const store = new MockApprovalStore()
     await store.savePolicy(0, 1, {
       policies: [{ type: 'call', permissions: permissionsToDict([{ decision: 'AUTO' as const }]) }],
       signature: {}
     })
 
-    // Create without explicit policies -- should load from store
-    const facade = await createGuardedWDK(makeConfig({ approvalStore: store, policies: undefined }))
-
-    // Facade created successfully with store-loaded policies
+    const facade = await createGuardedWDK(makeConfig({ approvalStore: store }))
     expect(typeof facade.getAccount).toBe('function')
   })
 
-  test('store policies take precedence over config.policies', async () => {
-    const store = new MockApprovalStore()
+  test('facade does not expose updatePolicies', async () => {
+    const facade = await createGuardedWDK(makeConfig())
+    expect((facade as unknown as Record<string, unknown>).updatePolicies).toBeUndefined()
+  })
 
-    // Pre-populate store with AUTO policy for chain 1
-    const storePolicies = {
-      policies: [{ type: 'call', permissions: permissionsToDict([
-        { target: '0x1234567890abcdef1234567890abcdef12345678', selector: '0x573ade81', decision: 'AUTO' as const }
-      ]) }],
+  test('getAccount switches currentAccountIndex: sendTransaction uses correct wallet policy (F15/E4)', async () => {
+    const store = new MockApprovalStore()
+    // Account 0: AUTO for all calls
+    await store.savePolicy(0, 1, {
+      policies: [{ type: 'call', permissions: permissionsToDict([{ decision: 'AUTO' as const }]) }],
       signature: {}
-    }
-    await store.savePolicy(0, 1, storePolicies)
-
-    // Config provides REJECT policy for chain 1 -- should be ignored because store has chain 1
-    const configPolicies = {
-      1: {
-        policies: [{
-          type: 'call' as const,
-          permissions: permissionsToDict([
-            { target: '0x1234567890abcdef1234567890abcdef12345678', selector: '0x573ade81', decision: 'REJECT' as const }
-          ])
-        }]
-      }
-    }
-
-    const facade = await createGuardedWDK(makeConfig({
-      approvalStore: store,
-      policies: configPolicies
-    }))
-
-    // Verify store policy (AUTO) was used, not config policy (REJECT)
-    const savedInStore = await store.loadPolicy(0, 1) as Record<string, unknown>
-    expect(savedInStore).not.toBeNull()
-    // Facade should work (store policy loaded)
-    expect(typeof facade.getAccount).toBe('function')
-  })
-
-  test('write-through: updatePolicies persists to store before updating memory', async () => {
-    const store = new MockApprovalStore()
-
-    // Track call order
-    const callOrder: string[] = []
-    const originalSave = store.savePolicy.bind(store)
-    store.savePolicy = async (accountIndex: number, chainId: number, input: PolicyInput) => {
-      callOrder.push('store.savePolicy')
-      return originalSave(accountIndex, chainId, input)
-    }
+    })
+    // Account 1: empty permissions → REJECT
+    await store.savePolicy(1, 1, {
+      policies: [{ type: 'call', permissions: {} }],
+      signature: {}
+    })
 
     const facade = await createGuardedWDK(makeConfig({ approvalStore: store }))
-    callOrder.length = 0 // Reset after init
 
-    const newPolicies = {
-      policies: [{ type: 'call', permissions: permissionsToDict([{ decision: 'AUTO' as const }]) }]
+    // Spy on loadPolicy to verify accountIndex
+    const origLoadPolicy = store.loadPolicy.bind(store)
+    const loadPolicyCalls: Array<[number, number]> = []
+    store.loadPolicy = async (accountIndex: number, chainId: number) => {
+      loadPolicyCalls.push([accountIndex, chainId])
+      return origLoadPolicy(accountIndex, chainId)
     }
-    await facade.updatePolicies(1, newPolicies)
 
-    // Verify store.savePolicy was called
-    expect(callOrder).toContain('store.savePolicy')
+    // getAccount with index 0 → AUTO policy
+    const account0 = await facade.getAccount('1', 0) as { sendTransaction: (tx: Record<string, unknown>) => Promise<unknown> }
+    const tx = { to: '0xdead', data: '0x12345678', value: '0' }
+    await account0.sendTransaction(tx) // should succeed (AUTO)
 
-    // Verify the policy was actually saved in the store
-    const saved = await store.loadPolicy(0, 1) as Record<string, unknown>
-    expect(saved.policies).toEqual(newPolicies.policies)
+    // Verify loadPolicy was called with accountIndex=0
+    expect(loadPolicyCalls.some(c => c[0] === 0 && c[1] === 1)).toBe(true)
+
+    // Switch to account 1 → REJECT policy
+    loadPolicyCalls.length = 0
+    const account1 = await facade.getAccount('1', 1) as { sendTransaction: (tx: Record<string, unknown>) => Promise<unknown> }
+    await expect(account1.sendTransaction(tx)).rejects.toThrow() // should reject
+
+    // Verify loadPolicy was called with accountIndex=1
+    expect(loadPolicyCalls.some(c => c[0] === 1 && c[1] === 1)).toBe(true)
   })
 
-  test('config.policies used as fallback when store has no policy for chain', async () => {
+  test('getAccountByPath parses accountIndex from BIP-44 path and uses it for policy', async () => {
     const store = new MockApprovalStore()
+    // Account 2: AUTO policy
+    await store.savePolicy(2, 1, {
+      policies: [{ type: 'call', permissions: permissionsToDict([{ decision: 'AUTO' as const }]) }],
+      signature: {}
+    })
 
-    // Store has NO policies for chain 1
-    // Config provides policies for chain 1
-    const configPolicies = {
-      1: {
-        policies: [{
-          type: 'call' as const,
-          permissions: permissionsToDict([
-            { target: '0x1234567890abcdef1234567890abcdef12345678', selector: '0x573ade81', decision: 'AUTO' as const }
-          ])
-        }]
-      }
+    const facade = await createGuardedWDK(makeConfig({ approvalStore: store }))
+
+    const origLoadPolicy = store.loadPolicy.bind(store)
+    const loadPolicyCalls: Array<[number, number]> = []
+    store.loadPolicy = async (accountIndex: number, chainId: number) => {
+      loadPolicyCalls.push([accountIndex, chainId])
+      return origLoadPolicy(accountIndex, chainId)
     }
 
-    const facade = await createGuardedWDK(makeConfig({
-      approvalStore: store,
-      policies: configPolicies
-    }))
+    // getAccountByPath with accountIndex=2 path
+    const account = await facade.getAccountByPath('1', "m/44'/60'/2'/0/0") as { sendTransaction: (tx: Record<string, unknown>) => Promise<unknown> }
+    const tx = { to: '0xdead', data: '0x12345678', value: '0' }
+    await account.sendTransaction(tx)
 
-    // Facade created successfully with config fallback policies
-    expect(typeof facade.getAccount).toBe('function')
+    // Verify loadPolicy was called with accountIndex=2 (parsed from path)
+    expect(loadPolicyCalls.some(c => c[0] === 2 && c[1] === 1)).toBe(true)
   })
 })
