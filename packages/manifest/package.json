@@ -10,7 +10,8 @@
     "test": "node --experimental-vm-modules ../../node_modules/.bin/jest"
   },
   "dependencies": {
-    "@wdk-app/canonical": "0.1.0"
+    "@wdk-app/canonical": "0.1.0",
+    "@wdk-app/guarded-wdk": "0.0.1"
   },
   "devDependencies": {
     "jest": "^29.7.0",

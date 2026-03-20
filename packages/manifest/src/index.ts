@@ -9,12 +9,11 @@ export type {
   Approval,
   Constraint,
   ValidationResult,
-  UserConfig,
-  PolicyPermission,
-  ManifestRule,
-  ManifestArgCondition,
-  ManifestPermissionDict
+  UserConfig
 } from './types.js'
+
+// Policy types: re-exported from guarded-wdk via types.ts
+export type { ArgCondition, Rule, PermissionDict, Decision } from './types.js'
 
 // Examples
 export { aaveV3Manifest } from './examples/aave-v3.js'

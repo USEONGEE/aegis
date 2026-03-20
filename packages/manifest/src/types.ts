@@ -1,3 +1,6 @@
+import type { ArgCondition, Rule, PermissionDict, Decision } from '@wdk-app/guarded-wdk'
+export type { ArgCondition, Rule, PermissionDict, Decision }
+
 /**
  * Constraint type for features.
  */
@@ -95,59 +98,13 @@ export interface UserConfig {
   /** Feature IDs to enable (all if omitted) */
   features?: string[]
   /** Override decision for all generated rules */
-  decision?: 'AUTO' | 'REQUIRE_APPROVAL' | 'REJECT'
+  decision?: Decision
   /** Additional argument conditions */
   argsConditions?: Record<string, string>
   /** Token symbol -> address map */
   tokenAddresses?: Record<string, string>
   /** User wallet address */
   userAddress?: string
-}
-
-/**
- * A single WDK policy permission (flat format).
- * @deprecated Use ManifestPermissionDict / ManifestRule instead.
- * Kept for backward compatibility only.
- */
-export interface PolicyPermission {
-  type: string
-  target: string
-  selector: string
-  description: string
-  args?: Record<string, ManifestArgCondition>
-  valueLimit?: string | number
-  decision: 'AUTO' | 'REQUIRE_APPROVAL' | 'REJECT'
-}
-
-/**
- * Argument condition for a rule.
- * Identical to guarded-wdk ArgCondition.
- */
-export interface ManifestArgCondition {
-  condition: 'EQ' | 'NEQ' | 'GT' | 'GTE' | 'LT' | 'LTE' | 'ONE_OF' | 'NOT_ONE_OF'
-  value: string | string[]
-}
-
-/**
- * A single rule in a PermissionDict bucket.
- * Structurally identical to guarded-wdk Rule — output can be used directly
- * as CallPolicy.permissions without conversion.
- */
-export interface ManifestRule {
-  order: number
-  args?: Record<string, ManifestArgCondition>
-  valueLimit?: string | number
-  decision: 'AUTO' | 'REQUIRE_APPROVAL' | 'REJECT'
-}
-
-/**
- * Dictionary-based permission structure.
- * Structurally compatible with guarded-wdk PermissionDict.
- */
-export interface ManifestPermissionDict {
-  [target: string]: {
-    [selector: string]: ManifestRule[]
-  }
 }
 
 export const Types = {}

@@ -1,4 +1,5 @@
-import type { Manifest, UserConfig, Feature, ManifestPermissionDict, ManifestRule } from './types.js'
+import type { Manifest, UserConfig, Feature } from './types.js'
+import type { PermissionDict, Rule } from '@wdk-app/guarded-wdk'
 
 /** ERC-20 approve(address,uint256) selector */
 const APPROVE_SELECTOR = '0x095ea7b3'
@@ -21,7 +22,7 @@ export function manifestToPolicy(
   manifest: Manifest,
   chainId: number,
   userConfig: UserConfig = {}
-): ManifestPermissionDict {
+): PermissionDict {
   const chainConfig = manifest.chains[chainId]
   if (!chainConfig) return {}
 
@@ -37,7 +38,7 @@ export function manifestToPolicy(
     ? chainConfig.features.filter((f: Feature) => enabledFeatures.includes(f.id))
     : chainConfig.features
 
-  const dict: ManifestPermissionDict = {}
+  const dict: PermissionDict = {}
   let order = 0
 
   for (const feature of selectedFeatures) {
@@ -49,7 +50,7 @@ export function manifestToPolicy(
       if (!dict[address]) dict[address] = {}
       if (!dict[address][selector]) dict[address][selector] = []
 
-      const rule: ManifestRule = {
+      const rule: Rule = {
         order: order++,
         decision: decision || 'REQUIRE_APPROVAL'
       }
@@ -71,7 +72,7 @@ export function manifestToPolicy(
       if (!dict['*']) dict['*'] = {}
       if (!dict['*'][APPROVE_SELECTOR]) dict['*'][APPROVE_SELECTOR] = []
 
-      const rule: ManifestRule = {
+      const rule: Rule = {
         order: order++,
         decision: decision || 'REQUIRE_APPROVAL',
         args: {

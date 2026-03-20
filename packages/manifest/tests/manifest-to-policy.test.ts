@@ -1,6 +1,6 @@
 import { describe, test, expect } from '@jest/globals'
 import { manifestToPolicy, validateManifest } from '../src/index.js'
-import type { ManifestPermissionDict } from '../src/index.js'
+import type { PermissionDict } from '../src/index.js'
 import { aaveV3Manifest } from '../src/examples/aave-v3.js'
 
 const POOL_ADDRESS = '0x87870Bca3F3fD6335C3F4ce8392D69350B4fA4E2'.toLowerCase()
@@ -8,7 +8,7 @@ const APPROVE_SELECTOR = '0x095ea7b3'
 
 describe('manifestToPolicy', () => {
   test('Aave manifest -> PermissionDict contains correct target/selector buckets', () => {
-    const dict: ManifestPermissionDict = manifestToPolicy(aaveV3Manifest, 1)
+    const dict: PermissionDict = manifestToPolicy(aaveV3Manifest, 1)
 
     // supply call rule: pool/0x617ba037
     expect(dict[POOL_ADDRESS]).toBeDefined()
@@ -30,7 +30,7 @@ describe('manifestToPolicy', () => {
   })
 
   test('approve rules auto-generated from feature.approvals with spender constraint', () => {
-    const dict: ManifestPermissionDict = manifestToPolicy(aaveV3Manifest, 1)
+    const dict: PermissionDict = manifestToPolicy(aaveV3Manifest, 1)
 
     // Wildcard target with approve selector
     expect(dict['*']).toBeDefined()
@@ -50,7 +50,7 @@ describe('manifestToPolicy', () => {
   })
 
   test('features without approvals do not generate approve rules', () => {
-    const dict: ManifestPermissionDict = manifestToPolicy(aaveV3Manifest, 1, {
+    const dict: PermissionDict = manifestToPolicy(aaveV3Manifest, 1, {
       features: ['borrow']
     })
 
@@ -68,7 +68,7 @@ describe('manifestToPolicy', () => {
   })
 
   test('userConfig.features filters to specific features', () => {
-    const dict: ManifestPermissionDict = manifestToPolicy(aaveV3Manifest, 1, {
+    const dict: PermissionDict = manifestToPolicy(aaveV3Manifest, 1, {
       features: ['supply', 'repay']
     })
 
@@ -86,7 +86,7 @@ describe('manifestToPolicy', () => {
   })
 
   test('userConfig overrides decision', () => {
-    const dict: ManifestPermissionDict = manifestToPolicy(aaveV3Manifest, 1, {
+    const dict: PermissionDict = manifestToPolicy(aaveV3Manifest, 1, {
       features: ['supply'],
       decision: 'AUTO'
     })
@@ -99,7 +99,7 @@ describe('manifestToPolicy', () => {
   })
 
   test('userConfig overrides args conditions', () => {
-    const dict: ManifestPermissionDict = manifestToPolicy(aaveV3Manifest, 1, {
+    const dict: PermissionDict = manifestToPolicy(aaveV3Manifest, 1, {
       features: ['supply'],
       argsConditions: { maxValue: '1000000' }
     })
@@ -111,19 +111,19 @@ describe('manifestToPolicy', () => {
   })
 
   test('unknown chainId returns empty dict', () => {
-    const dict: ManifestPermissionDict = manifestToPolicy(aaveV3Manifest, 999)
+    const dict: PermissionDict = manifestToPolicy(aaveV3Manifest, 999)
     expect(dict).toEqual({})
   })
 
   test('empty features array returns empty dict', () => {
-    const dict: ManifestPermissionDict = manifestToPolicy(aaveV3Manifest, 1, {
+    const dict: PermissionDict = manifestToPolicy(aaveV3Manifest, 1, {
       features: []
     })
     expect(dict).toEqual({})
   })
 
   test('all features when userConfig.features is omitted', () => {
-    const dict: ManifestPermissionDict = manifestToPolicy(aaveV3Manifest, 1)
+    const dict: PermissionDict = manifestToPolicy(aaveV3Manifest, 1)
 
     // Count total rules across all buckets
     let totalRules = 0
@@ -142,7 +142,7 @@ describe('manifestToPolicy', () => {
   })
 
   test('rules have sequential order values', () => {
-    const dict: ManifestPermissionDict = manifestToPolicy(aaveV3Manifest, 1)
+    const dict: PermissionDict = manifestToPolicy(aaveV3Manifest, 1)
 
     // Collect all rules and verify order is sequential
     const allRules: Array<{ order: number }> = []
@@ -159,7 +159,7 @@ describe('manifestToPolicy', () => {
   })
 
   test('round-trip: output is structurally compatible with guarded-wdk CallPolicy', () => {
-    const dict: ManifestPermissionDict = manifestToPolicy(aaveV3Manifest, 1, {
+    const dict: PermissionDict = manifestToPolicy(aaveV3Manifest, 1, {
       features: ['supply'],
       decision: 'AUTO'
     })
