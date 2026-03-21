@@ -21,6 +21,7 @@ import { noCrossPackageImport } from './checks/cross/no-cross-package-import.js'
 import { noRequireImports } from './checks/cross/no-require-imports.js'
 import { packageExportsBoundary } from './checks/cross/package-exports-boundary.js'
 import { deadFiles } from './checks/cross/dead-files.js'
+import { deadExportsCheck } from './checks/cross/dead-exports.js'
 import { typescriptCompile } from './checks/cross/typescript-compile.js'
 
 export const checks: CheckEntry[] = [
@@ -114,6 +115,12 @@ export const checks: CheckEntry[] = [
     description: 'Detect .ts files not reachable from package entry points',
     group: 'cross',
     fn: deadFiles,
+  },
+  {
+    name: 'cross/dead-exports',
+    description: 'Detect exported symbols never imported anywhere in the project',
+    group: 'cross',
+    fn: deadExportsCheck,
   },
   // Phase 2: typescript-compile (외부 JS 라이브러리 타입 불일치 해소 필요)
   // {

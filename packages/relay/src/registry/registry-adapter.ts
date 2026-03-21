@@ -42,7 +42,7 @@ export interface CreateUserParams {
   passwordHash?: string | null  // null for OAuth users
 }
 
-export interface RegisterDeviceParams {
+export interface CreateDeviceParams {
   id: string
   userId: string
   type: 'daemon' | 'app'
@@ -90,6 +90,17 @@ export interface CreateRefreshTokenParams {
   expiresAt: Date
 }
 
+export interface CreateDaemonUserParams {
+  daemonId: string
+  userId: string
+}
+
+export interface CreateEnrollmentCodeParams {
+  code: string
+  daemonId: string
+  expiresAt: Date
+}
+
 export interface EnrollmentCodeRecord {
   code: string
   daemonId: string
@@ -117,7 +128,7 @@ export abstract class RegistryAdapter {
    * Devices
    * ----------------------------------------------------------------*/
 
-  abstract registerDevice (params: RegisterDeviceParams): Promise<DeviceRecord>
+  abstract createDevice (params: CreateDeviceParams): Promise<DeviceRecord>
 
   abstract getDevice (id: string): Promise<DeviceRecord | null>
 
@@ -149,7 +160,7 @@ export abstract class RegistryAdapter {
    * Daemon-User Binding
    * ----------------------------------------------------------------*/
 
-  abstract bindUser (daemonId: string, userId: string): Promise<DaemonUserRecord>
+  abstract bindUser (params: CreateDaemonUserParams): Promise<DaemonUserRecord>
 
   abstract unbindUsers (daemonId: string, userIds: string[]): Promise<string[]>
 
@@ -173,7 +184,7 @@ export abstract class RegistryAdapter {
    * Enrollment Codes
    * ----------------------------------------------------------------*/
 
-  abstract createEnrollmentCode (code: string, daemonId: string, expiresAt: Date): Promise<EnrollmentCodeRecord>
+  abstract createEnrollmentCode (params: CreateEnrollmentCodeParams): Promise<EnrollmentCodeRecord>
 
   abstract getEnrollmentCode (code: string): Promise<EnrollmentCodeRecord | null>
 

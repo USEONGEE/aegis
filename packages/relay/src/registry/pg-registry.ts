@@ -10,14 +10,16 @@ import type {
   SessionRecord,
   SessionListItem,
   CreateUserParams,
-  RegisterDeviceParams,
+  CreateDeviceParams,
   CreateSessionParams,
   DaemonRecord,
   CreateDaemonParams,
   DaemonUserRecord,
+  CreateDaemonUserParams,
   RefreshTokenRecord,
   CreateRefreshTokenParams,
-  EnrollmentCodeRecord
+  EnrollmentCodeRecord,
+  CreateEnrollmentCodeParams
 } from './registry-adapter.js'
 import config from '../config.js'
 
@@ -76,7 +78,7 @@ export class PgRegistry extends RegistryAdapter {
    * Devices
    * ----------------------------------------------------------------*/
 
-  async registerDevice ({ id, userId, type, pushToken }: RegisterDeviceParams): Promise<DeviceRecord> {
+  async createDevice ({ id, userId, type, pushToken }: CreateDeviceParams): Promise<DeviceRecord> {
     const { rows } = await this.pool.query(
       `INSERT INTO devices (id, user_id, type, push_token)
        VALUES ($1, $2, $3, $4)
@@ -184,7 +186,7 @@ export class PgRegistry extends RegistryAdapter {
    * Daemon-User Binding
    * ----------------------------------------------------------------*/
 
-  async bindUser (daemonId: string, userId: string): Promise<DaemonUserRecord> {
+  async bindUser ({ daemonId, userId }: CreateDaemonUserParams): Promise<DaemonUserRecord> {
     const { rows } = await this.pool.query(
       `INSERT INTO daemon_users (daemon_id, user_id)
        VALUES ($1, $2)
@@ -264,7 +266,7 @@ export class PgRegistry extends RegistryAdapter {
    * Enrollment Codes
    * ----------------------------------------------------------------*/
 
-  async createEnrollmentCode (code: string, daemonId: string, expiresAt: Date): Promise<EnrollmentCodeRecord> {
+  async createEnrollmentCode ({ code, daemonId, expiresAt }: CreateEnrollmentCodeParams): Promise<EnrollmentCodeRecord> {
     const { rows } = await this.pool.query(
       `INSERT INTO enrollment_codes (code, daemon_id, expires_at)
        VALUES ($1, $2, $3)

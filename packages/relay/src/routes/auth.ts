@@ -303,7 +303,7 @@ export default async function authRoutes (fastify: FastifyInstance): Promise<voi
     const userId = payload.sub
     const { deviceId, type, pushToken } = request.body
 
-    const device = await registry.registerDevice({
+    const device = await registry.createDevice({
       id: deviceId,
       userId,
       type,
@@ -440,7 +440,7 @@ export default async function authRoutes (fastify: FastifyInstance): Promise<voi
     const daemonId = payload.sub
     const code = generateEnrollmentCode()
     const expiresAt = new Date(Date.now() + 5 * 60 * 1000) // 5 minutes
-    await registry.createEnrollmentCode(code, daemonId, expiresAt)
+    await registry.createEnrollmentCode({ code, daemonId, expiresAt })
 
     return reply.send({ enrollmentCode: code, expiresIn: 300 })
   })
@@ -476,7 +476,7 @@ export default async function authRoutes (fastify: FastifyInstance): Promise<voi
 
     // Bind user to daemon
     try {
-      await registry.bindUser(enrollment.daemonId, userId)
+      await registry.bindUser({ daemonId: enrollment.daemonId, userId })
     } catch (err: any) {
       // UNIQUE violation → user already bound to another daemon
       if (err.code === '23505' || err.message?.includes('unique') || err.message?.includes('duplicate')) {
