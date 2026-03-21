@@ -88,6 +88,29 @@ AI DeFi Agent 서명 엔진 + 제어 인프라.
 - **Codex Session ID**: `/Users/mousebook/Documents/GitHub/WDK-APP/docs/phases/v0.2.11-daemon-type-infra-cleanup`
 - **시작일**: 2026-03-20
 
+### v0.3.0 — Relay Daemon Multiplex
+- **상태**: Step 1 - PRD
+- **문서**: [docs/phases/v0.3.0-relay-daemon-multiplex/](docs/phases/v0.3.0-relay-daemon-multiplex/)
+- **Codex Session ID**: `/Users/mousebook/Documents/GitHub/WDK-APP/docs/phases/v0.3.0-relay-daemon-multiplex`
+- **시작일**: 2026-03-21
+
+### v0.3.1 — App 채팅 UX 완성
+- **상태**: ✅ 완료 (아카이브)
+- **문서**: [docs/archive/v0.3.1-app-chat-ux/](docs/archive/v0.3.1-app-chat-ux/)
+- **시작일**: 2026-03-21
+
+### v0.3.2 — 프로토콜 타입 중복 제거 + 취소 API 분리
+- **상태**: ✅ 완료 (아카이브)
+- **문서**: [docs/phases/v0.3.2-protocol-dedup-cancel-split/](docs/phases/v0.3.2-protocol-dedup-cancel-split/)
+- **Codex Session ID**: `/Users/mousebook/Documents/GitHub/WDK-APP/docs/phases/v0.3.2-protocol-dedup-cancel-split`
+- **시작일**: 2026-03-21
+
+### v0.3.3 — Relay 오프라인 Cron 복구 통합
+- **상태**: Step 1 - PRD
+- **문서**: [docs/phases/v0.3.3-relay-offline-cron-recovery/](docs/phases/v0.3.3-relay-offline-cron-recovery/)
+- **Codex Session ID**: `/Users/mousebook/Documents/GitHub/WDK-APP/docs/phases/v0.3.3-relay-offline-cron-recovery`
+- **시작일**: 2026-03-21
+
 ## 프로젝트 구조
 
 ```
