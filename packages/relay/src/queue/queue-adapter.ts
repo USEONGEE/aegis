@@ -35,6 +35,15 @@ export abstract class QueueAdapter {
   }
 
   /**
+   * Read a range of entries from a stream (non-blocking).
+   * Uses XRANGE — returns entries between `start` and `end` (inclusive).
+   * Limited by `count` parameter (default 1000). Does NOT paginate beyond count.
+   */
+  async readRange (stream: string, start: string, end: string, count: number = 1000): Promise<StreamEntry[]> {
+    throw new Error('QueueAdapter.readRange() not implemented')
+  }
+
+  /**
    * Acknowledge that a message has been processed (consumer-group semantics).
    */
   async ack (stream: string, group: string, id: string): Promise<void> {

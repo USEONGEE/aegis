@@ -96,6 +96,23 @@ export class RedisQueue extends QueueAdapter {
   }
 
   /* ------------------------------------------------------------------
+   * readRange  (non-blocking XRANGE)
+   * ----------------------------------------------------------------*/
+
+  /**
+   * XRANGE — non-blocking read of entries between start and end (inclusive).
+   * Limited to `count` entries (default 1000). Does NOT paginate — intentional product limit for backfill.
+   */
+  async readRange (stream: string, start: string, end: string, count: number = 1000): Promise<StreamEntry[]> {
+    const result = await this.redis.xrange(stream, start, end, 'COUNT', count)
+    // result: [ [id, [f1,v1,f2,v2,...]], ... ]
+    return result.map(([id, fields]: [string, string[]]) => ({
+      id,
+      data: RedisQueue._fieldsToObject(fields),
+    }))
+  }
+
+  /* ------------------------------------------------------------------
    * ack  (consumer-group)
    * ----------------------------------------------------------------*/
 

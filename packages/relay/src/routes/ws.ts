@@ -288,11 +288,27 @@ export default async function wsRoutes (fastify: FastifyInstance): Promise<void>
         fastify.log.info({ userId }, 'App authenticated')
 
         pollControlForApp(userId, socket, controlCursor, ac.signal)
+
+        // Backfill known chat sessions for offline cron recovery (one-shot, non-blocking)
+        const chatCursors: Record<string, string> = msg.payload?.chatCursors ?? {}
+        for (const [sessionId, cursor] of Object.entries(chatCursors)) {
+          backfillChatStream(userId, sessionId, cursor, socket)
+        }
+
         return
       }
 
       if (!authenticated || !userId) {
         return send(socket, { type: 'error', message: 'Not authenticated' })
+      }
+
+      /* ---- subscribe_chat: one-shot backfill for newly discovered sessions ---- */
+      if (msg.type === 'subscribe_chat') {
+        const sessionId = msg.payload?.sessionId
+        if (sessionId && userId) {
+          backfillChatStream(userId, sessionId, '0', socket)
+        }
+        return
       }
 
       /* ---- heartbeat ---- */
@@ -408,6 +424,30 @@ export default async function wsRoutes (fastify: FastifyInstance): Promise<void>
           await sleep(1000)
         }
       }
+    }
+  }
+
+  // -----------------------------------------------------------------------
+  // Chat backfill — one-shot XRANGE for offline cron recovery
+  // -----------------------------------------------------------------------
+
+  async function backfillChatStream (
+    userId: string, sessionId: string, startId: string, socket: WebSocket
+  ): Promise<void> {
+    try {
+      const stream = `chat:${userId}:${sessionId}`
+      const entries = await queue.readRange(stream, startId, '+', 1000)
+      for (const entry of entries) {
+        if (entry.data.sender === 'app') continue // echo 방지
+        const payload = tryParseJSON(entry.data.payload)
+        const encrypted = entry.data.encrypted === '1'
+        const out: OutgoingMessage = { type: 'chat', id: entry.id, sessionId, payload }
+        if (encrypted) out.encrypted = true
+        send(socket, out)
+      }
+      fastify.log.info({ userId, sessionId, startId, count: entries.length }, 'Chat backfill completed')
+    } catch (err: any) {
+      fastify.log.error({ err: err.message, userId, sessionId }, 'Chat backfill error')
     }
   }
 
