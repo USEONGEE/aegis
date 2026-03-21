@@ -11,58 +11,70 @@ import {
 } from 'react-native';
 import { useChatStore, type ChatMessage } from '../../../stores/useChatStore';
 import { RelayClient } from '../../../core/relay/RelayClient';
+import type { NativeStackScreenProps } from '@react-navigation/native-stack';
+import type { ChatStackParamList } from '../../../app/RootNavigator';
+import type { ChatEvent, ControlEvent } from '@wdk-app/protocol';
+
+type Props = NativeStackScreenProps<ChatStackParamList, 'ChatDetail'>;
 
 /**
- * ChatScreen — conversation with OpenClaw AI via Relay.
+ * ChatDetailScreen — conversation with OpenClaw AI via Relay.
  *
  * Messages flow:
  * user input -> RelayClient.sendChat() -> Relay -> daemon -> OpenClaw
  * OpenClaw response -> daemon -> Relay -> RelayClient handler -> store -> UI
  */
-export function ChatScreen() {
-  const { messages, addMessage, isLoading, setLoading, currentSessionId, setSessionId } = useChatStore();
+export function ChatDetailScreen({ route }: Props) {
+  const sessionId = route.params.sessionId;
+  const {
+    sessions, addMessage, isLoading, setLoading, isTyping, setTyping,
+    switchSession, queuedMessageId, setQueuedMessageId,
+    messageState, setMessageState,
+  } = useChatStore();
   const [inputText, setInputText] = useState('');
-  const [isTyping, setIsTyping] = useState(false);
   const [streamError, setStreamError] = useState<string | null>(null);
-  const [pendingMessageId, setPendingMessageId] = useState<string | null>(null);
+  const currentSessionId = sessionId;
+  const messages = sessions[currentSessionId] || [];
   const streamBufferRef = useRef<string>('');
   const streamMsgIdRef = useRef<string | null>(null);
   const flatListRef = useRef<FlatList>(null);
   const relay = RelayClient.getInstance();
 
-  // Initialize session on mount
+  // Sync store's currentSessionId with route param
   useEffect(() => {
-    if (!currentSessionId) {
-      const sessionId = `session_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
-      setSessionId(sessionId);
-    }
-  }, [currentSessionId, setSessionId]);
+    switchSession(currentSessionId);
+  }, [currentSessionId, switchSession]);
+
+  // Cursor providers and cron_session_created handler are registered at app-level (ChatNavigator)
 
   // Subscribe to incoming chat messages from Relay
   useEffect(() => {
     const handler = (message: { channel: string; payload: unknown; timestamp: number }) => {
-      const data = message.payload as {
-        type?: string;
-        role?: string;
-        content?: string;
-        delta?: string;
-        sessionId?: string;
-        error?: string;
-        messageId?: string;
-      };
+      // Use flexible type for payload — protocol types + extra fields from relay
+      const data = message.payload as Record<string, any>;
 
-      // Control channel: handle message_queued and cancel_message_result
+      // Control channel: handle message_queued, message_started, and cancel results (screen-level)
+      // cron_session_created and cursor tracking are handled at app-level (ChatNavigator)
       if (message.channel === 'control') {
         switch (data.type) {
           case 'message_queued': {
             if (data.sessionId === currentSessionId && data.messageId) {
-              setPendingMessageId(data.messageId);
+              setQueuedMessageId(data.messageId);
+              setMessageState('queued');
             }
             return;
           }
-          case 'cancel_message_result': {
-            setPendingMessageId(null);
-            setIsTyping(false);
+          case 'message_started': {
+            if (data.sessionId === currentSessionId) {
+              setMessageState('active');
+            }
+            return;
+          }
+          case 'cancel_queued':
+          case 'cancel_active': {
+            setQueuedMessageId(null);
+            setMessageState('idle');
+            setTyping(false);
             setLoading(false);
             streamBufferRef.current = '';
             streamMsgIdRef.current = null;
@@ -74,75 +86,161 @@ export function ChatScreen() {
 
       // Chat channel: handle streaming message types
       if (message.channel !== 'chat') return;
-      if (data.sessionId !== currentSessionId) return;
+
+      const msgSessionId = data.sessionId ?? currentSessionId;
+      const msgSource = (data as any).source ?? 'user';
+
+      // Store messages for all sessions (not just current) for cron/offline recovery
+      // But only update UI state (typing, stream, loading) for current session
+      const isCurrentSession = msgSessionId === currentSessionId;
 
       switch (data.type) {
+        case 'tool_start': {
+          if (isCurrentSession) {
+            setTyping(false);
+          }
+          addMessage({
+            kind: 'tool',
+            id: `tool_${(data as any).toolCallId}`,
+            role: 'system',
+            content: `🔧 ${(data as any).toolName}`,
+            timestamp: message.timestamp,
+            sessionId: msgSessionId!,
+            source: msgSource,
+            toolCall: (data as any).toolName,
+            toolStatus: 'running',
+          });
+          return;
+        }
+
+        case 'tool_done': {
+          addMessage({
+            kind: 'tool',
+            id: `tool_${(data as any).toolCallId}`,
+            role: 'system',
+            content: (data as any).status === 'success'
+              ? `✅ ${(data as any).toolName} 완료`
+              : `❌ ${(data as any).toolName} 실패`,
+            timestamp: message.timestamp,
+            sessionId: msgSessionId!,
+            source: msgSource,
+            toolCall: (data as any).toolName,
+            toolStatus: (data as any).status === 'success' ? 'done' : 'error',
+          });
+          return;
+        }
+
+        case 'cancelled': {
+          if (isCurrentSession) {
+            setTyping(false);
+            setLoading(false);
+            setQueuedMessageId(null);
+            setMessageState('idle');
+            streamBufferRef.current = '';
+            streamMsgIdRef.current = null;
+          }
+          addMessage({
+            kind: 'status',
+            id: `msg_cancelled_${Date.now()}`,
+            role: 'system',
+            content: '요청이 취소되었습니다.',
+            timestamp: message.timestamp,
+            sessionId: msgSessionId!,
+            source: msgSource,
+            status: 'cancelled',
+          });
+          return;
+        }
+
         case 'typing': {
-          setIsTyping(true);
-          setStreamError(null);
+          if (isCurrentSession) {
+            setTyping(true);
+            setStreamError(null);
+          }
           return;
         }
 
         case 'stream': {
-          setIsTyping(false);
+          if (isCurrentSession) {
+            setTyping(false);
+          }
           if (data.delta) {
-            streamBufferRef.current += data.delta;
-            // Create or update the streaming message
-            if (!streamMsgIdRef.current) {
-              streamMsgIdRef.current = `msg_stream_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+            // Always save stream messages (all sessions, not just current)
+            if (isCurrentSession) {
+              streamBufferRef.current += data.delta;
+              if (!streamMsgIdRef.current) {
+                streamMsgIdRef.current = `msg_stream_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+              }
             }
-            addMessage({
-              id: streamMsgIdRef.current,
-              role: 'assistant',
-              content: streamBufferRef.current,
-              timestamp: message.timestamp,
-              sessionId: currentSessionId!,
-            });
+            // For non-current sessions, we can't buffer streams — they'll be saved on 'done'
+            if (isCurrentSession && streamMsgIdRef.current) {
+              addMessage({
+                kind: 'text',
+                id: streamMsgIdRef.current,
+                role: 'assistant',
+                content: streamBufferRef.current,
+                timestamp: message.timestamp,
+                sessionId: msgSessionId!,
+                source: msgSource,
+              });
+            }
           }
           return;
         }
 
         case 'error': {
-          setIsTyping(false);
-          setLoading(false);
-          setPendingMessageId(null);
-          streamBufferRef.current = '';
-          streamMsgIdRef.current = null;
-          const errorText = data.error || 'Unknown error';
-          setStreamError(errorText);
+          if (isCurrentSession) {
+            setTyping(false);
+            setLoading(false);
+            setQueuedMessageId(null);
+            setMessageState('idle');
+            streamBufferRef.current = '';
+            streamMsgIdRef.current = null;
+            const errorText = data.error || 'Unknown error';
+            setStreamError(errorText);
+          }
           addMessage({
+            kind: 'status',
             id: `msg_${Date.now()}_err`,
             role: 'system',
-            content: `Error: ${errorText}`,
+            content: `Error: ${data.error || 'Unknown error'}`,
             timestamp: message.timestamp,
-            sessionId: currentSessionId!,
+            sessionId: msgSessionId!,
+            source: msgSource,
+            status: 'cancelled',
           });
           return;
         }
 
         case 'done': {
           // Stream complete — finalize
-          setIsTyping(false);
-          setLoading(false);
-          setPendingMessageId(null);
-          streamBufferRef.current = '';
-          streamMsgIdRef.current = null;
+          if (isCurrentSession) {
+            setTyping(false);
+            setLoading(false);
+            setQueuedMessageId(null);
+            setMessageState('idle');
+            streamBufferRef.current = '';
+            streamMsgIdRef.current = null;
+          }
+          // Non-current session done messages are saved at app-level (ChatNavigator)
           return;
         }
 
         default: {
           // Legacy: complete message (no type field)
-          if (data.content) {
-            setIsTyping(false);
+          if (data.content && isCurrentSession) {
+            setTyping(false);
             setLoading(false);
             streamBufferRef.current = '';
             streamMsgIdRef.current = null;
             addMessage({
+              kind: 'text',
               id: `msg_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
               role: (data.role as 'assistant') ?? 'assistant',
               content: data.content,
               timestamp: message.timestamp,
-              sessionId: currentSessionId!,
+              sessionId: msgSessionId!,
+              source: msgSource,
             });
           }
           return;
@@ -152,18 +250,20 @@ export function ChatScreen() {
 
     relay.addMessageHandler(handler);
     return () => relay.removeMessageHandler(handler);
-  }, [currentSessionId, addMessage, setLoading, relay]);
+  }, [currentSessionId, addMessage, setLoading, setTyping, setQueuedMessageId, setMessageState, sessions, relay]);
 
   const sendMessage = useCallback(async () => {
     const text = inputText.trim();
     if (!text || !currentSessionId) return;
 
     const userMsg: ChatMessage = {
+      kind: 'text',
       id: `msg_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
       role: 'user',
       content: text,
       timestamp: Date.now(),
       sessionId: currentSessionId,
+      source: 'user',
     };
 
     addMessage(userMsg);
@@ -178,33 +278,55 @@ export function ChatScreen() {
       });
     } catch (e) {
       addMessage({
+        kind: 'status',
         id: `msg_${Date.now()}_err`,
         role: 'system',
         content: `Failed to send: ${e instanceof Error ? e.message : String(e)}`,
         timestamp: Date.now(),
         sessionId: currentSessionId,
+        source: 'user',
+        status: 'cancelled',
       });
       setLoading(false);
     }
   }, [inputText, currentSessionId, addMessage, setLoading, relay]);
 
   const cancelPendingMessage = useCallback(async () => {
-    if (!pendingMessageId) return;
+    if (!queuedMessageId) return;
     try {
-      await relay.cancelMessage(pendingMessageId);
+      if (messageState === 'queued') {
+        await relay.cancelQueued(queuedMessageId);
+      } else {
+        await relay.cancelActive(queuedMessageId);
+      }
     } catch {
       // Cancel best-effort; clear state regardless
     }
-    setPendingMessageId(null);
-    setIsTyping(false);
+    setQueuedMessageId(null);
+    setMessageState('idle');
+    setTyping(false);
     setLoading(false);
     streamBufferRef.current = '';
     streamMsgIdRef.current = null;
-  }, [pendingMessageId, relay, setLoading]);
+  }, [queuedMessageId, messageState, relay, setLoading, setTyping, setQueuedMessageId, setMessageState]);
 
   const renderMessage = useCallback(({ item }: { item: ChatMessage }) => {
-    const isUser = item.role === 'user';
+    const isUser = item.kind === 'text' && item.role === 'user';
     const isSystem = item.role === 'system';
+    const isTool = item.kind === 'tool';
+
+    // Tool messages: compact indicator
+    if (isTool) {
+      return (
+        <View style={styles.toolIndicator}>
+          <Text style={styles.toolText}>
+            {item.toolStatus === 'running' && `🔧 ${item.toolCall} 실행 중...`}
+            {item.toolStatus === 'done' && `✅ ${item.toolCall} 완료`}
+            {item.toolStatus === 'error' && `❌ ${item.toolCall} 실패`}
+          </Text>
+        </View>
+      );
+    }
 
     return (
       <View
@@ -217,12 +339,17 @@ export function ChatScreen() {
           {item.role === 'user' ? 'You' : item.role === 'assistant' ? 'AI' : 'System'}
         </Text>
         <Text style={styles.messageText}>{item.content}</Text>
-        <Text style={styles.timestamp}>
-          {new Date(item.timestamp).toLocaleTimeString()}
-        </Text>
+        <View style={styles.messageFooter}>
+          <Text style={styles.timestamp}>
+            {new Date(item.timestamp).toLocaleTimeString()}
+          </Text>
+          {isUser && queuedMessageId && item.id === messages[messages.length - 1]?.id && (
+            <Text style={styles.queuedStatus}>전송됨 ✓</Text>
+          )}
+        </View>
       </View>
     );
-  }, []);
+  }, [queuedMessageId, messages]);
 
   return (
     <KeyboardAvoidingView
@@ -269,7 +396,7 @@ export function ChatScreen() {
           <Text style={styles.loadingText}>
             {isTyping ? 'AI is typing...' : 'AI is thinking...'}
           </Text>
-          {pendingMessageId && (
+          {queuedMessageId && (
             <Pressable style={styles.cancelButton} onPress={cancelPendingMessage}>
               <Text style={styles.cancelButtonText}>Cancel</Text>
             </Pressable>
@@ -399,11 +526,30 @@ const styles = StyleSheet.create({
     color: '#ffffff',
     lineHeight: 20,
   },
+  messageFooter: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    alignItems: 'center',
+    marginTop: 4,
+    gap: 8,
+  },
   timestamp: {
     fontSize: 10,
     color: '#4b5563',
-    marginTop: 4,
-    textAlign: 'right',
+  },
+  queuedStatus: {
+    fontSize: 10,
+    color: '#22c55e',
+  },
+  toolIndicator: {
+    paddingVertical: 4,
+    paddingHorizontal: 12,
+    alignSelf: 'center',
+    marginBottom: 4,
+  },
+  toolText: {
+    fontSize: 12,
+    color: '#6b7280',
   },
   loadingBar: {
     flexDirection: 'row',

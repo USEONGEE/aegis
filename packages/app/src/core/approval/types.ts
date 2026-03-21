@@ -1,7 +1,13 @@
 /**
  * Unified Signed Approval types.
  * These mirror the PRD's Signed Envelope Spec — used by both RN App and WDK.
+ *
+ * Wire-level fields shared with daemon are defined in @wdk-app/protocol.
+ * See: SignedApprovalFields (protocol) vs SignedApprovalPayload (app-local).
  */
+import type { SignedApprovalFields } from '@wdk-app/protocol'
+
+export type { SignedApprovalFields }
 
 /**
  * The approval types supported by the system.

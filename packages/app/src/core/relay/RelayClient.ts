@@ -15,7 +15,8 @@
 import nacl from 'tweetnacl';
 import { encodeBase64, decodeBase64, encodeUTF8 } from 'tweetnacl-util';
 
-export type RelayChannel = 'control' | 'chat';
+import type { RelayChannel, ControlEvent, ChatEvent } from '@wdk-app/protocol';
+export type { RelayChannel };
 
 export interface RelayMessage {
   channel: RelayChannel;
@@ -67,6 +68,15 @@ export class RelayClient {
   /** E2E session key (NaCl secretbox key, 32 bytes). Set after pairing. */
   private sessionKey: Uint8Array | null = null;
 
+  /** v0.3.0: callback invoked once 'authenticated' response is received */
+  private onceAuthenticated: (() => void) | null = null;
+
+  /** Provider for chatCursors (injected to avoid circular dependency with store). */
+  private chatCursorsProvider: (() => Record<string, string>) | null = null;
+
+  /** Provider for persisted control cursor (for cold-start offline recovery). */
+  private controlCursorProvider: (() => string) | null = null;
+
   private constructor() {}
 
   static getInstance(): RelayClient {
@@ -89,6 +99,21 @@ export class RelayClient {
    */
   clearSessionKey(): void {
     this.sessionKey = null;
+  }
+
+  /**
+   * Set provider for chat stream cursors (for offline cron recovery).
+   * Called on reconnect to include per-session cursors in authenticate payload.
+   */
+  setChatCursorsProvider(provider: () => Record<string, string>): void {
+    this.chatCursorsProvider = provider;
+  }
+
+  /**
+   * Set provider for persisted control cursor (for cold-start recovery).
+   */
+  setControlCursorProvider(provider: () => string): void {
+    this.controlCursorProvider = provider;
   }
 
   /**
@@ -141,29 +166,58 @@ export class RelayClient {
       this.ws = new WebSocket(wsUrl);
 
       const onOpen = () => {
-        this.connected = true;
+        // v0.3.0: Do NOT set connected=true until 'authenticated' response
         this.reconnectAttempts = 0;
 
-        // Authenticate
+        // Authenticate — use persisted cursors for cold-start offline recovery
+        const persistedControlCursor = this.controlCursorProvider ? this.controlCursorProvider() : '0';
+        const effectiveControlCursor = this.lastStreamId !== '0' ? this.lastStreamId : persistedControlCursor;
         this.ws!.send(JSON.stringify({
           type: 'authenticate',
           payload: {
             userId: this.userId,
             token: this.authToken,
-            lastStreamId: this.lastStreamId,
+            lastStreamId: effectiveControlCursor,
+            chatCursors: this.chatCursorsProvider ? this.chatCursorsProvider() : {},
           },
         }));
 
-        // Start heartbeat
-        this.startHeartbeat();
+        // v0.3.0: Set auth timeout — if no 'authenticated' response in 10s, reconnect
+        const authTimeout = setTimeout(() => {
+          if (!this.connected) {
+            console.warn('[RelayClient] Authentication timeout — reconnecting');
+            this.ws?.close(4002, 'Authentication timeout');
+          }
+        }, 10000);
 
-        this.notifyConnectionHandlers(true);
-        resolve();
+        // v0.3.0: Wait for 'authenticated' message before resolving
+        this.onceAuthenticated = () => {
+          clearTimeout(authTimeout);
+          this.connected = true;
+          this.startHeartbeat();
+          this.notifyConnectionHandlers(true);
+          resolve();
+        };
       };
 
       const onMessage = (event: MessageEvent) => {
         try {
           const data = JSON.parse(typeof event.data === 'string' ? event.data : '');
+
+          // v0.3.0: Handle 'authenticated' response
+          if (data.type === 'authenticated') {
+            if (this.onceAuthenticated) {
+              this.onceAuthenticated();
+              this.onceAuthenticated = null;
+            }
+            return;
+          }
+
+          // v0.3.0: Handle auth failure — relay closes socket
+          if (data.type === 'error' && !this.connected) {
+            console.error('[RelayClient] Auth error:', data.message);
+            return;
+          }
 
           // Track stream cursor for reconnection
           if (data.messageId || data.id) {
@@ -231,6 +285,13 @@ export class RelayClient {
   /**
    * Exponential backoff reconnect.
    */
+  /** F27: Token refresh callback — set by app to auto-refresh before reconnect */
+  private tokenRefresher: (() => Promise<string | null>) | null = null;
+
+  setTokenRefresher(refresher: () => Promise<string | null>): void {
+    this.tokenRefresher = refresher;
+  }
+
   private scheduleReconnect(): void {
     if (this.reconnectTimer) return;
 
@@ -244,6 +305,19 @@ export class RelayClient {
     this.reconnectTimer = setTimeout(async () => {
       this.reconnectTimer = null;
       this.reconnectAttempts++;
+
+      // F27: Auto-refresh token before reconnect
+      if (this.tokenRefresher) {
+        const newToken = await this.tokenRefresher();
+        if (newToken) {
+          this.authToken = newToken;
+        } else {
+          // Refresh failed — stop reconnecting, app should navigate to login
+          console.warn('[RelayClient] Token refresh failed — stopping reconnect');
+          return;
+        }
+      }
+
       try {
         await this.doConnect();
       } catch {
@@ -376,11 +450,34 @@ export class RelayClient {
   }
 
   /**
-   * Cancel a queued or in-progress message via control channel.
+   * Request relay to start polling a chat stream for a newly discovered session.
+   * Used for offline cron recovery: after control replay reveals cron_session_created,
+   * the app requests chat history for that session.
    */
-  async cancelMessage(messageId: string): Promise<void> {
+  async subscribeChatStream(sessionId: string): Promise<void> {
+    this.ensureConnected();
+    this.ws!.send(JSON.stringify({
+      type: 'subscribe_chat',
+      payload: { sessionId },
+    }));
+  }
+
+  /**
+   * Cancel a queued message (not yet processing) via control channel.
+   */
+  async cancelQueued(messageId: string): Promise<void> {
     await this.sendControl({
-      type: 'cancel_message',
+      type: 'cancel_queued',
+      payload: { messageId },
+    });
+  }
+
+  /**
+   * Cancel an actively processing message via control channel.
+   */
+  async cancelActive(messageId: string): Promise<void> {
+    await this.sendControl({
+      type: 'cancel_active',
       payload: { messageId },
     });
   }
