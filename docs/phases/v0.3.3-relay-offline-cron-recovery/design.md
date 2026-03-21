@@ -40,28 +40,41 @@ async readRange(stream: string, start: string, end: string, count?: number): Pro
 - start='0', end='+' → 전체 스트림 읽기
 - start=cursor, end='+' → cursor 이후 전체 읽기
 
-### backfillChatStream (one-shot)
+### backfillChatStream (one-shot, startId 파라미터)
 ```
-async function backfillChatStream(userId, sessionId, socket):
-  entries = queue.readRange(`chat:${userId}:${sessionId}`, '0', '+', 1000)
+async function backfillChatStream(userId, sessionId, startId, socket):
+  entries = queue.readRange(`chat:${userId}:${sessionId}`, startId, '+', 1000)
   for entry in entries:
     if sender === 'app': continue  // echo 방지
-    send(socket, { type: 'chat', id, sessionId, payload })
+    send(socket, { type: 'chat', id: entry.id, sessionId, payload })
 ```
+- `startId` 파라미터로 시작 위치 지정
+- authenticate 경로: `startId = cursor` (이미 수신한 메시지 포함 — idempotent)
+- subscribe_chat 경로: `startId = '0'` (전체 히스토리)
 - loop 없음. 1회 실행 후 종료.
-- 즉시 forward 경로와 중복 → App addMessage의 id 기반 idempotent 처리로 안전.
+
+### cursor 경계 규칙
+**inclusive-start + idempotent**: XRANGE의 start는 inclusive (해당 ID 포함). 따라서 authenticate backfill은 마지막으로 받은 cursor의 메시지를 한 번 더 받을 수 있음. App의 addMessage가 같은 entry.id를 덮어쓰기(idempotent)하므로 데이터 무결성 유지. strict-after 보장이 불필요 — 중복 1건은 안전하게 흡수됨.
 
 ### authenticate 시 chatCursors 처리
 ```
 chatCursors = msg.payload?.chatCursors ?? {}
 for [sessionId, cursor] in chatCursors:
-  backfillChatStream(userId, sessionId, socket)  // cursor 이후부터
+  backfillChatStream(userId, sessionId, cursor, socket)
 ```
 - authenticate 경로도 one-shot backfill (long-running poller 아님)
-- readRange의 start를 cursor로 설정하여 이미 수신한 메시지 skip
+
+### subscribe_chat 호출
+```
+backfillChatStream(userId, sessionId, '0', socket)
+```
+- 전체 히스토리를 one-shot으로 전달
 
 ### subscribe_chat 재호출 정책
-**idempotent**: 같은 sessionId로 재호출해도 relay는 '0'부터 다시 읽어 보냄. App의 addMessage가 같은 id를 덮어쓰기하므로 데이터 무결성 유지. relay 측 중복 방지 불필요.
+**idempotent**: 같은 sessionId로 재호출해도 relay는 '0'부터 다시 읽어 보냄. App의 addMessage가 entry.id 기반으로 덮어쓰기하므로 데이터 무결성 유지. relay 측 중복 방지 불필요 — app 측 `backfilledSessions` Set이 이미 중복 호출을 방지.
+
+### backfill 상한: 1000건
+의도된 제품 제한. 오프라인 복구는 최근 1000건까지만 지원. relay의 streamMaxLen(10000)보다 작으므로 대부분의 실사용 시나리오를 커버. 1000건 초과 시 가장 오래된 메시지가 조용히 잘리며, 이는 허용 가능한 동작.
 
 ### XRANGE stale cursor 안전성
 XRANGE는 존재하지 않는 ID를 start로 줘도 에러 없이 해당 ID 이후의 entries만 반환. trim된 구간도 안전.
