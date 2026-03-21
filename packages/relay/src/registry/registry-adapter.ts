@@ -39,7 +39,7 @@ export interface SessionListItem {
 
 export interface CreateUserParams {
   id: string
-  passwordHash: string
+  passwordHash?: string | null  // null for OAuth users
 }
 
 export interface RegisterDeviceParams {
@@ -53,6 +53,48 @@ export interface CreateSessionParams {
   id: string
   userId: string
   metadata?: Record<string, unknown>
+}
+
+export interface DaemonRecord {
+  id: string
+  secretHash: string
+  createdAt: Date
+}
+
+export interface CreateDaemonParams {
+  id: string
+  secretHash: string
+}
+
+export interface DaemonUserRecord {
+  daemonId: string
+  userId: string
+  boundAt: Date
+}
+
+export interface RefreshTokenRecord {
+  id: string
+  subjectId: string
+  role: 'daemon' | 'app'
+  deviceId: string | null
+  expiresAt: Date
+  createdAt: Date
+  revokedAt: Date | null
+}
+
+export interface CreateRefreshTokenParams {
+  id: string
+  subjectId: string
+  role: 'daemon' | 'app'
+  deviceId: string | null
+  expiresAt: Date
+}
+
+export interface EnrollmentCodeRecord {
+  code: string
+  daemonId: string
+  expiresAt: Date
+  usedAt: Date | null
 }
 
 /**
@@ -94,6 +136,49 @@ export abstract class RegistryAdapter {
   abstract getSession (id: string): Promise<SessionRecord | null>
 
   abstract getSessionsByUser (userId: string): Promise<SessionListItem[]>
+
+  /* ------------------------------------------------------------------
+   * Daemons
+   * ----------------------------------------------------------------*/
+
+  abstract createDaemon (params: CreateDaemonParams): Promise<DaemonRecord>
+
+  abstract getDaemon (id: string): Promise<(DaemonRecord & { secretHash: string }) | null>
+
+  /* ------------------------------------------------------------------
+   * Daemon-User Binding
+   * ----------------------------------------------------------------*/
+
+  abstract bindUser (daemonId: string, userId: string): Promise<DaemonUserRecord>
+
+  abstract unbindUsers (daemonId: string, userIds: string[]): Promise<string[]>
+
+  abstract getUsersByDaemon (daemonId: string): Promise<string[]>
+
+  abstract getDaemonByUser (userId: string): Promise<string | null>
+
+  /* ------------------------------------------------------------------
+   * Refresh Tokens
+   * ----------------------------------------------------------------*/
+
+  abstract createRefreshToken (params: CreateRefreshTokenParams): Promise<RefreshTokenRecord>
+
+  abstract getRefreshToken (id: string): Promise<RefreshTokenRecord | null>
+
+  abstract revokeRefreshToken (id: string): Promise<void>
+
+  abstract revokeAllRefreshTokens (subjectId: string, role: 'daemon' | 'app'): Promise<void>
+
+  /* ------------------------------------------------------------------
+   * Enrollment Codes
+   * ----------------------------------------------------------------*/
+
+  abstract createEnrollmentCode (code: string, daemonId: string, expiresAt: Date): Promise<EnrollmentCodeRecord>
+
+  abstract getEnrollmentCode (code: string): Promise<EnrollmentCodeRecord | null>
+
+  /** Atomically claim an enrollment code. Returns the record if claimed, null if already used or expired. */
+  abstract claimEnrollmentCode (code: string): Promise<EnrollmentCodeRecord | null>
 
   /* ------------------------------------------------------------------
    * Lifecycle

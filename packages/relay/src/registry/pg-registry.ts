@@ -11,7 +11,13 @@ import type {
   SessionListItem,
   CreateUserParams,
   RegisterDeviceParams,
-  CreateSessionParams
+  CreateSessionParams,
+  DaemonRecord,
+  CreateDaemonParams,
+  DaemonUserRecord,
+  RefreshTokenRecord,
+  CreateRefreshTokenParams,
+  EnrollmentCodeRecord
 } from './registry-adapter.js'
 import config from '../config.js'
 
@@ -52,7 +58,7 @@ export class PgRegistry extends RegistryAdapter {
       `INSERT INTO users (id, password_hash)
        VALUES ($1, $2)
        RETURNING id, created_at AS "createdAt"`,
-      [id, passwordHash],
+      [id, passwordHash || null],
     )
     return rows[0]
   }
@@ -149,6 +155,143 @@ export class PgRegistry extends RegistryAdapter {
       [userId],
     )
     return rows
+  }
+
+  /* ------------------------------------------------------------------
+   * Daemons
+   * ----------------------------------------------------------------*/
+
+  async createDaemon ({ id, secretHash }: CreateDaemonParams): Promise<DaemonRecord> {
+    const { rows } = await this.pool.query(
+      `INSERT INTO daemons (id, secret_hash)
+       VALUES ($1, $2)
+       RETURNING id, secret_hash AS "secretHash", created_at AS "createdAt"`,
+      [id, secretHash],
+    )
+    return rows[0]
+  }
+
+  async getDaemon (id: string): Promise<(DaemonRecord & { secretHash: string }) | null> {
+    const { rows } = await this.pool.query(
+      `SELECT id, secret_hash AS "secretHash", created_at AS "createdAt"
+       FROM daemons WHERE id = $1`,
+      [id],
+    )
+    return rows[0] || null
+  }
+
+  /* ------------------------------------------------------------------
+   * Daemon-User Binding
+   * ----------------------------------------------------------------*/
+
+  async bindUser (daemonId: string, userId: string): Promise<DaemonUserRecord> {
+    const { rows } = await this.pool.query(
+      `INSERT INTO daemon_users (daemon_id, user_id)
+       VALUES ($1, $2)
+       RETURNING daemon_id AS "daemonId", user_id AS "userId", bound_at AS "boundAt"`,
+      [daemonId, userId],
+    )
+    return rows[0]
+  }
+
+  async unbindUsers (daemonId: string, userIds: string[]): Promise<string[]> {
+    const { rows } = await this.pool.query(
+      `DELETE FROM daemon_users
+       WHERE daemon_id = $1 AND user_id = ANY($2)
+       RETURNING user_id AS "userId"`,
+      [daemonId, userIds],
+    )
+    return rows.map((r: { userId: string }) => r.userId)
+  }
+
+  async getUsersByDaemon (daemonId: string): Promise<string[]> {
+    const { rows } = await this.pool.query(
+      `SELECT user_id AS "userId" FROM daemon_users WHERE daemon_id = $1`,
+      [daemonId],
+    )
+    return rows.map((r: { userId: string }) => r.userId)
+  }
+
+  async getDaemonByUser (userId: string): Promise<string | null> {
+    const { rows } = await this.pool.query(
+      `SELECT daemon_id AS "daemonId" FROM daemon_users WHERE user_id = $1`,
+      [userId],
+    )
+    return rows[0]?.daemonId || null
+  }
+
+  /* ------------------------------------------------------------------
+   * Refresh Tokens
+   * ----------------------------------------------------------------*/
+
+  async createRefreshToken (params: CreateRefreshTokenParams): Promise<RefreshTokenRecord> {
+    const { rows } = await this.pool.query(
+      `INSERT INTO refresh_tokens (id, subject_id, role, device_id, expires_at)
+       VALUES ($1, $2, $3, $4, $5)
+       RETURNING id, subject_id AS "subjectId", role, device_id AS "deviceId",
+                 expires_at AS "expiresAt", created_at AS "createdAt", revoked_at AS "revokedAt"`,
+      [params.id, params.subjectId, params.role, params.deviceId, params.expiresAt],
+    )
+    return rows[0]
+  }
+
+  async getRefreshToken (id: string): Promise<RefreshTokenRecord | null> {
+    const { rows } = await this.pool.query(
+      `SELECT id, subject_id AS "subjectId", role, device_id AS "deviceId",
+              expires_at AS "expiresAt", created_at AS "createdAt", revoked_at AS "revokedAt"
+       FROM refresh_tokens WHERE id = $1`,
+      [id],
+    )
+    return rows[0] || null
+  }
+
+  async revokeRefreshToken (id: string): Promise<void> {
+    await this.pool.query(
+      `UPDATE refresh_tokens SET revoked_at = NOW() WHERE id = $1`,
+      [id],
+    )
+  }
+
+  async revokeAllRefreshTokens (subjectId: string, role: 'daemon' | 'app'): Promise<void> {
+    await this.pool.query(
+      `UPDATE refresh_tokens SET revoked_at = NOW()
+       WHERE subject_id = $1 AND role = $2 AND revoked_at IS NULL`,
+      [subjectId, role],
+    )
+  }
+
+  /* ------------------------------------------------------------------
+   * Enrollment Codes
+   * ----------------------------------------------------------------*/
+
+  async createEnrollmentCode (code: string, daemonId: string, expiresAt: Date): Promise<EnrollmentCodeRecord> {
+    const { rows } = await this.pool.query(
+      `INSERT INTO enrollment_codes (code, daemon_id, expires_at)
+       VALUES ($1, $2, $3)
+       RETURNING code, daemon_id AS "daemonId", expires_at AS "expiresAt", used_at AS "usedAt"`,
+      [code, daemonId, expiresAt],
+    )
+    return rows[0]
+  }
+
+  async getEnrollmentCode (code: string): Promise<EnrollmentCodeRecord | null> {
+    const { rows } = await this.pool.query(
+      `SELECT code, daemon_id AS "daemonId", expires_at AS "expiresAt", used_at AS "usedAt"
+       FROM enrollment_codes WHERE code = $1`,
+      [code],
+    )
+    return rows[0] || null
+  }
+
+  async claimEnrollmentCode (code: string): Promise<EnrollmentCodeRecord | null> {
+    const { rows } = await this.pool.query(
+      `UPDATE enrollment_codes
+       SET used_at = NOW()
+       WHERE code = $1 AND used_at IS NULL AND expires_at > NOW()
+       RETURNING code, daemon_id AS "daemonId", expires_at AS "expiresAt", used_at AS "usedAt"`,
+      [code],
+    )
+    return rows[0] || null
   }
 
   /* ------------------------------------------------------------------

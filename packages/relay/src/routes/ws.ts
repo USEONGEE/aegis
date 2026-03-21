@@ -1,10 +1,12 @@
 import { verifyToken } from './auth.js'
+import type { JwtPayload } from './auth.js'
 import { sendPushNotification } from './push.js'
 import config from '../config.js'
 import type { FastifyInstance } from 'fastify'
 import type { WebSocket } from 'ws'
 import type { QueueAdapter } from '../queue/queue-adapter.js'
 import type { RegistryAdapter } from '../registry/registry-adapter.js'
+import type { RelayEnvelope } from '@wdk-app/protocol'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -12,217 +14,320 @@ import type { RegistryAdapter } from '../registry/registry-adapter.js'
 
 type Role = 'daemon' | 'app'
 
-interface ConnectionBucket {
-  daemon: WebSocket | null
-  apps: Set<WebSocket>
+interface DaemonSocket {
+  socket: WebSocket
+  daemonId: string
+  userIds: Set<string>
+  pollerAbort: AbortController
+  userPollerAborts: Map<string, AbortController>
 }
 
-interface IncomingMessage {
-  type: string
+/** Incoming message: RelayEnvelope with payload loosened to any for wire parsing */
+interface IncomingMessage extends Omit<RelayEnvelope, 'payload'> {
   payload?: any
-  sessionId?: string
-  encrypted?: boolean
-}
-
-interface OutgoingMessage {
-  type: string
   id?: string
-  payload?: any
-  sessionId?: string
-  encrypted?: boolean
   message?: string
-  userId?: string
+}
+
+/** Outgoing message: RelayEnvelope with payload loosened + stream entry id */
+interface OutgoingMessage extends Omit<RelayEnvelope, 'payload'> {
+  payload?: any
+  id?: string
+  message?: string
 }
 
 /**
- * WebSocket route plugin.
+ * WebSocket route plugin — v0.3.0 multiplex architecture.
  *
  * Endpoints:
- *   /ws/daemon  -- daemon connections (one per userId, outbound from personal server)
- *   /ws/app     -- RN app connections (one+ per userId)
+ *   /ws/daemon  — single daemon connection serving N users
+ *   /ws/app     — per-user app connections
  *
- * Expects `fastify.queue` (RedisQueue) and `fastify.registry` (PgRegistry)
+ * Expects `fastify.queue` (QueueAdapter) and `fastify.registry` (RegistryAdapter)
  * to be decorated before registration.
  */
 export default async function wsRoutes (fastify: FastifyInstance): Promise<void> {
   const queue = (fastify as any).queue as QueueAdapter
   const registry = (fastify as any).registry as RegistryAdapter
 
-  /**
-   * Connected clients indexed by userId.
-   * Each userId can have one daemon and multiple app connections.
-   */
-  const connections = new Map<string, ConnectionBucket>()
+  // -----------------------------------------------------------------------
+  // Connection state
+  // -----------------------------------------------------------------------
 
-  /** Get or create the connection bucket for a userId. */
-  function getBucket (userId: string): ConnectionBucket {
-    let bucket = connections.get(userId)
-    if (!bucket) {
-      bucket = { daemon: null, apps: new Set() }
-      connections.set(userId, bucket)
-    }
-    return bucket
-  }
+  const daemonSockets = new Map<string, DaemonSocket>()
+  const userToDaemon = new Map<string, string>()
+  const appBuckets = new Map<string, Set<WebSocket>>()
 
-  /** Remove a socket from the connection map. */
-  function removeSocket (userId: string, role: Role, socket: WebSocket): void {
-    const bucket = connections.get(userId)
-    if (!bucket) return
-    if (role === 'daemon' && bucket.daemon === socket) {
-      bucket.daemon = null
-    } else {
-      bucket.apps.delete(socket)
-    }
-    if (!bucket.daemon && bucket.apps.size === 0) {
-      connections.delete(userId)
+  // -----------------------------------------------------------------------
+  // Helpers
+  // -----------------------------------------------------------------------
+
+  function send (socket: WebSocket, data: OutgoingMessage): void {
+    if ((socket as any).readyState === 1) {
+      socket.send(JSON.stringify(data))
     }
   }
 
-  /* ------------------------------------------------------------------
-   * /ws/daemon
-   * ----------------------------------------------------------------*/
-  fastify.get('/ws/daemon', { websocket: true } as any, (socket: any, request: any) => {
-    handleConnection(socket, request, 'daemon')
+  function tryParseJSON (str: string): any {
+    try { return JSON.parse(str) } catch { return str }
+  }
+
+  function sleep (ms: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms))
+  }
+
+  function getAppSockets (userId: string): Set<WebSocket> {
+    let s = appBuckets.get(userId)
+    if (!s) { s = new Set(); appBuckets.set(userId, s) }
+    return s
+  }
+
+  // -----------------------------------------------------------------------
+  // /ws/daemon
+  // -----------------------------------------------------------------------
+
+  fastify.get('/ws/daemon', { websocket: true } as any, (socket: any, _request: any) => {
+    handleDaemonConnection(socket)
   })
 
-  /* ------------------------------------------------------------------
-   * /ws/app
-   * ----------------------------------------------------------------*/
-  fastify.get('/ws/app', { websocket: true } as any, (socket: any, request: any) => {
-    handleConnection(socket, request, 'app')
-  })
-
-  /* ------------------------------------------------------------------
-   * Shared connection handler
-   * ----------------------------------------------------------------*/
-
-  function handleConnection (socket: WebSocket, request: any, role: Role): void {
-    let userId: string | null = null
+  function handleDaemonConnection (socket: WebSocket): void {
+    let daemonId: string | null = null
     let authenticated = false
-
-    /** Per-user cursor for consuming streams since last delivery. */
-    let controlCursor = '$'
-    let chatCursors = new Map<string, string>() // sessionId -> lastId
-
-    /** Polling abort controller -- cancelled on socket close. */
-    const ac = new AbortController()
 
     socket.on('message', async (raw: Buffer) => {
       let msg: IncomingMessage
-      try {
-        msg = JSON.parse(raw.toString())
-      } catch {
+      try { msg = JSON.parse(raw.toString()) } catch {
         return send(socket, { type: 'error', message: 'Invalid JSON' })
       }
 
       /* ---- authenticate ---- */
       if (msg.type === 'authenticate') {
         const token: string | undefined = msg.payload?.token
-        const payload = verifyToken(token!)
-        if (!payload) {
-          return send(socket, { type: 'error', message: 'Authentication failed' })
+        if (!token) {
+          send(socket, { type: 'error', message: 'Missing token' })
+          socket.close(4001, 'Missing token')
+          return
+        }
+
+        const payload = verifyToken(token)
+        if (!payload || payload.role !== 'daemon') {
+          send(socket, { type: 'error', message: 'Authentication failed' })
+          socket.close(4001, 'Authentication failed')
+          return
+        }
+
+        daemonId = payload.sub
+        authenticated = true
+
+        // Replace existing daemon connection (abort all pollers)
+        const existing = daemonSockets.get(daemonId)
+        if (existing && existing.socket !== socket) {
+          existing.pollerAbort.abort()
+          for (const ac of existing.userPollerAborts.values()) { ac.abort() }
+          existing.userPollerAborts.clear()
+          existing.socket.close(4000, 'Replaced by new daemon connection')
+        }
+
+        // Load bound users from DB
+        const userIds = await registry.getUsersByDaemon(daemonId)
+        const pollerAbort = new AbortController()
+        const ds: DaemonSocket = { socket, daemonId, userIds: new Set(userIds), pollerAbort, userPollerAborts: new Map() }
+        daemonSockets.set(daemonId, ds)
+
+        for (const uid of userIds) {
+          userToDaemon.set(uid, daemonId)
+        }
+
+        send(socket, { type: 'authenticated', daemonId, userIds })
+        fastify.log.info({ daemonId, userCount: userIds.length }, 'Daemon authenticated')
+
+        // Start control stream polling (per user with individual abort)
+        const lastControlIds: Record<string, string> = msg.lastControlIds || msg.payload?.lastControlIds || {}
+        for (const uid of userIds) {
+          const cursor = lastControlIds[uid] || '$'
+          const userAc = new AbortController()
+          ds.userPollerAborts.set(uid, userAc)
+          pollControlForDaemon(ds, uid, cursor, userAc.signal)
+        }
+
+        // Start daemon-events polling
+        pollDaemonEvents(ds, pollerAbort.signal)
+        return
+      }
+
+      if (!authenticated || !daemonId) {
+        return send(socket, { type: 'error', message: 'Not authenticated' })
+      }
+
+      /* ---- heartbeat ---- */
+      if (msg.type === 'heartbeat' || msg.type === 'ping') {
+        await queue.setWithTtl(`online:daemon:${daemonId}`, config.heartbeatTtl)
+        return
+      }
+
+      /* ---- control / chat (daemon → app) ---- */
+      if (msg.type === 'control' || msg.type === 'chat') {
+        const ds = daemonSockets.get(daemonId)
+        if (!ds) return
+
+        // v0.3.0: userId is required unless it's an event_stream broadcast
+        if (!msg.userId) {
+          const isEventStream = msg.payload?.type === 'event_stream'
+          if (!isEventStream) {
+            return send(socket, { type: 'error', message: 'Missing userId' })
+          }
+        }
+
+        const targetUserIds = msg.userId ? [msg.userId] : [...ds.userIds]
+
+        // Validate ownership for targeted messages
+        if (msg.userId && !ds.userIds.has(msg.userId)) {
+          return send(socket, { type: 'error', message: 'Unauthorized userId' })
+        }
+
+        for (const userId of targetUserIds) {
+          const stream = msg.type === 'chat'
+            ? `chat:${userId}:${msg.sessionId}`
+            : `control:${userId}`
+          const entry: Record<string, string> = {
+            sender: 'daemon',
+            payload: JSON.stringify(msg.payload),
+            timestamp: String(Date.now()),
+          }
+          if (msg.sessionId) entry.sessionId = msg.sessionId
+          if (msg.encrypted) entry.encrypted = '1'
+          const id = await queue.publish(stream, entry)
+
+          const outgoing: OutgoingMessage = { type: msg.type, id, userId, payload: msg.payload }
+          if (msg.sessionId) outgoing.sessionId = msg.sessionId
+          if (msg.encrypted) outgoing.encrypted = true
+
+          const apps = appBuckets.get(userId)
+          if (apps) {
+            for (const appSocket of apps) { send(appSocket, outgoing) }
+          }
+
+          if (!apps || apps.size === 0) {
+            await pushToOfflineApps(userId, msg.type === 'chat' ? 'New message' : 'Control', 'You have a new message')
+          }
+        }
+        return
+      }
+
+      send(socket, { type: 'error', message: `Unknown message type: ${msg.type}` })
+    })
+
+    socket.on('close', () => {
+      if (daemonId) {
+        const ds = daemonSockets.get(daemonId)
+        if (ds && ds.socket === socket) {
+          ds.pollerAbort.abort()
+          // Abort all per-user pollers
+          for (const ac of ds.userPollerAborts.values()) { ac.abort() }
+          ds.userPollerAborts.clear()
+          for (const uid of ds.userIds) {
+            if (userToDaemon.get(uid) === daemonId) userToDaemon.delete(uid)
+          }
+          daemonSockets.delete(daemonId)
+        }
+        fastify.log.info({ daemonId }, 'Daemon disconnected')
+      }
+    })
+
+    socket.on('error', (err: Error) => {
+      fastify.log.error({ daemonId, err: err.message }, 'Daemon WS error')
+    })
+  }
+
+  // -----------------------------------------------------------------------
+  // /ws/app
+  // -----------------------------------------------------------------------
+
+  fastify.get('/ws/app', { websocket: true } as any, (socket: any, _request: any) => {
+    handleAppConnection(socket)
+  })
+
+  function handleAppConnection (socket: WebSocket): void {
+    let userId: string | null = null
+    let authenticated = false
+    let controlCursor = '$'
+    const ac = new AbortController()
+
+    socket.on('message', async (raw: Buffer) => {
+      let msg: IncomingMessage
+      try { msg = JSON.parse(raw.toString()) } catch {
+        return send(socket, { type: 'error', message: 'Invalid JSON' })
+      }
+
+      /* ---- authenticate ---- */
+      if (msg.type === 'authenticate') {
+        const token: string | undefined = msg.payload?.token
+        if (!token) {
+          send(socket, { type: 'error', message: 'Missing token' })
+          socket.close(4001, 'Missing token')
+          return
+        }
+
+        const payload = verifyToken(token)
+        if (!payload || payload.role !== 'app') {
+          send(socket, { type: 'error', message: 'Authentication failed' })
+          socket.close(4001, 'Authentication failed')
+          return
         }
 
         userId = payload.sub
         authenticated = true
 
-        // Step 10: Use client-provided lastStreamId for reconnect cursor
         const clientLastStreamId: string | undefined = msg.payload?.lastStreamId
         if (clientLastStreamId && clientLastStreamId !== '$' && clientLastStreamId !== '0') {
           controlCursor = clientLastStreamId
         }
 
-        const bucket = getBucket(userId)
-        if (role === 'daemon') {
-          // Only one daemon connection per user
-          if (bucket.daemon) {
-            (bucket.daemon as any).close(4000, 'Replaced by new daemon connection')
-          }
-          bucket.daemon = socket
-        } else {
-          bucket.apps.add(socket)
-        }
-
+        getAppSockets(userId).add(socket)
         send(socket, { type: 'authenticated', userId })
-        fastify.log.info({ userId, role, controlCursor }, 'WebSocket authenticated')
+        fastify.log.info({ userId }, 'App authenticated')
 
-        // Start forwarding stream messages to this client
-        startStreamPolling(userId, role, socket, ac.signal)
+        pollControlForApp(userId, socket, controlCursor, ac.signal)
         return
       }
 
-      if (!authenticated) {
-        return send(socket, { type: 'error', message: 'Not authenticated. Send { type: "authenticate" } first.' })
+      if (!authenticated || !userId) {
+        return send(socket, { type: 'error', message: 'Not authenticated' })
       }
 
-      /* ---- heartbeat (daemon only) -- accept both 'heartbeat' and 'ping' ---- */
+      /* ---- heartbeat ---- */
       if (msg.type === 'heartbeat' || msg.type === 'ping') {
-        await queue.setWithTtl(`online:${userId}`, config.heartbeatTtl)
         return
       }
 
-      /* ---- control message ---- */
-      if (msg.type === 'control') {
-        const stream = `control:${userId}`
-        const entry: Record<string, string> = {
-          sender: role,
-          payload: JSON.stringify(msg.payload),
-          timestamp: String(Date.now()),
-        }
-        if (msg.encrypted) entry.encrypted = '1'
-        const id = await queue.publish(stream, entry)
-
-        // Forward to the other side immediately via connected sockets
-        const bucket = getBucket(userId!)
-        const outgoing: OutgoingMessage = { type: 'control', id, payload: msg.payload }
-        if (msg.encrypted) outgoing.encrypted = true
-
-        if (role === 'daemon') {
-          // Daemon sent -> forward to all apps
-          for (const appSocket of bucket.apps) {
-            send(appSocket, outgoing)
-          }
-          // Push notification to offline app devices
-          await pushToOfflineApps(userId!, 'Control', 'New control message')
-        } else {
-          // App sent -> forward to daemon
-          if (bucket.daemon) {
-            send(bucket.daemon, outgoing)
-          }
-        }
-        return
-      }
-
-      /* ---- chat message ---- */
-      if (msg.type === 'chat') {
-        const sessionId = msg.sessionId
-        if (!sessionId) {
+      /* ---- control / chat (app → daemon) ---- */
+      if (msg.type === 'control' || msg.type === 'chat') {
+        if (msg.type === 'chat' && !msg.sessionId) {
           return send(socket, { type: 'error', message: 'Missing sessionId for chat message' })
         }
 
-        const stream = `chat:${userId}:${sessionId}`
+        const stream = msg.type === 'chat'
+          ? `chat:${userId}:${msg.sessionId}`
+          : `control:${userId}`
+
         const entry: Record<string, string> = {
-          sender: role,
-          sessionId,
+          sender: 'app',
           payload: JSON.stringify(msg.payload),
           timestamp: String(Date.now()),
         }
+        if (msg.sessionId) entry.sessionId = msg.sessionId
         if (msg.encrypted) entry.encrypted = '1'
         const id = await queue.publish(stream, entry)
 
-        // Forward to the other side
-        const bucket = getBucket(userId!)
-        const outgoing: OutgoingMessage = { type: 'chat', id, sessionId, payload: msg.payload }
-        if (msg.encrypted) outgoing.encrypted = true
-
-        if (role === 'daemon') {
-          for (const appSocket of bucket.apps) {
-            send(appSocket, outgoing)
-          }
-          await pushToOfflineApps(userId!, 'New message', 'You have a new chat message')
-        } else {
-          if (bucket.daemon) {
-            send(bucket.daemon, outgoing)
+        // Forward to daemon
+        const daemonId = userToDaemon.get(userId)
+        if (daemonId) {
+          const ds = daemonSockets.get(daemonId)
+          if (ds) {
+            const outgoing: OutgoingMessage = { type: msg.type, id, userId, payload: msg.payload }
+            if (msg.sessionId) outgoing.sessionId = msg.sessionId
+            if (msg.encrypted) outgoing.encrypted = true
+            send(ds.socket, outgoing)
           }
         }
         return
@@ -234,75 +339,138 @@ export default async function wsRoutes (fastify: FastifyInstance): Promise<void>
     socket.on('close', () => {
       ac.abort()
       if (userId) {
-        removeSocket(userId, role, socket)
-        fastify.log.info({ userId, role }, 'WebSocket disconnected')
+        const apps = appBuckets.get(userId)
+        if (apps) {
+          apps.delete(socket)
+          if (apps.size === 0) appBuckets.delete(userId)
+        }
+        fastify.log.info({ userId }, 'App disconnected')
       }
     })
 
     socket.on('error', (err: Error) => {
-      fastify.log.error({ userId, role, err: err.message }, 'WebSocket error')
+      fastify.log.error({ userId, err: err.message }, 'App WS error')
     })
   }
 
-  /* ------------------------------------------------------------------
-   * Stream polling -- delivers queued messages that arrived while the
-   * client was disconnected or between immediate forwards.
-   * ----------------------------------------------------------------*/
+  // -----------------------------------------------------------------------
+  // Stream polling — Daemon (control only, per-user)
+  // -----------------------------------------------------------------------
 
-  async function startStreamPolling (userId: string, role: Role, socket: WebSocket, signal: AbortSignal): Promise<void> {
-    // Step 10: Use the per-connection controlCursor for reconnect resume
-    pollStream(`control:${userId}`, role, socket, userId, signal, controlCursor)
-  }
-
-  async function pollStream (stream: string, role: Role, socket: WebSocket, userId: string, signal: AbortSignal, initialCursor: string = '$'): Promise<void> {
+  async function pollControlForDaemon (
+    ds: DaemonSocket, userId: string, initialCursor: string, signal: AbortSignal
+  ): Promise<void> {
     let cursor = initialCursor
-
     while (!signal.aborted) {
       try {
-        const entries = await queue.consume(stream, cursor, 20)
+        const entries = await queue.consume(`control:${userId}`, cursor, 20)
         for (const entry of entries) {
           cursor = entry.id
-          const sender = entry.data.sender
-
-          // Don't echo messages back to the sender role
-          if (sender === role) continue
-
+          if (entry.data.sender === 'daemon') continue
           const payload = tryParseJSON(entry.data.payload)
-          const sessionId = entry.data.sessionId
           const encrypted = entry.data.encrypted === '1'
-
-          if (sessionId) {
-            const out: OutgoingMessage = { type: 'chat', id: entry.id, sessionId, payload }
-            if (encrypted) out.encrypted = true
-            send(socket, out)
-          } else {
-            const out: OutgoingMessage = { type: 'control', id: entry.id, payload }
-            if (encrypted) out.encrypted = true
-            send(socket, out)
-          }
+          const out: OutgoingMessage = { type: 'control', id: entry.id, userId, payload }
+          if (encrypted) out.encrypted = true
+          send(ds.socket, out)
         }
       } catch (err: any) {
-        // XREAD can fail if connection drops -- log and retry
         if (!signal.aborted) {
-          fastify.log.error({ err: err.message, stream }, 'Stream poll error')
+          fastify.log.error({ err: err.message, userId }, 'Daemon control poll error')
           await sleep(1000)
         }
       }
     }
   }
 
-  /* ------------------------------------------------------------------
-   * Push notifications for offline app devices
-   * ----------------------------------------------------------------*/
+  // -----------------------------------------------------------------------
+  // Stream polling — App (control for single user)
+  // -----------------------------------------------------------------------
+
+  async function pollControlForApp (
+    userId: string, socket: WebSocket, initialCursor: string, signal: AbortSignal
+  ): Promise<void> {
+    let cursor = initialCursor
+    while (!signal.aborted) {
+      try {
+        const entries = await queue.consume(`control:${userId}`, cursor, 20)
+        for (const entry of entries) {
+          cursor = entry.id
+          if (entry.data.sender === 'app') continue
+          const payload = tryParseJSON(entry.data.payload)
+          const encrypted = entry.data.encrypted === '1'
+          const out: OutgoingMessage = { type: 'control', id: entry.id, payload }
+          if (encrypted) out.encrypted = true
+          send(socket, out)
+        }
+      } catch (err: any) {
+        if (!signal.aborted) {
+          fastify.log.error({ err: err.message, userId }, 'App control poll error')
+          await sleep(1000)
+        }
+      }
+    }
+  }
+
+  // -----------------------------------------------------------------------
+  // Daemon events polling (user_bound / user_unbound)
+  // -----------------------------------------------------------------------
+
+  async function pollDaemonEvents (ds: DaemonSocket, signal: AbortSignal): Promise<void> {
+    const stream = `daemon-events:${ds.daemonId}`
+    let cursor = '$'
+
+    while (!signal.aborted) {
+      try {
+        const entries = await queue.consume(stream, cursor, 20)
+        for (const entry of entries) {
+          cursor = entry.id
+          const eventType = entry.data.type
+          const userId = entry.data.userId
+
+          if (eventType === 'user_bound' && userId) {
+            ds.userIds.add(userId)
+            userToDaemon.set(userId, ds.daemonId)
+            send(ds.socket, { type: 'user_bound', userId })
+            // Start per-user poller with its own abort
+            const userAc = new AbortController()
+            ds.userPollerAborts.set(userId, userAc)
+            pollControlForDaemon(ds, userId, '$', userAc.signal)
+            fastify.log.info({ daemonId: ds.daemonId, userId }, 'User bound (runtime)')
+          }
+
+          if (eventType === 'user_unbound' && userId) {
+            ds.userIds.delete(userId)
+            if (userToDaemon.get(userId) === ds.daemonId) {
+              userToDaemon.delete(userId)
+            }
+            // Stop per-user poller
+            const userAc = ds.userPollerAborts.get(userId)
+            if (userAc) {
+              userAc.abort()
+              ds.userPollerAborts.delete(userId)
+            }
+            send(ds.socket, { type: 'user_unbound', userId })
+            fastify.log.info({ daemonId: ds.daemonId, userId }, 'User unbound (runtime)')
+          }
+        }
+      } catch (err: any) {
+        if (!signal.aborted) {
+          fastify.log.error({ err: err.message, daemonId: ds.daemonId }, 'Daemon events poll error')
+          await sleep(1000)
+        }
+      }
+    }
+  }
+
+  // -----------------------------------------------------------------------
+  // Push notifications for offline app devices
+  // -----------------------------------------------------------------------
 
   async function pushToOfflineApps (userId: string, title: string, body: string): Promise<void> {
     try {
       const devices = await registry.getDevicesByUser(userId)
-      const bucket = getBucket(userId)
-
-      // Collect connected app device IDs (we'd need to track deviceId on socket
-      // for precise matching; for now push to all app tokens when no apps connected)
-      if (bucket.apps.size > 0) return // at least one app is online
+      const apps = appBuckets.get(userId)
+      if (apps && apps.size > 0) return
 
       for (const device of devices) {
         if (device.type === 'app' && device.pushToken) {
@@ -312,27 +480,5 @@ export default async function wsRoutes (fastify: FastifyInstance): Promise<void>
     } catch (err: any) {
       fastify.log.error({ err: err.message, userId }, 'Push notification error')
     }
-  }
-
-  /* ------------------------------------------------------------------
-   * Helpers
-   * ----------------------------------------------------------------*/
-
-  function send (socket: WebSocket, data: OutgoingMessage): void {
-    if ((socket as any).readyState === 1) { // WebSocket.OPEN
-      socket.send(JSON.stringify(data))
-    }
-  }
-
-  function tryParseJSON (str: string): any {
-    try {
-      return JSON.parse(str)
-    } catch {
-      return str
-    }
-  }
-
-  function sleep (ms: number): Promise<void> {
-    return new Promise((resolve) => setTimeout(resolve, ms))
   }
 }
