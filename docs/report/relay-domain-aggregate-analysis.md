@@ -1,0 +1,415 @@
+# Relay 도메인 Aggregate 분석서
+
+> relay 패키지의 5개 도메인 Aggregate를 타입 그래프(33 nodes, 44 edges) 기반으로 식별하고, 도메인 간 관계 → 기능 축 → 시나리오 순서로 풀어낸 아키텍처 원페이저
+
+---
+
+## Section 1 — 한줄 정의
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                           relay 전체 구조                                │
+│                                                                         │
+│  "Daemon과 App 사이에서 JWT로 인증하고, Redis Streams로 메시지를 중계하며,│
+│   PostgreSQL에 사용자/데몬 바인딩을 영속하는 멀티플렉스 게이트웨이"        │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Section 2 — 도메인 Aggregate
+
+### 레지스트리 (Registry)
+
+> "사용자, 데몬, 디바이스, 세션, 바인딩, 인증 토큰을 PostgreSQL에 영속하는 ID 관리 계층"
+
+Aggregate Root: `RegistryAdapter` — port (`registry-adapter.ts:19`)
+생애주기: 정적 — 서버 부팅 시 migrate, 종료 시 close
+
+```
+  ┌──────────────────────────────────────────────────────────────────┐
+  │                                                                  │
+  │  CreateUserParams ─input─→ [RegistryAdapter] ──→ UserRecord      │
+  │  CreateDaemonParams ─────→     (port)        ──→ DaemonRecord    │
+  │  RegisterDeviceParams ───→       │           ──→ DeviceRecord    │
+  │  CreateSessionParams ────→       │           ──→ SessionRecord   │
+  │  CreateRefreshTokenParams→       │           ──→ RefreshTokenRecord│
+  │                                  │                                │
+  │                                  ├──→ DaemonUserRecord (바인딩)   │
+  │                                  ├──→ EnrollmentCodeRecord        │
+  │                                  ├──→ DeviceListItem (output)     │
+  │                                  └──→ SessionListItem (output)    │
+  │                                                                  │
+  │  PgRegistry ── (core, extends RegistryAdapter)                   │
+  │    Pool(PostgreSQL) 기반 구현                                      │
+  │                                                                  │
+  │  PgRegistryOptions ── config ── { databaseUrl }                  │
+  │                                                                  │
+  └──────────────────────────────────────────────────────────────────┘
+```
+
+- **RegistryAdapter** — 추상 클래스. 6개 엔티티(User, Daemon, Device, Session, DaemonUser, RefreshToken, EnrollmentCode) CRUD 메서드 정의. 구현은 PgRegistry
+- **UserRecord** — `{ id, passwordHash, createdAt }`. Google OAuth 시 passwordHash=null
+- **DaemonRecord** — `{ id, secretHash, createdAt }`. daemon self-register로 생성
+- **DaemonUserRecord** — `{ daemonId, userId, boundAt }`. **UNIQUE(userId)** — 1 user : 1 daemon 강제
+- **EnrollmentCodeRecord** — `{ code, daemonId, expiresAt, usedAt }`. 5분 TTL, 1회 사용
+- **RefreshTokenRecord** — `{ id, subjectId, role, deviceId, expiresAt, revokedAt }`. daemon/app 공용
+
+---
+
+### 큐 (Queue)
+
+> "Redis Streams 기반으로 control/chat 메시지를 영속적으로 publish/consume하고, heartbeat TTL을 관리하는 전송 계층"
+
+Aggregate Root: `QueueAdapter` — port (`queue-adapter.ts:19`)
+생애주기: 정적 — 서버 부팅 시 생성, 종료 시 close
+
+```
+  ┌──────────────────────────────────────────────────────────────────┐
+  │                                                                  │
+  │  stream key ─input─→ [QueueAdapter] ──→ StreamEntry              │
+  │  "control:{userId}"      (port)         (output)                 │
+  │  "chat:{userId}:{sessId}"  │          { id: Redis stream ID      │
+  │                            │            data: Record<str,str> }   │
+  │                            │                                     │
+  │                     publish(stream, msg) → id                    │
+  │                     consume(stream, cursor) → StreamEntry[]      │
+  │                     readRange(stream, start, end) → StreamEntry[]│
+  │                     setWithTtl(key, ttl) → heartbeat             │
+  │                     exists(key) → online 체크                     │
+  │                                                                  │
+  │  RedisQueue ── (core, extends QueueAdapter)                      │
+  │    redis: ioredis (쓰기 전용)                                     │
+  │    blockingRedis: ioredis (XREAD BLOCK 전용, 별도 연결)            │
+  │                                                                  │
+  │  RedisQueueOptions ── config ── { url }                          │
+  │                                                                  │
+  └──────────────────────────────────────────────────────────────────┘
+```
+
+- **QueueAdapter** — 추상 클래스. publish/consume/readRange/setWithTtl/exists/trim/close. 스트림 키 규약: `control:{userId}`, `chat:{userId}:{sessionId}`
+- **StreamEntry** — `{ id, data }`. id는 Redis stream entry ID (timestamp 기반), data는 `{ sender, payload, timestamp, sessionId?, encrypted? }`
+- **RedisQueue** — 2개 ioredis 연결 사용. blockingRedis는 XREAD BLOCK 전용 (head-of-line blocking 방지)
+
+---
+
+### 인증 (Auth)
+
+> "JWT 발급/검증, 비밀번호 해싱, Google OAuth ID token 검증, refresh token 관리를 담당하는 인증 계층"
+
+Aggregate Root: 함수 집합 (auth.ts — 진입점이 여러 라우트)
+생애주기: **register → login → JWT 발급 → refresh → (revoke)**
+
+```
+  ┌──────────────────────────────────────────────────────────────────┐
+  │                                                                  │
+  │  ── Daemon 인증 ──                                               │
+  │  POST /daemon/register { daemonId, secret }                      │
+  │    → hashPassword → registry.createDaemon                        │
+  │                                                                  │
+  │  POST /daemon/login { daemonId, secret }                         │
+  │    → verifyPassword → signDaemonToken → issueRefreshToken        │
+  │                                                                  │
+  │  ── App 인증 ──                                                   │
+  │  POST /google { idToken }                                        │
+  │    → verifyGoogleIdToken → registry.createUser (auto)            │
+  │    → signAppToken → issueRefreshToken                            │
+  │                                                                  │
+  │  ── 공용 ──                                                       │
+  │  POST /refresh { refreshToken }                                  │
+  │    → registry.getRefreshToken → rotation + replay detection      │
+  │    → signToken(role) → issueRefreshToken (new)                   │
+  │                                                                  │
+  │  ── Enrollment ──                                                 │
+  │  POST /daemon/enroll (daemon JWT)                                │
+  │    → generateEnrollmentCode → registry.createEnrollmentCode      │
+  │                                                                  │
+  │  POST /enroll/confirm (app JWT)                                  │
+  │    → registry.claimEnrollmentCode (atomic)                       │
+  │    → registry.bindUser → queue.publish(user_bound)               │
+  │                                                                  │
+  │  JwtPayload ── value ── { sub, role:'daemon'|'app', deviceId? }  │
+  │                                                                  │
+  └──────────────────────────────────────────────────────────────────┘
+```
+
+- **signDaemonToken / signAppToken** — JWT 생성. role 필드로 daemon/app 구분
+- **verifyToken** — JWT 검증 + JwtPayload 반환. WS 핸드셰이크에서도 사용
+- **verifyGoogleIdToken** — Google 공개키로 ID token 서명 검증 (issuer, expiry, audience)
+- **hashPassword / verifyPassword** — SHA-256 + salt + timingSafeEqual
+- **issueRefreshToken** — DB에 저장, rotation 시 이전 토큰 revoke, replay 감지
+
+---
+
+### 소켓 (Socket)
+
+> "Daemon과 App의 WebSocket 연결을 관리하고, 메시지를 양방향으로 라우팅하는 실시간 중계 계층"
+
+Aggregate Root: `wsRoutes` 함수 내부 상태 (`ws.ts:49-59`)
+생애주기: **connecting → authenticated → active ⇄ disconnected**
+
+```
+  ┌──────────────────────────────────────────────────────────────────┐
+  │                                                                  │
+  │  ── 연결 상태 (인메모리) ──                                       │
+  │                                                                  │
+  │  daemonSockets: Map<daemonId, DaemonSocket>                      │
+  │    DaemonSocket = { socket, daemonId, userIds: Set,              │
+  │                     pollerAbort, userPollerAborts: Map }          │
+  │                                                                  │
+  │  userToDaemon: Map<userId, daemonId>                             │
+  │    → "이 사용자의 메시지를 어느 daemon에게 보낼까?"                 │
+  │                                                                  │
+  │  appBuckets: Map<userId, Set<WebSocket>>                         │
+  │    → "이 사용자의 앱 소켓들" (다중 디바이스 가능)                   │
+  │                                                                  │
+  │  ── /ws/daemon 핸들러 ──                                          │
+  │  authenticate → load bound userIds → per-user control poller     │
+  │  → daemon-events poller (user_bound/unbound 실시간 반영)          │
+  │  → daemon→app: ownership 검증 후 Redis XADD + app 소켓 forward   │
+  │                                                                  │
+  │  ── /ws/app 핸들러 ──                                             │
+  │  authenticate → control poller + chat backfill (cursor 기반)     │
+  │  → app→daemon: Redis XADD + daemon 소켓 forward                  │
+  │  → subscribe_chat: 새 세션 발견 시 one-shot backfill              │
+  │                                                                  │
+  │  ── 보조 함수 ──                                                   │
+  │  pollControlForDaemon — per-user XREAD 루프 (sender≠daemon skip) │
+  │  pollControlForApp — single-user XREAD 루프 (sender≠app skip)    │
+  │  backfillChatStream — one-shot XRANGE (오프라인 cron 복구)         │
+  │  pollDaemonEvents — user_bound/unbound 실시간 반영                │
+  │  pushToOfflineApps — 앱 오프라인 시 Expo push notification        │
+  │                                                                  │
+  └──────────────────────────────────────────────────────────────────┘
+```
+
+- **DaemonSocket** — daemon 연결 상태. `userIds`로 소유 사용자 추적, `userPollerAborts`로 per-user poller 개별 제어
+- **userToDaemon** — 라우팅 핵심 맵. app→daemon 메시지 전달 시 이 맵으로 대상 daemon 결정
+- **appBuckets** — 사용자별 앱 소켓 집합. 다중 디바이스 동시 접속 지원
+- **echo 방지** — poller가 sender 필드를 확인해서 자기가 보낸 메시지 skip
+
+---
+
+### 방어 (RateLimit)
+
+> "IP 기반 sliding-window 속도 제한으로 HTTP 라우트를 보호하는 미들웨어"
+
+Aggregate Root: `RateLimiter` — core (`rate-limit.ts:30`)
+생애주기: 정적 — 서버 부팅 시 생성
+
+```
+  ┌──────────────────────────────────────────────────────────────┐
+  │                                                              │
+  │  FastifyRequest ──→ [RateLimiter] ──→ RateLimitCheckResult   │
+  │    (input)            (core)           (output)              │
+  │    req.ip          인메모리 Map       { allowed, remaining,  │
+  │                    <IP, timestamps[]>   retryAfterMs }       │
+  │                                                              │
+  │  RateLimitOptions ── config ── { max:100, windowMs:60s }     │
+  │                                                              │
+  └──────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Section 3 — 도메인 관계 맵
+
+```
+  ┌──────────┐                    ┌────────┐
+  │ Registry │←──reads/writes────│  Auth  │
+  │(PG 영속) │                    │(JWT+PW)│
+  └────┬─────┘                    └───┬────┘
+       │                              │
+       │ bindUser                     │ verifyToken
+       │ getUsersByDaemon             │
+       ▼                              ▼
+  ┌──────────┐──publish/consume──→┌────────┐
+  │  Queue   │                    │ Socket │
+  │(Redis)   │←──XREAD poll──────│ (WS)   │
+  └──────────┘                    └───┬────┘
+                                      │
+                                      │ preHandler
+                                      ▼
+                                 ┌──────────┐
+                                 │RateLimit │
+                                 │(인메모리) │
+                                 └──────────┘
+```
+
+| 관계 | 설명 |
+|------|------|
+| **Auth → Registry** | 사용자/데몬 생성, 로그인 검증, refresh token 관리, enrollment code claim + bindUser |
+| **Auth → Queue** | enrollment confirm 시 `queue.publish(daemon-events:{daemonId}, user_bound)` |
+| **Socket → Auth** | WS 인증 시 `verifyToken(JWT)`으로 역할+subject 확인 |
+| **Socket → Registry** | daemon 인증 후 `registry.getUsersByDaemon(daemonId)`로 바인딩된 사용자 로드 |
+| **Socket → Queue** | 메시지 중계: `queue.publish` (영속) + 소켓 직접 forward (실시간) |
+| **Socket ← Queue** | per-user control poller가 `queue.consume` (XREAD BLOCK)으로 수신 |
+| **RateLimit → (전체)** | `preHandler` 훅으로 모든 HTTP 라우트에 적용 |
+
+---
+
+## Section 4 — 기능 축 다이어그램
+
+```
+                          3개의 큰 축:
+
+  ┌────────────────────┐  ┌────────────────────┐  ┌────────────────────┐
+  │ A. 인증 & 바인딩    │  │ B. 메시지 중계      │  │ C. 오프라인 복구    │
+  │ "누가 누구인가,     │  │ "App↔Daemon 메시지를 │  │ "재연결 시 놓친    │
+  │  누구와 연결되는가?" │  │  실시간으로 전달"    │  │  메시지를 복원"     │
+  │ [Auth+Registry]    │  │ [Socket+Queue]      │  │ [Queue+Socket]    │
+  └────────┬───────────┘  └────────┬───────────┘  └────────┬───────────┘
+           │                       │                       │
+           ▼                       ▼                       ▼
+```
+
+---
+
+## Section 5 — 축별 상세 설명
+
+```
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃                                                                            ┃
+┃  A. 인증 & 바인딩 (Auth & Binding)                                         ┃
+┃  ──────────────────────────────────                                        ┃
+┃  "이 연결이 누구(daemon/app)이고, 어떤 사용자와 연결되는가?"                ┃
+┃  관여 도메인: Auth, Registry                                                ┃
+┃                                                                            ┃
+┃  Daemon 흐름:                                                               ┃
+┃    login(id,secret) ──→ JWT(role:daemon) ──→ WS authenticate              ┃
+┃    enroll() ──→ code(5min TTL) ──→ 터미널 출력                              ┃
+┃                                                                            ┃
+┃  App 흐름:                                                                  ┃
+┃    google(idToken) ──→ JWT(role:app) ──→ WS authenticate                  ┃
+┃    enroll/confirm(code) ──→ bindUser(daemonId,userId)                      ┃
+┃                          ──→ publish(user_bound)                           ┃
+┃                                                                            ┃
+┃  바인딩 규칙:                                                               ┃
+┃    daemon_users: UNIQUE(user_id) — 1 user : 1 daemon                      ┃
+┃    userToDaemon: Map<userId, daemonId> — 인메모리 라우팅 맵                  ┃
+┃                                                                            ┃
+┣━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┫
+```
+
+```
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃                                                                            ┃
+┃  B. 메시지 중계 (Message Relay)                                            ┃
+┃  ──────────────────────────────                                            ┃
+┃  "App과 Daemon 사이의 메시지를 어떻게 실시간으로 전달하는가?"               ┃
+┃  관여 도메인: Socket, Queue                                                 ┃
+┃                                                                            ┃
+┃  App→Daemon:                                                                ┃
+┃    app WS ──→ Relay ──→ Redis XADD (영속)                                  ┃
+┃                       ──→ daemonSocket forward (실시간)                     ┃
+┃                                                                            ┃
+┃  Daemon→App:                                                                ┃
+┃    daemon WS ──→ Relay ──→ ownership 검증 (daemon_users)                   ┃
+┃                          ──→ Redis XADD (영속)                              ┃
+┃                          ──→ appBuckets[userId] forward (실시간)            ┃
+┃                          ──→ 앱 오프라인? push notification                 ┃
+┃                                                                            ┃
+┃  Daemon→App (per-user control):                                             ┃
+┃    per-user poller ──→ XREAD BLOCK control:{userId}                        ┃
+┃                     ──→ sender≠daemon인 것만 daemon에 forward              ┃
+┃                                                                            ┃
+┃  스트림 키:                                                                  ┃
+┃    control:{userId}           — durable (reconnect resume)                 ┃
+┃    chat:{userId}:{sessionId}  — 실시간 forward + backfill                  ┃
+┃    daemon-events:{daemonId}   — bind/unbind 이벤트                         ┃
+┃                                                                            ┃
+┣━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┫
+```
+
+```
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃                                                                            ┃
+┃  C. 오프라인 복구 (Offline Recovery)                                       ┃
+┃  ──────────────────────────────────                                        ┃
+┃  "Daemon이나 App이 재연결했을 때 놓친 메시지를 어떻게 복원하는가?"          ┃
+┃  관여 도메인: Queue, Socket                                                 ┃
+┃                                                                            ┃
+┃  Daemon 재연결:                                                             ┃
+┃    authenticate({ lastControlIds: { alice:'1234-0', bob:'$' } })           ┃
+┃    → per-user cursor 기반 control stream resume                            ┃
+┃    → chat은 resume 안 함 (새 메시지 도착 시 자연 재개)                      ┃
+┃                                                                            ┃
+┃  App 재연결:                                                                ┃
+┃    authenticate({ lastStreamId, chatCursors: { s1:'5678-0' } })            ┃
+┃    → control stream: lastStreamId 이후 resume                              ┃
+┃    → chat streams: chatCursors의 각 sessionId에 대해 backfill              ┃
+┃      backfillChatStream() → XRANGE (one-shot, max 1000건)                  ┃
+┃                                                                            ┃
+┃  내구성 정책:                                                               ┃
+┃    control = durable (반드시 replay)                                        ┃
+┃    chat = backfill (요청 시에만, 주로 오프라인 cron 복구용)                  ┃
+┃                                                                            ┃
+┣━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┫
+```
+
+---
+
+## Section 6 — 시나리오
+
+```
+                      3개 축의 연결:
+
+  [첫 실행] → [A. 인증&바인딩] → daemon+app 인증 + enrollment
+                                       │
+                                       ▼
+  [정상 운영] → [B. 메시지 중계] → Redis 영속 + WS 실시간 forward
+                                       │
+                                       ▼ (연결 끊김 후)
+  [재연결] → [C. 오프라인 복구] → cursor 기반 resume + backfill
+```
+
+### 시나리오 1: Enrollment — Daemon과 App 최초 바인딩
+
+```
+Daemon 부팅
+  → [축A] POST /daemon/login → JWT 발급
+  → [축A] POST /daemon/enroll → enrollment code "A7K9M2" (5분 TTL)
+  → 터미널에 코드 출력
+
+사용자가 앱에서 코드 입력
+  → [축A] POST /enroll/confirm { code: "A7K9M2" } (app JWT)
+    → registry.claimEnrollmentCode (EnrollmentCode: →used)
+    → registry.bindUser (DaemonUser: created)
+    → queue.publish(daemon-events, user_bound)
+  → [축B] daemon의 pollDaemonEvents가 user_bound 수신
+    → userIds.add(userId) + control poller 시작
+    → 이제 양방향 통신 준비 완료
+```
+
+### 시나리오 2: App이 채팅 전송 → Daemon 응답
+
+```
+App이 채팅 전송
+  → [축B] app WS → { type:'chat', sessionId:'s1', payload:{ text:'...' } }
+    → Relay: Redis XADD chat:{userId}:s1
+    → Relay: userToDaemon.get(userId) → daemonSocket forward
+
+Daemon이 응답 (stream delta)
+  → [축B] daemon WS → { type:'chat', userId, sessionId:'s1', payload:{ type:'stream', delta:'...' } }
+    → Relay: ownership 검증 (daemon_users)
+    → Relay: Redis XADD chat:{userId}:s1
+    → Relay: appBuckets[userId] → 모든 앱 소켓에 forward
+```
+
+### 시나리오 3: App 오프라인 중 Cron 실행 → 재연결 시 복구
+
+```
+App 오프라인 상태에서 Daemon의 Cron이 실행
+  → [축B] daemon → Relay → Redis XADD chat:{userId}:cron-session
+    → appBuckets[userId] = 빈 Set → push notification 전송
+
+App 재연결
+  → [축C] WS authenticate({ chatCursors: { 'cron-session': '0' } })
+    → backfillChatStream(userId, 'cron-session', '0', socket)
+    → XRANGE chat:{userId}:cron-session '0' '+' COUNT 1000
+    → 놓친 cron 결과 메시지를 한 번에 수신
+```
+
+---
+
+**작성일**: 2026-03-22 00:30 KST

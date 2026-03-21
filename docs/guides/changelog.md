@@ -1,5 +1,39 @@
 # Changelog
 
+## v0.3.6 - Daemon Self-Register (2026-03-22)
+
+- **Self-register 자동화**: daemon 첫 실행 시 login 401 → `POST /auth/daemon/register` 자동 호출 → login 재시도. 수동 등록 없이 relay에 자동 연결
+- **authenticateWithRelay 함수 분리**: `relay-auth.ts`로 auth 로직 추출. login/register/retry 3단계 플로우 + 401 구분 전략 (미등록 vs 잘못된 secret)
+- **7개 단위 테스트**: 미등록, 잘못된 secret, 정상, 동시 등록, 에러 핸들링(register 5xx, login 비-401, retry 실패) 시나리오 커버
+- 📝 [Phase 문서](../archive/v0.3.6-daemon-self-register/README.md)
+
+### 수치
+- daemon 67 tests pass (기존 60 + 신규 7)
+- 3 files changed (2 new, 1 modified)
+
+## v0.3.5 - Dead Exports CI 체크 포팅 (2026-03-22)
+
+- **cross/dead-exports 체크 신규**: HypurrQuant에서 검증된 미사용 export 탐지 로직을 WDK-APP 체크 프레임워크에 포팅. `npx tsx scripts/check/index.ts --check=cross/dead-exports`로 파일 내부 미사용 export 자동 탐지
+- **export 레벨 dead code 탐지**: 기존 `cross/dead-files`는 파일 단위 도달 가능성만 검사 — 신규 체크는 ts-morph `getExportedDeclarations()` + import 소비자 추적으로 파일 내부 미사용 export까지 커버
+- **스캔 대상**: guarded-wdk, daemon, relay, manifest, app, canonical, protocol 7개 패키지
+- 📝 [Phase 문서](../archive/v0.3.5-dead-exports-check/README.md)
+
+### 수치
+- 94개 dead export 탐지, CI 15개 체크 중 13 pass (2건 pre-existing)
+- 2 files changed (1 new, 1 modified)
+
+## v0.3.4 - Dead Code 정리 + Pairing 전면 제거 (2026-03-22)
+
+- **Pairing 3패키지 전면 제거**: daemon `PairingSession` + `pairing_confirm` handler (73줄), protocol `PairingConfirmPayload` + `ControlMessage` variant, app `PairingService.ts` (183줄) + SettingsScreen pairing UI 삭제
+- **No Optional 원칙 복원**: `handleChatMessage`의 `queueManager` optional → required. 실행 불가 else 분기(No Fallback 위반) 삭제
+- **Daemon misc dead code**: `ToolResult` deprecated alias, `listPending()` + `PendingMessageRequest` 미사용 코드, `getQueue()` public→private, 중복 JSDoc 정리
+- **App pairing 문구 정리**: "re-pair" → "re-enroll", "device pairing first" → "generate an identity key first" 등 사용자 대면 문구 일괄 수정
+- 📝 [Phase 문서](../archive/v0.3.4-daemon-dead-code-cleanup/README.md)
+
+### 수치
+- daemon 60 tests pass, protocol tsc clean, CI 13/14 (1건 pre-existing)
+- 40 files changed, +46 -2,364
+
 ## v0.3.1 - App 채팅 UX 완성 (2026-03-21)
 
 - **대화 이력 영속성**: useChatStore를 Record\<sessionId, messages[]\> 구조로 전면 재설계 + zustand persist + AsyncStorage. 앱 재시작 후 모든 세션 메시지 유지

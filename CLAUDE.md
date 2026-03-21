@@ -4,112 +4,42 @@ AI DeFi Agent 서명 엔진 + 제어 인프라.
 
 ## 현재 페이즈
 
-### v0.1.7 — Store 타입 네이밍 통일
-- **상태**: Step 1 - PRD
-- **문서**: [docs/phases/v0.1.7-store-naming/](docs/phases/v0.1.7-store-naming/)
-- **Codex Session ID**: `/Users/mousebook/Documents/GitHub/WDK-APP/docs/phases/v0.1.7-store-naming`
-- **시작일**: 2026-03-19
+## 완료된 페이즈
 
-### v0.1.8 — EvaluationResult 정책 컨텍스트 추가
-- **상태**: Step 1 - PRD
-- **문서**: [docs/phases/v0.1.8-evaluation-context/](docs/phases/v0.1.8-evaluation-context/)
-- **Codex Session ID**: `/Users/mousebook/Documents/GitHub/WDK-APP/docs/phases/v0.1.8-evaluation-context`
-- **시작일**: 2026-03-19
+모든 완료 문서는 [docs/archive/](docs/archive/)에 보관.
 
-### v0.1.9 — Device → Signer 추상화
-- **상태**: Step 5 완료 (커밋 대기)
-- **문서**: [docs/phases/v0.1.9-signer-abstraction/](docs/phases/v0.1.9-signer-abstraction/)
-- **Codex Session ID**: `/Users/mousebook/Documents/GitHub/WDK-APP/docs/phases/v0.1.9-signer-abstraction`
-- **시작일**: 2026-03-19
-
-### v0.1.10 — Layer 0 Semantic Union 도입
-- **상태**: Step 5 완료 (커밋 대기)
-- **문서**: [docs/phases/v0.1.10-semantic-unions/](docs/phases/v0.1.10-semantic-unions/)
-- **Codex Session ID**: `/Users/mousebook/Documents/GitHub/WDK-APP/docs/phases/v0.1.10-semantic-unions`
-- **시작일**: 2026-03-19
-
-### v0.2.0 — BIP-44 멀티 월렛 아키텍처
-- **상태**: Step 1 - PRD
-- **문서**: [docs/phases/v0.2.0-bip44-wallet/](docs/phases/v0.2.0-bip44-wallet/)
-- **Codex Session ID**: `/Users/mousebook/Documents/GitHub/WDK-APP/docs/phases/v0.2.0-bip44-wallet`
-- **시작일**: 2026-03-19
-
-### v0.2.1 — Stored extends Input 타입 통일
-- **상태**: Step 1 - PRD
-- **문서**: [docs/phases/v0.2.1-stored-extends-input/](docs/phases/v0.2.1-stored-extends-input/)
-- **Codex Session ID**: `/Users/mousebook/Documents/GitHub/WDK-APP/docs/phases/v0.2.1-stored-extends-input`
-- **시작일**: 2026-03-20
-
-### v0.2.4 — WDK 외부 타입 직접 참조
-- **상태**: Step 1 - PRD
-- **문서**: [docs/phases/v0.2.4-wdk-type-safety/](docs/phases/v0.2.4-wdk-type-safety/)
-- **Codex Session ID**: `/Users/mousebook/Documents/GitHub/WDK-APP/docs/phases/v0.2.4-wdk-type-safety`
-- **시작일**: 2026-03-20
-
-### v0.2.5 — Decision 단순화 + 정책 버전 이력
-- **상태**: Step 1 - PRD
-- **문서**: [docs/phases/v0.2.5-decision-simplification/](docs/phases/v0.2.5-decision-simplification/)
-- **Codex Session ID**: `/Users/mousebook/Documents/GitHub/WDK-APP/docs/phases/v0.2.5-decision-simplification`
-- **시작일**: 2026-03-20
-
-### v0.2.6 — Daemon 타입 경계 정합성 복원
-- **상태**: Step 1 - PRD
-- **문서**: [docs/phases/v0.2.6-daemon-boundary-normalization/](docs/phases/v0.2.6-daemon-boundary-normalization/)
-- **Codex Session ID**: `/Users/mousebook/Documents/GitHub/WDK-APP/docs/phases/v0.2.6-daemon-boundary-normalization`
-- **시작일**: 2026-03-20
-
-### v0.2.8 — Manifest 정책 호환성 복원
-- **상태**: Step 5 완료 (커밋 대기)
-- **문서**: [docs/phases/v0.2.8-manifest-policy-compat/](docs/phases/v0.2.8-manifest-policy-compat/)
-- **Codex Session ID**: `/Users/mousebook/Documents/GitHub/WDK-APP/docs/phases/v0.2.8-manifest-policy-compat`
-- **시작일**: 2026-03-20
-
-### v0.2.7 — signerId === publicKey 통합
-- **상태**: Step 1 - PRD
-- **문서**: [docs/phases/v0.2.7-signer-id-unification/](docs/phases/v0.2.7-signer-id-unification/)
-- **Codex Session ID**: `/Users/mousebook/Documents/GitHub/WDK-APP/docs/phases/v0.2.7-signer-id-unification`
-- **시작일**: 2026-03-20
-
-### v0.2.9 — Daemon Wide-Bag Union 분리
-- **상태**: Step 1 - PRD
-- **문서**: [docs/phases/v0.2.9-daemon-wide-bag-union/](docs/phases/v0.2.9-daemon-wide-bag-union/)
-- **Codex Session ID**: `/Users/mousebook/Documents/GitHub/WDK-APP/docs/phases/v0.2.9-daemon-wide-bag-union`
-- **시작일**: 2026-03-20
-
-### v0.2.10 — WDKContext 분해 + Port Interface
-- **상태**: Step 1 - PRD
-- **문서**: [docs/phases/v0.2.10-wdkcontext-decomposition/](docs/phases/v0.2.10-wdkcontext-decomposition/)
-- **Codex Session ID**: `/Users/mousebook/Documents/GitHub/WDK-APP/docs/phases/v0.2.10-wdkcontext-decomposition`
-- **시작일**: 2026-03-20
-
-### v0.2.11 — Daemon 타입 인프라 정리
-- **상태**: Step 1 - PRD
-- **문서**: [docs/phases/v0.2.11-daemon-type-infra-cleanup/](docs/phases/v0.2.11-daemon-type-infra-cleanup/)
-- **Codex Session ID**: `/Users/mousebook/Documents/GitHub/WDK-APP/docs/phases/v0.2.11-daemon-type-infra-cleanup`
-- **시작일**: 2026-03-20
-
-### v0.3.0 — Relay Daemon Multiplex
-- **상태**: Step 1 - PRD
-- **문서**: [docs/phases/v0.3.0-relay-daemon-multiplex/](docs/phases/v0.3.0-relay-daemon-multiplex/)
-- **Codex Session ID**: `/Users/mousebook/Documents/GitHub/WDK-APP/docs/phases/v0.3.0-relay-daemon-multiplex`
-- **시작일**: 2026-03-21
-
-### v0.3.1 — App 채팅 UX 완성
-- **상태**: ✅ 완료 (아카이브)
-- **문서**: [docs/archive/v0.3.1-app-chat-ux/](docs/archive/v0.3.1-app-chat-ux/)
-- **시작일**: 2026-03-21
-
-### v0.3.2 — 프로토콜 타입 중복 제거 + 취소 API 분리
-- **상태**: ✅ 완료 (아카이브)
-- **문서**: [docs/phases/v0.3.2-protocol-dedup-cancel-split/](docs/phases/v0.3.2-protocol-dedup-cancel-split/)
-- **Codex Session ID**: `/Users/mousebook/Documents/GitHub/WDK-APP/docs/phases/v0.3.2-protocol-dedup-cancel-split`
-- **시작일**: 2026-03-21
-
-### v0.3.3 — Relay 오프라인 Cron 복구 통합
-- **상태**: Step 1 - PRD
-- **문서**: [docs/phases/v0.3.3-relay-offline-cron-recovery/](docs/phases/v0.3.3-relay-offline-cron-recovery/)
-- **Codex Session ID**: `/Users/mousebook/Documents/GitHub/WDK-APP/docs/phases/v0.3.3-relay-offline-cron-recovery`
-- **시작일**: 2026-03-21
+| 버전 | 이름 |
+|---|---|
+| v0.1.0 | WDK App Platform |
+| v0.1.1 | Manifest Role Fix |
+| v0.1.2 | TS Migration |
+| v0.1.3 | CI Checks & Type Graph |
+| v0.1.4 | Type Refactoring |
+| v0.1.5 | Gap Resolution |
+| v0.1.6 | Layer 0 Type Cleanup |
+| v0.1.7 | Store 타입 네이밍 통일 |
+| v0.1.8 | EvaluationResult 정책 컨텍스트 |
+| v0.1.9 | Device → Signer 추상화 |
+| v0.1.10 | Layer 0 Semantic Union |
+| v0.2.0 | BIP-44 멀티 월렛 아키텍처 |
+| v0.2.1 | Stored extends Input 타입 통일 |
+| v0.2.2 | Policy Resolver |
+| v0.2.3 | Manifest Type Dedup |
+| v0.2.4 | WDK 외부 타입 직접 참조 |
+| v0.2.5 | Decision 단순화 + 정책 버전 이력 |
+| v0.2.6 | Daemon 타입 경계 정합성 복원 |
+| v0.2.7 | signerId === publicKey 통합 |
+| v0.2.8 | Manifest 정책 호환성 복원 |
+| v0.2.9 | Daemon Wide-Bag Union 분리 |
+| v0.2.10 | WDKContext 분해 + Port Interface |
+| v0.2.11 | Daemon 타입 인프라 정리 |
+| v0.3.0 | Relay Daemon Multiplex |
+| v0.3.1 | App 채팅 UX 완성 |
+| v0.3.2 | 프로토콜 타입 중복 제거 + 취소 API 분리 |
+| v0.3.3 | Relay 오프라인 Cron 복구 통합 |
+| v0.3.4 | Dead Code 정리 + Pairing 전면 제거 |
+| v0.3.5 | Dead Exports CI 체크 포팅 |
+| v0.3.6 | Daemon Self-Register |
 
 ## 프로젝트 구조
 
