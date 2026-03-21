@@ -5,7 +5,7 @@
  * - WebSocket connection with exponential backoff reconnect
  * - Send/receive on control_channel (SignedApproval, device ops)
  * - Send/receive on chat_queue (user <-> OpenClaw messages)
- * - REST auth (login, pair)
+ * - REST auth (login, enroll)
  * - Last Stream ID tracking for cursor-based sync on reconnect
  *
  * The Relay server is a blind transport — all payloads are E2E encrypted.
@@ -65,7 +65,7 @@ export class RelayClient {
 
   private connected = false;
 
-  /** E2E session key (NaCl secretbox key, 32 bytes). Set after pairing. */
+  /** E2E session key (NaCl secretbox key, 32 bytes). Set after key exchange. */
   private sessionKey: Uint8Array | null = null;
 
   /** v0.3.0: callback invoked once 'authenticated' response is received */
@@ -87,7 +87,7 @@ export class RelayClient {
   }
 
   /**
-   * Set the E2E session key (shared secret from pairing ECDH).
+   * Set the E2E session key (shared secret from ECDH key exchange).
    * Once set, all payloads are encrypted before sending and decrypted on receive.
    */
   setSessionKey(sessionKey: Uint8Array): void {
@@ -95,7 +95,7 @@ export class RelayClient {
   }
 
   /**
-   * Clear the E2E session key (on disconnect / re-pair).
+   * Clear the E2E session key (on disconnect).
    */
   clearSessionKey(): void {
     this.sessionKey = null;

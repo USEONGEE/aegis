@@ -8,18 +8,16 @@ import {
   StyleSheet,
 } from 'react-native';
 import { IdentityKeyManager } from '../../../core/identity/IdentityKeyManager';
-import { PairingService, type PairingQRPayload } from '../../../core/crypto/PairingService';
 import { RelayClient, type RelayMessage } from '../../../core/relay/RelayClient';
 import { SignedApprovalBuilder } from '../../../core/approval/SignedApprovalBuilder';
 import { useToast } from '../../../shared/ui/ToastProvider';
 
 /**
- * SettingsScreen — Signer management + pairing.
+ * SettingsScreen — Signer management.
  *
  * Features:
  * - Identity key info (public key hex)
  * - Paired signers list with revoke option
- * - Pairing button (scan QR from daemon)
  * - Connection status
  */
 
@@ -35,8 +33,6 @@ export function SettingsScreen() {
   const [publicKeyHex, setPublicKeyHex] = useState<string | null>(null);
   const [deviceId, setDeviceId] = useState<string | null>(null);
   const [signers, setSigners] = useState<PairedSigner[]>([]);
-  const [pairingSAS, setPairingSAS] = useState<string | null>(null);
-  const [pairingConfirm, setPairingConfirm] = useState<(() => Promise<void>) | null>(null);
   const [connected, setConnected] = useState(false);
   const { showToast } = useToast();
 
@@ -133,7 +129,7 @@ export function SettingsScreen() {
   const handleGenerateKey = useCallback(async () => {
     Alert.alert(
       'Generate New Identity Key',
-      'This will replace your existing identity key. You will need to re-pair with your daemon. Continue?',
+      'This will replace your existing identity key. You will need to re-enroll with your daemon. Continue?',
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -151,37 +147,6 @@ export function SettingsScreen() {
       ],
     );
   }, [identity, showToast]);
-
-  // Start pairing (in a real app, this would scan a QR code)
-  const handleStartPairing = useCallback(async () => {
-    // In production: open camera, scan QR from daemon
-    // For now: placeholder that demonstrates the flow
-    showToast('In production, this opens the camera to scan daemon QR code', 'info');
-
-    // Mock QR payload for development
-    const mockQR: PairingQRPayload = {
-      relayUrl: 'wss://relay.wdk-app.com',
-      userId: 'user_mock',
-      pairingToken: 'pair_mock_token',
-      daemonPubKey: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=', // mock
-    };
-
-    try {
-      const pairingService = new PairingService();
-      const { sas, confirmPairing, cancelPairing } = await pairingService.initiatePairing(mockQR);
-      setPairingSAS(sas);
-      setPairingConfirm(() => async () => {
-        const result = await confirmPairing();
-        if (result.success) {
-          showToast(`Paired! Signer registered: ${result.deviceId}`, 'success');
-          setPairingSAS(null);
-          setPairingConfirm(null);
-        }
-      });
-    } catch (e) {
-      showToast(`Pairing failed: ${e instanceof Error ? e.message : String(e)}`, 'error');
-    }
-  }, [showToast]);
 
   // Revoke a signer — builds a proper SignedApproval via SignedApprovalBuilder
   const handleRevoke = useCallback(
@@ -226,7 +191,7 @@ export function SettingsScreen() {
   const handleDeleteKey = useCallback(async () => {
     Alert.alert(
       'Delete Identity Key',
-      'This will delete your identity key. You will need to generate a new one and re-pair. This action cannot be undone.',
+      'This will delete your identity key. You will need to generate a new one and re-enroll. This action cannot be undone.',
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -279,41 +244,16 @@ export function SettingsScreen() {
         )}
       </View>
 
-      {/* Pairing Section */}
-      <Text style={styles.sectionHeader}>Pairing</Text>
+      {/* Connection Status */}
+      <Text style={styles.sectionHeader}>Connection</Text>
       <View style={styles.card}>
         <View style={styles.row}>
           <Text style={styles.label}>Status</Text>
           <View style={styles.statusRow}>
             <View style={[styles.dot, connected ? styles.connectedDot : styles.disconnectedDot]} />
-            <Text style={styles.value}>{connected ? 'Connected' : 'Not paired'}</Text>
+            <Text style={styles.value}>{connected ? 'Connected' : 'Disconnected'}</Text>
           </View>
         </View>
-
-        {pairingSAS ? (
-          <View style={styles.sasSection}>
-            <Text style={styles.sasLabel}>Verify this code matches your daemon:</Text>
-            <Text style={styles.sasCode}>{pairingSAS}</Text>
-            <View style={styles.buttonGroup}>
-              <Pressable
-                style={styles.secondaryButton}
-                onPress={() => {
-                  setPairingSAS(null);
-                  setPairingConfirm(null);
-                }}
-              >
-                <Text style={styles.secondaryButtonText}>Cancel</Text>
-              </Pressable>
-              <Pressable style={styles.primaryButton} onPress={pairingConfirm ?? undefined}>
-                <Text style={styles.primaryButtonText}>Confirm Match</Text>
-              </Pressable>
-            </View>
-          </View>
-        ) : (
-          <Pressable style={styles.primaryButton} onPress={handleStartPairing}>
-            <Text style={styles.primaryButtonText}>Scan Daemon QR Code</Text>
-          </Pressable>
-        )}
       </View>
 
       {/* Signers Section */}
@@ -489,24 +429,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     color: '#ef4444',
-  },
-  sasSection: {
-    alignItems: 'center',
-    paddingVertical: 16,
-  },
-  sasLabel: {
-    fontSize: 13,
-    color: '#6b7280',
-    marginBottom: 12,
-    textAlign: 'center',
-  },
-  sasCode: {
-    fontSize: 36,
-    fontWeight: 'bold',
-    fontFamily: 'Menlo',
-    color: '#3b82f6',
-    letterSpacing: 8,
-    marginBottom: 16,
   },
   deviceRow: {
     flexDirection: 'row',

@@ -87,7 +87,7 @@ export class IdentityKeyManager {
 
   /**
    * Delete keypair from SecureStore. Clears cache.
-   * Used during device reset / re-pairing.
+   * Used during device reset.
    */
   async delete(): Promise<void> {
     await SecureStore.deleteItemAsync(SECURE_STORE_KEY_SECRET);

@@ -26,14 +26,6 @@ export interface DeviceRevokePayload extends SignedApprovalFields {
   targetPublicKey: string
 }
 
-export interface PairingConfirmPayload {
-  signerId: string
-  identityPubKey: string
-  encryptionPubKey: string
-  pairingToken: string
-  sas: string
-}
-
 export interface CancelQueuedPayload {
   messageId: string
 }
@@ -49,7 +41,6 @@ export type ControlMessage =
   | { type: 'device_revoke'; payload: DeviceRevokePayload }
   | { type: 'wallet_create'; payload: SignedApprovalFields }
   | { type: 'wallet_delete'; payload: SignedApprovalFields }
-  | { type: 'pairing_confirm'; payload: PairingConfirmPayload }
   | { type: 'cancel_queued'; payload: CancelQueuedPayload }
   | { type: 'cancel_active'; payload: CancelActivePayload }
 

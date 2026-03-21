@@ -18,7 +18,7 @@ export interface ChatHandlerOptions {
  *
  * Flow:
  *   1. Extract userId, sessionId, text from the message.
- *   2. Enqueue into the FIFO MessageQueue (if provided) or run processChat directly.
+ *   2. Enqueue into the FIFO MessageQueue.
  *   3. The queue processor sends the final response back through the Relay.
  */
 export async function handleChatMessage (
@@ -27,7 +27,7 @@ export async function handleChatMessage (
   relayClient: RelayClient,
   ctx: ToolExecutionContext,
   opts: ChatHandlerOptions = {},
-  queueManager?: MessageQueueManager | null
+  queueManager: MessageQueueManager
 ): Promise<void> {
   const { logger } = ctx
   const { userId, sessionId, text } = msg
@@ -39,27 +39,20 @@ export async function handleChatMessage (
 
   logger.info({ userId, sessionId, textLen: text.length }, 'Processing chat message')
 
-  // If queue manager is provided, enqueue instead of direct processing
-  if (queueManager) {
-    const messageId = queueManager.enqueue(sessionId, {
-      sessionId,
-      source: 'user',
-      userId,
-      text
-    })
+  const messageId = queueManager.enqueue(sessionId, {
+    sessionId,
+    source: 'user',
+    userId,
+    text
+  })
 
-    // Notify the app that the message was queued (via control channel)
-    relayClient.send('control', {
-      type: 'message_queued',
-      userId,
-      sessionId,
-      messageId
-    })
-    return
-  }
-
-  // Direct processing (no queue manager)
-  await _processChatDirect(userId, sessionId, text, openclawClient, relayClient, ctx, opts)
+  // Notify the app that the message was queued (via control channel)
+  relayClient.send('control', {
+    type: 'message_queued',
+    userId,
+    sessionId,
+    messageId
+  })
 }
 
 /**

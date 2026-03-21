@@ -12,8 +12,6 @@ export interface QueuedMessage {
   abortController: AbortController
 }
 
-export type PendingMessageRequest = Omit<QueuedMessage, 'userId' | 'abortController'>
-
 export interface CancelResult {
   ok: boolean
   reason?: 'not_found' | 'already_completed'
@@ -74,18 +72,6 @@ export class SessionMessageQueue {
     return { ok: true, wasProcessing: true }
   }
 
-  listPending (): PendingMessageRequest[] {
-    return this._queue.map(m => ({
-      messageId: m.messageId,
-      sessionId: m.sessionId,
-      source: m.source,
-      text: m.text,
-      chainId: m.chainId,
-      createdAt: m.createdAt,
-      cronId: m.cronId
-    }))
-  }
-
   get pendingCount (): number {
     return this._queue.length
   }
@@ -134,7 +120,7 @@ export class MessageQueueManager {
     return `${userId}:${sessionId}`
   }
 
-  getQueue (sessionId: string, userId: string = ''): SessionMessageQueue {
+  private getQueue (sessionId: string, userId: string = ''): SessionMessageQueue {
     const key = this._queueKey(userId, sessionId)
     let queue = this._queues.get(key)
     if (!queue) {

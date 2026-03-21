@@ -158,11 +158,6 @@ export class RelayClient extends EventEmitter {
 
   /**
    * Send a message to the Relay.
-   * Uses relay's expected format: { type: 'control' | 'chat' | 'heartbeat', ... }
-   * If E2E session key is set, payload is encrypted before sending.
-   */
-  /**
-   * Send a message to the Relay.
    * v0.3.0: userId is required for control/chat messages (multiplex).
    */
   send (type: string, payload: Record<string, unknown>, userId?: string): boolean {

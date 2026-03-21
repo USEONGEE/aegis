@@ -99,83 +99,6 @@ describe('handleControlMessage', () => {
   })
 
   // -------------------------------------------------------------------------
-  // pairing_confirm
-  // -------------------------------------------------------------------------
-
-  test('pairing_confirm: calls store.saveSigner with correct args', async () => {
-    const pairingSession = {
-      pairingToken: 'tok_abc',
-      expectedSAS: '1234',
-      daemonEncryptionPubKey: new Uint8Array(32),
-      daemonEncryptionSecretKey: new Uint8Array(32),
-      createdAt: Date.now()
-    }
-    const msg: ControlMessage = {
-      type: 'pairing_confirm',
-      payload: {
-        signerId: 'signer_1',
-        identityPubKey: '0xpubkey123',
-        encryptionPubKey: '0xenckey456',
-        pairingToken: 'tok_abc',
-        sas: '1234'
-      }
-    }
-
-    const result = await handleControlMessage(msg, broker, logger as any, undefined, store, pairingSession)
-
-    expect(result.ok).toBe(true)
-    expect(result.type).toBe('pairing_confirm')
-    expect(store.saveSigner).toHaveBeenCalledWith('0xpubkey123')
-  })
-
-  test('pairing_confirm: adds identityPubKey to trusted approvers', async () => {
-    // After saveSigner, listSigners returns the newly added signer
-    store.listSigners.mockResolvedValue([
-      { publicKey: '0xnewkey', revokedAt: null }
-    ])
-    const pairingSession = {
-      pairingToken: 'tok_pair',
-      expectedSAS: '5678',
-      daemonEncryptionPubKey: new Uint8Array(32),
-      daemonEncryptionSecretKey: new Uint8Array(32),
-      createdAt: Date.now()
-    }
-    const msg: ControlMessage = {
-      type: 'pairing_confirm',
-      payload: {
-        signerId: 'signer_2',
-        identityPubKey: '0xnewkey',
-        encryptionPubKey: '',
-        pairingToken: 'tok_pair',
-        sas: '5678'
-      }
-    }
-
-    await handleControlMessage(msg, broker, logger as any, undefined, store, pairingSession)
-
-    expect(broker.setTrustedApprovers).toHaveBeenCalledWith(['0xnewkey'])
-  })
-
-  test('pairing_confirm: returns error when identityPubKey is missing', async () => {
-    const msg: ControlMessage = {
-      type: 'pairing_confirm',
-      payload: {
-        signerId: '',
-        identityPubKey: '',
-        encryptionPubKey: '',
-        pairingToken: '',
-        sas: ''
-      }
-    }
-
-    const result = await handleControlMessage(msg, broker, logger as any)
-
-    expect(result.ok).toBe(false)
-    expect(result.type).toBe('pairing_confirm')
-    expect(result.error).toBe('Missing identityPubKey')
-  })
-
-  // -------------------------------------------------------------------------
   // policy_approval
   // -------------------------------------------------------------------------
 
@@ -399,7 +322,7 @@ describe('handleControlMessage', () => {
       payload: { messageId: '' }
     }
 
-    const result = await handleControlMessage(msg, broker, logger as any, undefined, undefined, undefined, mockQueueManager as any)
+    const result = await handleControlMessage(msg, broker, logger as any, undefined, undefined, mockQueueManager as any)
 
     expect(result.ok).toBe(false)
     expect(result.type).toBe('cancel_queued')
@@ -429,7 +352,7 @@ describe('handleControlMessage', () => {
       payload: { messageId: 'msg-123' }
     }
 
-    const result = await handleControlMessage(msg, broker, logger as any, undefined, undefined, undefined, mockQueueManager as any)
+    const result = await handleControlMessage(msg, broker, logger as any, undefined, undefined, mockQueueManager as any)
 
     expect(result.ok).toBe(true)
     expect(result.type).toBe('cancel_queued')
@@ -447,7 +370,7 @@ describe('handleControlMessage', () => {
       payload: { messageId: 'msg-active' }
     }
 
-    const result = await handleControlMessage(msg, broker, logger as any, undefined, undefined, undefined, mockQueueManager as any)
+    const result = await handleControlMessage(msg, broker, logger as any, undefined, undefined, mockQueueManager as any)
 
     expect(result.ok).toBe(false)
     expect(result.reason).toBe('not_found')
@@ -467,7 +390,7 @@ describe('handleControlMessage', () => {
       payload: { messageId: '' }
     }
 
-    const result = await handleControlMessage(msg, broker, logger as any, undefined, undefined, undefined, mockQueueManager as any)
+    const result = await handleControlMessage(msg, broker, logger as any, undefined, undefined, mockQueueManager as any)
 
     expect(result.ok).toBe(false)
     expect(result.type).toBe('cancel_active')
@@ -497,7 +420,7 @@ describe('handleControlMessage', () => {
       payload: { messageId: 'msg-456' }
     }
 
-    const result = await handleControlMessage(msg, broker, logger as any, undefined, undefined, undefined, mockQueueManager as any)
+    const result = await handleControlMessage(msg, broker, logger as any, undefined, undefined, mockQueueManager as any)
 
     expect(result.ok).toBe(true)
     expect(result.type).toBe('cancel_active')
@@ -516,7 +439,7 @@ describe('handleControlMessage', () => {
       payload: { messageId: 'msg-queued' }
     }
 
-    const result = await handleControlMessage(msg, broker, logger as any, undefined, undefined, undefined, mockQueueManager as any)
+    const result = await handleControlMessage(msg, broker, logger as any, undefined, undefined, mockQueueManager as any)
 
     expect(result.ok).toBe(false)
     expect(result.reason).toBe('not_found')

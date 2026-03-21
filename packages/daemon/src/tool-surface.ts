@@ -178,9 +178,6 @@ export type AnyToolResult =
   | ListRejectionsResult
   | ListPolicyVersionsResult
 
-/** @deprecated Use AnyToolResult instead */
-export type ToolResult = AnyToolResult
-
 interface SendTransactionArgs {
   chain: string
   to: string

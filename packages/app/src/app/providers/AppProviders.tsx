@@ -30,7 +30,7 @@ async function approvalExecutor(request: {
   const keyPair = await identity.load();
 
   if (!keyPair) {
-    throw new Error('Identity key not found. Please complete device pairing first.');
+    throw new Error('Identity key not found. Please generate an identity key first.');
   }
 
   const builder = new SignedApprovalBuilder(keyPair);

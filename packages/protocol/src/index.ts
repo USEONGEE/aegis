@@ -2,7 +2,6 @@ export {
   type SignedApprovalFields,
   type PolicyApprovalPayload,
   type DeviceRevokePayload,
-  type PairingConfirmPayload,
   type CancelQueuedPayload,
   type CancelActivePayload,
   type ControlMessage,

@@ -128,34 +128,6 @@ describe('SessionMessageQueue', () => {
     expect(result.reason).toBe('not_found')
   })
 
-  test('listPending returns pending messages without internal fields', async () => {
-    let processingResolve: (() => void) | null = null
-    const processor: MessageProcessor = async () => {
-      await new Promise<void>(resolve => { processingResolve = resolve })
-    }
-
-    const queue = new SessionMessageQueue('sess-1', processor)
-    queue.enqueue({ sessionId: 'sess-1', source: 'user', userId: 'u1', text: 'first' })
-
-    // Wait for first to start processing
-    await new Promise(resolve => setTimeout(resolve, 10))
-
-    queue.enqueue({ sessionId: 'sess-1', source: 'user', userId: 'u1', text: 'second' })
-    queue.enqueue({ sessionId: 'sess-1', source: 'cron', userId: 'cron:c1', text: 'third', cronId: 'c1' })
-
-    const pending = queue.listPending()
-    expect(pending).toHaveLength(2)
-    expect(pending[0].text).toBe('second')
-    expect(pending[1].text).toBe('third')
-    expect(pending[1].cronId).toBe('c1')
-    // Should not expose abortController
-    expect((pending[0] as any).abortController).toBeUndefined()
-
-    ;(processingResolve as (() => void) | null)?.()
-    await new Promise(resolve => setTimeout(resolve, 50))
-    queue.dispose()
-  })
-
   test('enqueue returns a messageId', () => {
     const processor: MessageProcessor = async () => {}
     const queue = new SessionMessageQueue('sess-1', processor)

@@ -9,7 +9,7 @@ import { encodeBase64, decodeBase64, encodeUTF8, decodeUTF8 } from 'tweetnacl-ut
  *
  * Flow:
  * 1. App generates ephemeral Curve25519 keypair (or derives from Ed25519 identity)
- * 2. During pairing, app and daemon exchange public keys (authenticated via SAS/QR)
+ * 2. App and daemon exchange public keys via authenticated channel
  * 3. Shared secret derived via ECDH → used for nacl.box
  */
 
@@ -53,7 +53,7 @@ export class E2ECrypto {
   }
 
   /**
-   * Get our public key (to share with the peer during pairing).
+   * Get our public key (to share with the peer during key exchange).
    */
   getPublicKey(): Uint8Array {
     return this.keyPair.publicKey;
@@ -65,7 +65,7 @@ export class E2ECrypto {
 
   /**
    * Establish shared key from peer's public key (ECDH).
-   * Call this after pairing is complete.
+   * Call this after key exchange is complete.
    */
   setRemotePublicKey(peerPublicKey: Uint8Array): void {
     this.sharedKey = nacl.box.before(peerPublicKey, this.keyPair.secretKey);
@@ -115,7 +115,7 @@ export class E2ECrypto {
   }
 
   /**
-   * Compute Short Authentication String (SAS) for visual verification during pairing.
+   * Compute Short Authentication String (SAS) for visual verification during key exchange.
    * Both sides compute SAS from both public keys — if Relay is MITM, SAS won't match.
    *
    * Returns 6-digit numeric code.
@@ -155,7 +155,7 @@ export class E2ECrypto {
   }
 
   /**
-   * Clear the shared key (on disconnect / re-pair).
+   * Clear the shared key (on disconnect).
    */
   reset(): void {
     this.sharedKey = null;

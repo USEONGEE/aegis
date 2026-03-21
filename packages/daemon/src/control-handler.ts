@@ -8,17 +8,6 @@ import type {
 import type { RelayClient } from './relay-client.js'
 import type { MessageQueueManager } from './message-queue.js'
 
-/**
- * Tracks the daemon's pending pairing session.
- */
-export interface PairingSession {
-  pairingToken: string
-  expectedSAS: string
-  daemonEncryptionPubKey: Uint8Array
-  daemonEncryptionSecretKey: Uint8Array
-  createdAt: number
-}
-
 // ---------------------------------------------------------------------------
 // Wire payload → SignedApproval mapping
 // ---------------------------------------------------------------------------
@@ -61,7 +50,6 @@ export async function handleControlMessage (
   logger: Logger,
   relayClient?: RelayClient,
   approvalStore?: InstanceType<typeof SqliteApprovalStore> | null,
-  pairingSession?: PairingSession | null,
   queueManager?: MessageQueueManager | null
 ): Promise<ControlResult> {
   if (!msg.type || !msg.payload) {
@@ -217,83 +205,6 @@ export async function handleControlMessage (
       } catch (err: unknown) {
         logger.error({ err, requestId: payload.requestId }, 'Wallet deletion approval verification failed')
         return { ok: false, type: 'wallet_delete', requestId: payload.requestId, error: (err as Error).message }
-      }
-    }
-
-    // -----------------------------------------------------------------------
-    // pairing_confirm -- app completed SAS verification and sent its keys
-    // -----------------------------------------------------------------------
-    case 'pairing_confirm': {
-      const payload = msg.payload
-      try {
-        const { identityPubKey, encryptionPubKey, pairingToken, sas } = payload
-
-        if (!identityPubKey) {
-          return { ok: false, type: 'pairing_confirm', error: 'Missing identityPubKey' }
-        }
-
-        if (!pairingToken) {
-          logger.warn({ identityPubKey }, 'Pairing rejected: missing pairingToken')
-          return { ok: false, type: 'pairing_confirm', error: 'Missing pairingToken' }
-        }
-
-        if (!pairingSession) {
-          logger.warn({ identityPubKey }, 'Pairing rejected: no active pairing session on daemon')
-          return { ok: false, type: 'pairing_confirm', error: 'No active pairing session' }
-        }
-
-        const tokenValid = pairingToken === pairingSession.pairingToken
-        if (!tokenValid) {
-          logger.warn({ identityPubKey }, 'Pairing rejected: invalid pairingToken')
-          return { ok: false, type: 'pairing_confirm', error: 'Invalid pairingToken' }
-        }
-
-        if (!sas) {
-          logger.warn({ identityPubKey }, 'Pairing rejected: missing SAS')
-          return { ok: false, type: 'pairing_confirm', error: 'Missing SAS for verification' }
-        }
-
-        if (sas !== pairingSession.expectedSAS) {
-          logger.warn({ identityPubKey, receivedSAS: sas, expectedSAS: pairingSession.expectedSAS }, 'Pairing rejected: SAS mismatch (possible MITM)')
-          return { ok: false, type: 'pairing_confirm', error: 'SAS mismatch — possible man-in-the-middle attack' }
-        }
-
-        logger.info({ identityPubKey, sas }, 'Pairing token and SAS verified successfully')
-
-        // Register signer in store and update trusted approvers
-        if (approvalStore) {
-          await approvalStore.saveSigner(identityPubKey)
-          logger.info({ identityPubKey }, 'Signer registered in store')
-
-          // Re-read from store (source of truth) and update broker
-          const signers: StoredSigner[] = await approvalStore.listSigners()
-          const active: string[] = signers
-            .filter(d => d.revokedAt === null || d.revokedAt === undefined)
-            .map(d => d.publicKey)
-          broker.setTrustedApprovers(active)
-          logger.info({ identityPubKey }, 'Trusted approvers updated from store')
-        }
-
-        // E2E session key establishment via ECDH
-        if (encryptionPubKey && relayClient) {
-          try {
-            const nacl = await import('tweetnacl')
-            const peerPubKeyBytes = Buffer.from(encryptionPubKey, 'base64')
-            const sharedSecret = nacl.default
-              ? nacl.default.box.before(peerPubKeyBytes, pairingSession.daemonEncryptionSecretKey)
-              : (nacl as Record<string, unknown> & { box: { before: (pk: Uint8Array, sk: Uint8Array) => Uint8Array } }).box.before(peerPubKeyBytes, pairingSession.daemonEncryptionSecretKey)
-            relayClient.setSessionKey(sharedSecret)
-            logger.info('E2E session key established via ECDH after pairing')
-          } catch (e2eErr: unknown) {
-            logger.error({ err: e2eErr }, 'Failed to establish E2E session key (pairing still succeeded)')
-          }
-        }
-
-        logger.info({ identityPubKey, sas }, 'Pairing confirmed successfully')
-        return { ok: true, type: 'pairing_confirm' }
-      } catch (err: unknown) {
-        logger.error({ err }, 'Pairing confirmation failed')
-        return { ok: false, type: 'pairing_confirm', error: (err as Error).message }
       }
     }
 
