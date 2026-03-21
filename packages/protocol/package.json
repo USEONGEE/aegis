@@ -1,0 +1,13 @@
+{
+  "name": "@wdk-app/protocol",
+  "version": "0.1.0",
+  "description": "Shared wire protocol types for daemon/app communication",
+  "type": "module",
+  "main": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0"
+  }
+}
