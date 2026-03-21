@@ -3,6 +3,7 @@
   "private": true,
   "workspaces": [
     "packages/canonical",
+    "packages/protocol",
     "packages/guarded-wdk",
     "packages/manifest",
     "packages/daemon",
