@@ -6,7 +6,6 @@ import { initWDK } from './wdk-host.js'
 import { createOpenClawClient } from './openclaw-client.js'
 import { RelayClient } from './relay-client.js'
 import { handleControlMessage } from './control-handler.js'
-import type { PairingSession } from './control-handler.js'
 import type { ControlMessage } from '@wdk-app/protocol'
 import { handleChatMessage } from './chat-handler.js'
 import { ExecutionJournal } from './execution-journal.js'
@@ -14,6 +13,7 @@ import { CronScheduler } from './cron-scheduler.js'
 import type { CronDispatch } from './cron-scheduler.js'
 import { AdminServer } from './admin-server.js'
 import { MessageQueueManager } from './message-queue.js'
+import { authenticateWithRelay } from './relay-auth.js'
 import type { QueuedMessage } from './message-queue.js'
 import { _processChatDirect } from './chat-handler.js'
 import type { ToolExecutionContext } from './tool-surface.js'
@@ -61,9 +61,6 @@ async function main (): Promise<void> {
     journal
   }
 
-  // Pairing session state (populated when daemon starts pairing flow)
-  const pairingSession: PairingSession | null = null
-
   // 6b. Create FIFO message queue manager
   const queueManager = new MessageQueueManager(
     async (msg: QueuedMessage, signal: AbortSignal) => {
@@ -93,7 +90,7 @@ async function main (): Promise<void> {
     switch (type) {
       case 'control':
         // TODO: v0.2.9+ — wire JSON parse/validate 후 ControlMessage로 변환. 현재는 as cast.
-        handleControlMessage(payload as ControlMessage, broker!, logger, relayClient, store, pairingSession, queueManager)
+        handleControlMessage(payload as ControlMessage, broker!, logger, relayClient, store, queueManager)
           .then((result) => {
             // v0.3.0: Forward control result with userId from incoming message
             const incomingUserId = (payload as any)?.userId
@@ -146,16 +143,7 @@ async function main (): Promise<void> {
     const relayHttpBase = config.relayUrl.replace(/\/$/, '')
     const relayWsUrl = relayHttpBase.replace(/^http/, 'ws') + '/ws/daemon'
     try {
-      const loginRes = await fetch(`${relayHttpBase}/api/auth/daemon/login`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ daemonId: config.daemonId, secret: config.daemonSecret }),
-      })
-      if (!loginRes.ok) {
-        throw new Error(`Daemon login failed: ${loginRes.status} ${await loginRes.text()}`)
-      }
-      const { token } = await loginRes.json() as { token: string }
-      logger.info({ daemonId: config.daemonId }, 'Daemon authenticated with relay')
+      const token = await authenticateWithRelay(relayHttpBase, config.daemonId, config.daemonSecret, logger)
 
       // F29: Request enrollment code and display in terminal
       try {
