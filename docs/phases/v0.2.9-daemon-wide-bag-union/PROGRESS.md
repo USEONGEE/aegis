@@ -3,17 +3,17 @@
 ## Codex Session ID
 `/Users/mousebook/Documents/GitHub/WDK-APP/docs/phases/v0.2.9-daemon-wide-bag-union`
 
-## 현재 단계: Step 2 진행중
+## 현재 단계: Step 4 완료
 
 ## Phase Steps
 
 | Step | 설명 | 상태 | Codex 리뷰 | 완료일 |
 |------|------|------|-----------|--------|
-| 1 | PRD (문제 정의) | ✅ 완료 | ✅ 통과 | 2026-03-20 |
-| 2 | Design (설계) | 🔄 진행중 | ⏳ | - |
-| 3 | DoD (완료 조건) | ⏳ 대기 | ⏳ | - |
-| 4 | Tickets (작업 분할) | ⏳ 대기 | ⏳ | - |
+| 1 | PRD (문제 정의) | ✅ 완료 | ✅ 통과 | 2026-03-21 |
+| 2 | Design (설계) | ✅ 완료 | ✅ 통과 | 2026-03-21 |
+| 3 | DoD (완료 조건) | ✅ 완료 | ✅ 통과 | 2026-03-21 |
+| 4 | Tickets (작업 분할) | ✅ 완료 | ✅ 통과 | 2026-03-21 |
 | 5 | 개발 | ⏳ 대기 | ⏳ | - |
 
 ## 메모
-- 2026-03-20: Step 1 완료, Codex OK (2회차 — discriminant 명확화 후 통과)
+- 2026-03-21: Step 1~4 완료. 5개 micro step. Codex 게이트 전부 통과.
