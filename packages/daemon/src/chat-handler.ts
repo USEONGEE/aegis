@@ -3,16 +3,11 @@ import type { ToolExecutionContext } from './tool-surface.js'
 import type { OpenClawClient } from './openclaw-client.js'
 import type { RelayClient } from './relay-client.js'
 import type { MessageQueueManager } from './message-queue.js'
+import type { RelayChatInput } from '@wdk-app/protocol'
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
-
-export interface ChatMessage {
-  userId: string
-  sessionId: string
-  text: string
-}
 
 export interface ChatHandlerOptions {
   maxIterations?: number
@@ -27,7 +22,7 @@ export interface ChatHandlerOptions {
  *   3. The queue processor sends the final response back through the Relay.
  */
 export async function handleChatMessage (
-  msg: ChatMessage,
+  msg: RelayChatInput,
   openclawClient: OpenClawClient,
   relayClient: RelayClient,
   ctx: ToolExecutionContext,
@@ -78,16 +73,19 @@ export async function _processChatDirect (
   relayClient: RelayClient,
   ctx: ToolExecutionContext,
   opts: ChatHandlerOptions = {},
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  source: 'user' | 'cron' = 'user'
 ): Promise<void> {
   const { logger } = ctx
 
-  // Send typing indicator
-  relayClient.send('chat', {
-    type: 'typing',
-    userId,
-    sessionId
-  })
+  // Send typing indicator (skip for cron messages)
+  if (source !== 'cron') {
+    relayClient.send('chat', {
+      type: 'typing',
+      userId,
+      sessionId
+    })
+  }
 
   try {
     const result = await processChat(
@@ -105,7 +103,29 @@ export async function _processChatDirect (
             type: 'stream',
             userId,
             sessionId,
-            delta
+            delta,
+            source
+          })
+        },
+        onToolStart: (toolName: string, toolCallId: string) => {
+          relayClient.send('chat', {
+            type: 'tool_start',
+            userId,
+            sessionId,
+            toolName,
+            toolCallId,
+            source
+          })
+        },
+        onToolDone: (toolName: string, toolCallId: string, ok: boolean) => {
+          relayClient.send('chat', {
+            type: 'tool_done',
+            userId,
+            sessionId,
+            toolName,
+            toolCallId,
+            status: ok ? 'success' : 'error',
+            source
           })
         }
       }
@@ -118,7 +138,8 @@ export async function _processChatDirect (
       sessionId,
       content: result.content,
       toolResults: result.toolResults,
-      iterations: result.iterations
+      iterations: result.iterations,
+      source
     })
 
     logger.info(
@@ -131,7 +152,8 @@ export async function _processChatDirect (
       relayClient.send('chat', {
         type: 'cancelled',
         userId,
-        sessionId
+        sessionId,
+        source
       })
       return
     }
@@ -143,7 +165,8 @@ export async function _processChatDirect (
       type: 'error',
       userId,
       sessionId,
-      error: 'An internal error occurred while processing your request.'
+      error: 'An internal error occurred while processing your request.',
+      source
     })
   }
 }

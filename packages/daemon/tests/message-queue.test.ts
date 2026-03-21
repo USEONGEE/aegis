@@ -40,7 +40,7 @@ describe('SessionMessageQueue', () => {
     queue.dispose()
   })
 
-  test('cancel pending: cancel a queued message removes it from queue', async () => {
+  test('cancelQueued: cancel a queued message removes it from queue', async () => {
     let processingResolve: (() => void) | null = null
     const processor: MessageProcessor = async () => {
       await new Promise<void>(resolve => { processingResolve = resolve })
@@ -57,7 +57,7 @@ describe('SessionMessageQueue', () => {
     expect(queue.pendingCount).toBe(1)
 
     // Cancel the pending message
-    const result = queue.cancel(msgId)
+    const result = queue.cancelQueued(msgId)
     expect(result.ok).toBe(true)
     expect(result.wasProcessing).toBe(false)
     expect(queue.pendingCount).toBe(0)
@@ -68,16 +68,16 @@ describe('SessionMessageQueue', () => {
     queue.dispose()
   })
 
-  test('cancel not found: cancel non-existent messageId returns not_found', () => {
+  test('cancelQueued: non-existent messageId returns not_found', () => {
     const processor: MessageProcessor = async () => {}
     const queue = new SessionMessageQueue('sess-1', processor)
 
-    const result = queue.cancel('nonexistent-id')
+    const result = queue.cancelQueued('nonexistent-id')
     expect(result.ok).toBe(false)
     expect(result.reason).toBe('not_found')
   })
 
-  test('cancel already completed: after processing completes, cancel returns not_found', async () => {
+  test('cancelQueued: after processing completes, returns not_found', async () => {
     const processor: MessageProcessor = async () => {}
 
     const queue = new SessionMessageQueue('sess-1', processor)
@@ -86,12 +86,12 @@ describe('SessionMessageQueue', () => {
     // Wait for processing to complete
     await new Promise(resolve => setTimeout(resolve, 50))
 
-    const result = queue.cancel(msgId)
+    const result = queue.cancelQueued(msgId)
     expect(result.ok).toBe(false)
     expect(result.reason).toBe('not_found')
   })
 
-  test('cancel processing: cancel currently processing message aborts', async () => {
+  test('cancelActive: cancel currently processing message aborts', async () => {
     let aborted = false
     const processor: MessageProcessor = async (_msg, signal) => {
       await new Promise<void>((resolve) => {
@@ -108,7 +108,7 @@ describe('SessionMessageQueue', () => {
     // Wait for processing to start
     await new Promise(resolve => setTimeout(resolve, 10))
 
-    const result = queue.cancel(msgId)
+    const result = queue.cancelActive(msgId)
     expect(result.ok).toBe(true)
     expect(result.wasProcessing).toBe(true)
 
@@ -117,6 +117,15 @@ describe('SessionMessageQueue', () => {
     expect(aborted).toBe(true)
 
     queue.dispose()
+  })
+
+  test('cancelActive: non-processing messageId returns not_found', () => {
+    const processor: MessageProcessor = async () => {}
+    const queue = new SessionMessageQueue('sess-1', processor)
+
+    const result = queue.cancelActive('nonexistent-id')
+    expect(result.ok).toBe(false)
+    expect(result.reason).toBe('not_found')
   })
 
   test('listPending returns pending messages without internal fields', async () => {
@@ -193,7 +202,7 @@ describe('MessageQueueManager', () => {
     manager.dispose()
   })
 
-  test('cancel searches all queues', async () => {
+  test('cancelQueued searches all queues', async () => {
     let processingResolve: (() => void) | null = null
     const processor: MessageProcessor = async () => {
       await new Promise<void>(resolve => { processingResolve = resolve })
@@ -206,17 +215,49 @@ describe('MessageQueueManager', () => {
 
     const msgId = manager.enqueue('sess-1', { sessionId: 'sess-1', source: 'user', userId: 'u1', text: 'second' })
 
-    const result = manager.cancel(msgId)
+    const result = manager.cancelQueued(msgId)
     expect(result.ok).toBe(true)
     expect(result.wasProcessing).toBe(false)
 
-    // Cancel non-existent
-    const result2 = manager.cancel('nonexistent')
+    // CancelQueued non-existent
+    const result2 = manager.cancelQueued('nonexistent')
     expect(result2.ok).toBe(false)
     expect(result2.reason).toBe('not_found')
 
     ;(processingResolve as (() => void) | null)?.()
     await new Promise(resolve => setTimeout(resolve, 10))
+    manager.dispose()
+  })
+
+  test('cancelActive searches all queues', async () => {
+    let aborted = false
+    const processor: MessageProcessor = async (_msg, signal) => {
+      await new Promise<void>((resolve) => {
+        signal.addEventListener('abort', () => {
+          aborted = true
+          resolve()
+        })
+      })
+    }
+
+    const manager = new MessageQueueManager(processor)
+
+    const msgId = manager.enqueue('sess-1', { sessionId: 'sess-1', source: 'user', userId: 'u1', text: 'long-running' })
+    await new Promise(resolve => setTimeout(resolve, 10))
+
+    const result = manager.cancelActive(msgId)
+    expect(result.ok).toBe(true)
+    expect(result.wasProcessing).toBe(true)
+
+    // Wait for abort handler
+    await new Promise(resolve => setTimeout(resolve, 10))
+    expect(aborted).toBe(true)
+
+    // CancelActive non-existent
+    const result2 = manager.cancelActive('nonexistent')
+    expect(result2.ok).toBe(false)
+    expect(result2.reason).toBe('not_found')
+
     manager.dispose()
   })
 

@@ -38,8 +38,8 @@ export interface ChatResponse {
 }
 
 export interface OpenClawClient {
-  chat (userId: string, sessionId: string, messages: ChatMessage[], tools: ToolDefinition[]): Promise<ChatResponse>
-  chatStream (userId: string, sessionId: string, messages: ChatMessage[], tools: ToolDefinition[], onDelta: ((delta: string) => void) | null): Promise<ChatResponse>
+  chat (userId: string, sessionId: string, messages: ChatMessage[], tools: ToolDefinition[], opts?: { signal?: AbortSignal }): Promise<ChatResponse>
+  chatStream (userId: string, sessionId: string, messages: ChatMessage[], tools: ToolDefinition[], onDelta: ((delta: string) => void) | null, opts?: { signal?: AbortSignal }): Promise<ChatResponse>
 }
 
 /**
@@ -62,7 +62,7 @@ export function createOpenClawClient (config: DaemonConfig): OpenClawClient {
      * We only need to send the latest user message -- OpenClaw loads prior
      * history from its JSONL store automatically.
      */
-    async chat (userId: string, sessionId: string, messages: ChatMessage[], tools: ToolDefinition[]): Promise<ChatResponse> {
+    async chat (userId: string, sessionId: string, messages: ChatMessage[], tools: ToolDefinition[], opts?: { signal?: AbortSignal }): Promise<ChatResponse> {
       const userField = sessionId ? `${userId}:${sessionId}` : userId
 
       const params: Record<string, any> = {
@@ -76,14 +76,14 @@ export function createOpenClawClient (config: DaemonConfig): OpenClawClient {
         params.tools = tools
       }
 
-      const response = await client.chat.completions.create(params)
+      const response = await client.chat.completions.create(params, { signal: opts?.signal })
       return response as unknown as ChatResponse
     },
 
     /**
      * Send a chat completion request and stream the response.
      */
-    async chatStream (userId: string, sessionId: string, messages: ChatMessage[], tools: ToolDefinition[], onDelta: ((delta: string) => void) | null): Promise<ChatResponse> {
+    async chatStream (userId: string, sessionId: string, messages: ChatMessage[], tools: ToolDefinition[], onDelta: ((delta: string) => void) | null, opts?: { signal?: AbortSignal }): Promise<ChatResponse> {
       const userField = sessionId ? `${userId}:${sessionId}` : userId
 
       const params: Record<string, any> = {
@@ -97,7 +97,7 @@ export function createOpenClawClient (config: DaemonConfig): OpenClawClient {
         params.tools = tools
       }
 
-      const stream = await client.chat.completions.create(params) as any
+      const stream = await client.chat.completions.create(params, { signal: opts?.signal }) as any
 
       let role = 'assistant'
       let content = ''

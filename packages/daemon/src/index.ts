@@ -6,7 +6,8 @@ import { initWDK } from './wdk-host.js'
 import { createOpenClawClient } from './openclaw-client.js'
 import { RelayClient } from './relay-client.js'
 import { handleControlMessage } from './control-handler.js'
-import type { ControlMessage, PairingSession } from './control-handler.js'
+import type { PairingSession } from './control-handler.js'
+import type { ControlMessage } from '@wdk-app/protocol'
 import { handleChatMessage } from './chat-handler.js'
 import { ExecutionJournal } from './execution-journal.js'
 import { CronScheduler } from './cron-scheduler.js'
@@ -66,6 +67,14 @@ async function main (): Promise<void> {
   // 6b. Create FIFO message queue manager
   const queueManager = new MessageQueueManager(
     async (msg: QueuedMessage, signal: AbortSignal) => {
+      // Notify app that processing has started (queue -> active transition)
+      relayClient.send('control', {
+        type: 'message_started',
+        userId: msg.userId,
+        sessionId: msg.sessionId,
+        messageId: msg.messageId
+      })
+
       await _processChatDirect(
         msg.userId,
         msg.sessionId,
@@ -74,7 +83,8 @@ async function main (): Promise<void> {
         relayClient,
         ctx,
         { maxIterations: config.toolCallMaxIterations },
-        signal
+        signal,
+        msg.source
       )
     }
   )
@@ -85,8 +95,9 @@ async function main (): Promise<void> {
         // TODO: v0.2.9+ — wire JSON parse/validate 후 ControlMessage로 변환. 현재는 as cast.
         handleControlMessage(payload as ControlMessage, broker!, logger, relayClient, store, pairingSession, queueManager)
           .then((result) => {
-            // Forward control result to app via relay (preserving the result's own type)
-            relayClient.send('control', result)
+            // v0.3.0: Forward control result with userId from incoming message
+            const incomingUserId = (payload as any)?.userId
+            relayClient.send('control', result, incomingUserId)
           })
           .catch((err: Error) => logger.error({ err }, 'Unhandled error in control handler'))
         break
@@ -129,14 +140,69 @@ async function main (): Promise<void> {
     logger.warn({ code }, 'Relay disconnected')
   })
 
-  if (config.relayUrl && config.relayToken) {
-    relayClient.connect(config.relayUrl, config.relayToken)
+  // v0.3.0: Daemon bootstrap — login with DAEMON_ID/SECRET to get JWT, then connect
+  if (config.relayUrl && config.daemonId && config.daemonSecret) {
+    // RELAY_URL is the base URL (http://host:port). Derive HTTP and WS URLs.
+    const relayHttpBase = config.relayUrl.replace(/\/$/, '')
+    const relayWsUrl = relayHttpBase.replace(/^http/, 'ws') + '/ws/daemon'
+    try {
+      const loginRes = await fetch(`${relayHttpBase}/api/auth/daemon/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ daemonId: config.daemonId, secret: config.daemonSecret }),
+      })
+      if (!loginRes.ok) {
+        throw new Error(`Daemon login failed: ${loginRes.status} ${await loginRes.text()}`)
+      }
+      const { token } = await loginRes.json() as { token: string }
+      logger.info({ daemonId: config.daemonId }, 'Daemon authenticated with relay')
+
+      // F29: Request enrollment code and display in terminal
+      try {
+        const enrollRes = await fetch(`${relayHttpBase}/api/auth/daemon/enroll`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        })
+        if (enrollRes.ok) {
+          const { enrollmentCode, expiresIn } = await enrollRes.json() as { enrollmentCode: string, expiresIn: number }
+          console.log('')
+          console.log('╔══════════════════════════════════════════╗')
+          console.log('║     DAEMON ENROLLMENT CODE               ║')
+          console.log('║                                          ║')
+          console.log(`║     ${enrollmentCode}                        ║`)
+          console.log('║                                          ║')
+          console.log(`║     Expires in ${expiresIn}s                      ║`)
+          console.log('║     Enter this code in the WDK App       ║')
+          console.log('╚══════════════════════════════════════════╝')
+          console.log('')
+        }
+      } catch (err: any) {
+        logger.warn({ err: err.message }, 'Could not request enrollment code')
+      }
+
+      relayClient.connect(relayWsUrl, token)
+    } catch (err: any) {
+      logger.error({ err: err.message }, 'Daemon bootstrap failed — relay connection skipped')
+    }
+  } else if (config.relayUrl && config.relayToken) {
+    // Legacy fallback: direct token (relayUrl must include /ws/daemon path)
+    const legacyWsUrl = config.relayUrl.replace(/^http/, 'ws')
+    const wsUrl = legacyWsUrl.includes('/ws') ? legacyWsUrl : legacyWsUrl + '/ws/daemon'
+    relayClient.connect(wsUrl, config.relayToken)
   } else {
-    logger.warn('RELAY_URL or RELAY_TOKEN not set. Relay connection skipped.')
+    logger.warn('RELAY_URL or DAEMON_ID/SECRET not set. Relay connection skipped.')
   }
 
   // 7. Start cron scheduler
   const cronDispatch: CronDispatch = async (cronId, sessionId, userId, prompt, chainId) => {
+    // Notify app that a cron session was created (for offline recovery)
+    relayClient.send('control', {
+      type: 'cron_session_created',
+      sessionId,
+      cronId,
+      userId
+    })
+
     queueManager.enqueue(sessionId, {
       sessionId,
       source: 'cron',

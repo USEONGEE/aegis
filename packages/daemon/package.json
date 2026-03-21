@@ -21,7 +21,8 @@
     "pino": "^8.19.0",
     "tweetnacl": "^1.0.3",
     "@wdk-app/guarded-wdk": "*",
-    "@wdk-app/canonical": "*"
+    "@wdk-app/canonical": "*",
+    "@wdk-app/protocol": "*"
   },
   "devDependencies": {
     "typescript": "^5.4.0",

@@ -7,5 +7,6 @@ export default {
   },
   moduleNameMapper: {
     '^(\\.{1,2}/.*)\\.js$': '$1',
+    '^@wdk-app/protocol$': '<rootDir>/../protocol/src/index.ts',
   },
 }

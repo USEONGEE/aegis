@@ -2,65 +2,11 @@ import { createHash } from 'node:crypto'
 import type { Logger } from 'pino'
 import type { SignedApproval, VerificationContext, StoredSigner } from '@wdk-app/guarded-wdk'
 import { SqliteApprovalStore, SignedApprovalBroker } from '@wdk-app/guarded-wdk'
+import type {
+  SignedApprovalFields, ControlMessage, ControlResult
+} from '@wdk-app/protocol'
 import type { RelayClient } from './relay-client.js'
 import type { MessageQueueManager } from './message-queue.js'
-
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
-
-export interface SignedApprovalFields {
-  requestId: string
-  signature: string
-  approverPubKey: string
-  chainId: number
-  accountIndex: number
-  signerId: string
-  targetHash: string
-  policyVersion: number
-  expiresAt: number
-  nonce: number
-  content: string
-}
-
-export interface PolicyApprovalPayload extends SignedApprovalFields {
-  policies: Record<string, unknown>[]
-}
-
-export interface PairingConfirmPayload {
-  signerId: string
-  identityPubKey: string
-  encryptionPubKey: string
-  pairingToken: string
-  sas: string
-}
-
-export interface DeviceRevokePayload extends SignedApprovalFields {
-  targetPublicKey: string
-}
-
-export interface CancelMessagePayload {
-  messageId: string
-}
-
-export type ControlMessage =
-  | { type: 'policy_approval'; payload: PolicyApprovalPayload }
-  | { type: 'policy_reject'; payload: SignedApprovalFields }
-  | { type: 'device_revoke'; payload: DeviceRevokePayload }
-  | { type: 'wallet_create'; payload: SignedApprovalFields }
-  | { type: 'wallet_delete'; payload: SignedApprovalFields }
-  | { type: 'pairing_confirm'; payload: PairingConfirmPayload }
-  | { type: 'cancel_message'; payload: CancelMessagePayload }
-
-export interface ControlResult {
-  ok: boolean
-  type?: string
-  requestId?: string
-  messageId?: string
-  error?: string
-  reason?: string
-  wasProcessing?: boolean
-}
 
 /**
  * Tracks the daemon's pending pairing session.
@@ -126,6 +72,24 @@ export async function handleControlMessage (
   logger.info({ type: msg.type, requestId: 'requestId' in msg.payload ? (msg.payload as SignedApprovalFields).requestId : undefined }, 'Processing control message')
 
   switch (msg.type) {
+    // -----------------------------------------------------------------------
+    // tx_approval -- owner approved a transaction
+    // -----------------------------------------------------------------------
+    case 'tx_approval': {
+      const payload = msg.payload
+      try {
+        const signedApproval = toSignedApproval(payload, 'tx')
+        const context: VerificationContext = { expectedTargetHash: payload.targetHash }
+        await broker.submitApproval(signedApproval, context)
+
+        logger.info({ requestId: payload.requestId }, 'Tx approval submitted successfully')
+        return { ok: true, type: 'tx_approval', requestId: payload.requestId }
+      } catch (err: unknown) {
+        logger.error({ err, requestId: payload.requestId }, 'Tx approval verification failed')
+        return { ok: false, type: 'tx_approval', requestId: payload.requestId, error: (err as Error).message }
+      }
+    }
+
     // -----------------------------------------------------------------------
     // policy_approval -- owner approved a pending policy change
     // -----------------------------------------------------------------------
@@ -334,17 +298,34 @@ export async function handleControlMessage (
     }
 
     // -----------------------------------------------------------------------
-    // cancel_message -- cancel a pending or in-progress message
+    // cancel_queued -- remove a message from the queue (not yet processing)
     // -----------------------------------------------------------------------
-    case 'cancel_message': {
+    case 'cancel_queued': {
       const payload = msg.payload
       if (!payload.messageId || !queueManager) {
-        return { ok: false, type: 'cancel_message_result', error: 'Missing messageId or queue' }
+        return { ok: false, type: 'cancel_queued', error: 'Missing messageId or queue' }
       }
-      const cancelResult = queueManager.cancel(payload.messageId)
+      const cancelResult = queueManager.cancelQueued(payload.messageId)
       return {
         ok: cancelResult.ok,
-        type: 'cancel_message_result',
+        type: 'cancel_queued',
+        messageId: payload.messageId,
+        reason: cancelResult.reason
+      }
+    }
+
+    // -----------------------------------------------------------------------
+    // cancel_active -- abort a currently processing message
+    // -----------------------------------------------------------------------
+    case 'cancel_active': {
+      const payload = msg.payload
+      if (!payload.messageId || !queueManager) {
+        return { ok: false, type: 'cancel_active', error: 'Missing messageId or queue' }
+      }
+      const cancelResult = queueManager.cancelActive(payload.messageId)
+      return {
+        ok: cancelResult.ok,
+        type: 'cancel_active',
         messageId: payload.messageId,
         reason: cancelResult.reason,
         wasProcessing: cancelResult.wasProcessing

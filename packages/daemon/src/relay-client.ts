@@ -18,12 +18,7 @@ export interface EncryptedPayload {
   ciphertext: string
 }
 
-export interface RelayEnvelope {
-  type: string
-  payload?: any
-  encrypted?: boolean
-  sessionId?: string
-}
+import type { RelayEnvelope } from '@wdk-app/protocol'
 
 export type MessageHandler = (type: string, payload: any, raw: any) => void
 
@@ -65,8 +60,11 @@ export class RelayClient extends EventEmitter {
   // E2E encryption -- set after pairing via setSessionKey()
   private _sessionKey: Uint8Array | null // 32 bytes, NaCl box shared key
 
-  // Step 10: Track last stream ID for reconnect cursor
-  private _lastStreamId: string
+  // v0.3.0: Per-user control stream cursors for reconnect resume
+  private _lastControlIds: Record<string, string>
+
+  // v0.3.0: Authenticated state (wait for 'authenticated' response)
+  private _authenticatedResolve: (() => void) | null
 
   constructor (logger: Logger, opts: RelayClientOptions = {}) {
     super()
@@ -94,8 +92,9 @@ export class RelayClient extends EventEmitter {
     // E2E encryption
     this._sessionKey = null
 
-    // Step 10: reconnect cursor
-    this._lastStreamId = '$'
+    // v0.3.0: per-user control cursors
+    this._lastControlIds = {}
+    this._authenticatedResolve = null
   }
 
   /**
@@ -162,13 +161,23 @@ export class RelayClient extends EventEmitter {
    * Uses relay's expected format: { type: 'control' | 'chat' | 'heartbeat', ... }
    * If E2E session key is set, payload is encrypted before sending.
    */
-  send (type: string, payload: Record<string, unknown>): boolean {
+  /**
+   * Send a message to the Relay.
+   * v0.3.0: userId is required for control/chat messages (multiplex).
+   */
+  send (type: string, payload: Record<string, unknown>, userId?: string): boolean {
     if (!this._ws || !this._connected) {
       this._logger.warn({ type }, 'Cannot send: not connected to Relay')
       return false
     }
 
     const envelope: RelayEnvelope = { type }
+
+    // v0.3.0: include userId for multiplex routing (explicit arg or from payload)
+    const effectiveUserId = userId || (payload as any)?.userId
+    if (effectiveUserId) {
+      envelope.userId = effectiveUserId
+    }
 
     // Encrypt payload if E2E session is established
     if (this._sessionKey) {
@@ -242,21 +251,27 @@ export class RelayClient extends EventEmitter {
     }
 
     this._ws.on('open', () => {
-      this._connected = true
       this._reconnectAttempt = 0
       this._lastPong = Date.now()
-      this._logger.info('Connected to Relay')
+      this._logger.info('WebSocket open, authenticating...')
 
-      // Authenticate — include lastStreamId for reconnect cursor (Step 10)
+      // v0.3.0: Authenticate with daemon JWT + per-user control cursors
       this._ws!.send(JSON.stringify({
         type: 'authenticate',
-        payload: { token: this._token, lastStreamId: this._lastStreamId }
+        payload: { token: this._token, lastControlIds: this._lastControlIds }
       }))
 
-      // Start heartbeat
-      this._startHeartbeat()
+      // v0.3.0: Auth timeout — if no 'authenticated' response in 10s, reconnect
+      const authTimeout = setTimeout(() => {
+        if (!this._connected) {
+          this._logger.warn('Authentication timeout — reconnecting')
+          try { this._ws?.close(4002, 'Authentication timeout') } catch {}
+        }
+      }, 10000)
 
-      this.emit('connected')
+      this._authenticatedResolve = () => {
+        clearTimeout(authTimeout)
+      }
     })
 
     this._ws.on('message', (data: WebSocket.Data) => {
@@ -274,9 +289,22 @@ export class RelayClient extends EventEmitter {
         return
       }
 
-      // Step 10: Track last stream ID for reconnect cursor
-      if (msg.id) {
-        this._lastStreamId = msg.id
+      // v0.3.0: Handle authenticated response
+      if (msg.type === 'authenticated') {
+        this._connected = true
+        this._logger.info({ daemonId: msg.daemonId, userIds: msg.userIds }, 'Authenticated with Relay')
+        this._startHeartbeat()
+        this.emit('connected')
+        if (this._authenticatedResolve) {
+          this._authenticatedResolve()
+          this._authenticatedResolve = null
+        }
+        // Pass through to handler as well
+      }
+
+      // v0.3.0: Track per-user control stream cursors
+      if (msg.id && msg.userId && msg.type === 'control') {
+        this._lastControlIds[msg.userId] = msg.id
       }
 
       // Dispatch to handler
@@ -292,6 +320,14 @@ export class RelayClient extends EventEmitter {
             this._logger.error({ err }, 'Failed to decrypt incoming message')
             return
           }
+        }
+
+        // v0.3.0: Inject top-level userId/sessionId into payload AFTER decryption
+        if (msg.userId && typeof payload === 'object' && payload !== null) {
+          payload.userId = msg.userId
+        }
+        if (msg.sessionId && typeof payload === 'object' && payload !== null) {
+          payload.sessionId = msg.sessionId
         }
 
         this._messageHandler(type, payload, msg)

@@ -16,8 +16,13 @@ export interface DaemonConfig {
   openclawToken: string
 
   // --- Relay ---
+  /** Relay base URL (e.g. http://localhost:3000). WS path is appended automatically. */
   relayUrl: string
   relayToken: string
+
+  // --- Daemon Identity (v0.3.0) ---
+  daemonId: string
+  daemonSecret: string
 
   // --- Daemon tuning ---
   toolCallMaxIterations: number
@@ -46,8 +51,12 @@ export function loadConfig (): DaemonConfig {
     openclawToken: process.env.OPENCLAW_TOKEN || '',
 
     // --- Relay ---
-    relayUrl: process.env.RELAY_URL || 'ws://localhost:3000/ws',
+    relayUrl: process.env.RELAY_URL || 'http://localhost:3000',
     relayToken: process.env.RELAY_TOKEN || '',
+
+    // --- Daemon Identity (v0.3.0) ---
+    daemonId: process.env.DAEMON_ID || '',
+    daemonSecret: process.env.DAEMON_SECRET || '',
 
     // --- Daemon tuning ---
     toolCallMaxIterations: parseInt(process.env.TOOL_CALL_MAX_ITERATIONS || '10', 10),

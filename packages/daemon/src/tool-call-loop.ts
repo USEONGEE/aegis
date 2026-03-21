@@ -38,6 +38,8 @@ export interface ProcessChatResult {
 export interface ProcessChatOptions {
   maxIterations?: number
   onDelta?: ((delta: string) => void) | null
+  onToolStart?: ((toolName: string, toolCallId: string) => void) | null
+  onToolDone?: ((toolName: string, toolCallId: string, ok: boolean) => void) | null
   signal?: AbortSignal
 }
 
@@ -89,11 +91,11 @@ export async function processChat (
     if (onDelta && iterations === 1) {
       // Only stream the first response (subsequent tool-result responses are non-streaming)
       response = await openclawClient.chatStream(
-        userId, sessionId, messages, TOOL_DEFINITIONS, onDelta
+        userId, sessionId, messages, TOOL_DEFINITIONS, onDelta, { signal }
       )
     } else {
       response = await openclawClient.chat(
-        userId, sessionId, messages, TOOL_DEFINITIONS
+        userId, sessionId, messages, TOOL_DEFINITIONS, { signal }
       )
     }
 
@@ -142,11 +144,16 @@ export async function processChat (
 
       logger.info({ tool: fnName, args: fnArgs }, 'Executing tool call')
 
+      // Notify tool start
+      opts.onToolStart?.(fnName, toolCall.id)
+
       let result: AnyToolResult
       try {
         result = await executeToolCall(fnName, fnArgs, ctx)
+        opts.onToolDone?.(fnName, toolCall.id, true)
       } catch (err: any) {
         logger.error({ err, tool: fnName }, 'Unhandled tool execution error')
+        opts.onToolDone?.(fnName, toolCall.id, false)
         result = { status: 'error', error: err.message }
       }
 

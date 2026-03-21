@@ -57,19 +57,21 @@ export class SessionMessageQueue {
     return messageId
   }
 
-  cancel (messageId: string): CancelResult {
-    // Check if currently processing
-    if (this._processing?.messageId === messageId) {
-      this._processing.abortController.abort()
-      return { ok: true, wasProcessing: true }
-    }
-    // Check pending queue
+  cancelQueued (messageId: string): CancelResult {
     const idx = this._queue.findIndex(m => m.messageId === messageId)
     if (idx === -1) {
       return { ok: false, reason: 'not_found' }
     }
     this._queue.splice(idx, 1)
     return { ok: true, wasProcessing: false }
+  }
+
+  cancelActive (messageId: string): CancelResult {
+    if (this._processing?.messageId !== messageId) {
+      return { ok: false, reason: 'not_found' }
+    }
+    this._processing.abortController.abort()
+    return { ok: true, wasProcessing: true }
   }
 
   listPending (): PendingMessageRequest[] {
@@ -125,22 +127,38 @@ export class MessageQueueManager {
     this._opts = opts ?? {}
   }
 
-  getQueue (sessionId: string): SessionMessageQueue {
-    let queue = this._queues.get(sessionId)
+  /**
+   * v0.3.0: composite key (userId, sessionId) to avoid cross-user collision.
+   */
+  private _queueKey (userId: string, sessionId: string): string {
+    return `${userId}:${sessionId}`
+  }
+
+  getQueue (sessionId: string, userId: string = ''): SessionMessageQueue {
+    const key = this._queueKey(userId, sessionId)
+    let queue = this._queues.get(key)
     if (!queue) {
       queue = new SessionMessageQueue(sessionId, this._processor, this._opts)
-      this._queues.set(sessionId, queue)
+      this._queues.set(key, queue)
     }
     return queue
   }
 
   enqueue (sessionId: string, msg: Omit<QueuedMessage, 'messageId' | 'abortController' | 'createdAt'>): string {
-    return this.getQueue(sessionId).enqueue(msg)
+    return this.getQueue(sessionId, msg.userId).enqueue(msg)
   }
 
-  cancel (messageId: string): CancelResult {
+  cancelQueued (messageId: string): CancelResult {
     for (const queue of this._queues.values()) {
-      const result = queue.cancel(messageId)
+      const result = queue.cancelQueued(messageId)
+      if (result.ok || result.reason !== 'not_found') return result
+    }
+    return { ok: false, reason: 'not_found' }
+  }
+
+  cancelActive (messageId: string): CancelResult {
+    for (const queue of this._queues.values()) {
+      const result = queue.cancelActive(messageId)
       if (result.ok || result.reason !== 'not_found') return result
     }
     return { ok: false, reason: 'not_found' }
