@@ -1,52 +1,101 @@
 # 설계 - v0.3.3
 
 ## 변경 규모
-**규모**: 작은 변경
-**근거**: 단일 파일(relay ws.ts) 내 3개 코드 블록 추가. 기존 패턴(pollControlForApp) 재사용. 새 모듈/의존성 없음.
+**규모**: 일반 기능
+**근거**: relay WS 계약에 `chatCursors`(authenticate 확장) + `subscribe_chat`(신규 메시지 타입) 추가. QueueAdapter에 non-blocking `readRange` 메서드 추가.
 
 ---
 
 ## 문제 요약
-v0.3.0이 relay ws.ts를 multiplex 아키텍처로 전면 재작성하면서, v0.3.1이 추가했던 오프라인 cron 복구 기능(chatCursors 파싱, subscribe_chat 핸들러, backfillChatStream)이 누락됨. App/Daemon은 이미 구현 완료.
+v0.3.0이 relay ws.ts를 multiplex 아키텍처로 전면 재작성하면서, v0.3.1이 추가했던 오프라인 cron 복구 기능이 누락됨. App/Daemon은 이미 구현 완료.
 
 > 상세: [README.md](README.md) 참조
 
 ## 접근법
-relay ws.ts의 `handleAppConnection` 내에 3개 코드 블록을 추가:
-1. authenticate에서 `chatCursors` 파싱 → per-session chat stream polling 시작
-2. `subscribe_chat` 메시지 핸들러 → one-shot backfill 실행
-3. `backfillChatStream` 함수 → Redis XREAD 1회 실행 후 종료
+1. QueueAdapter에 `readRange(stream, start, end, count)` non-blocking 메서드 추가 (XRANGE 기반)
+2. relay ws.ts에 `backfillChatStream` one-shot 함수 추가 (readRange 사용)
+3. `handleAppConnection`의 authenticate에서 chatCursors → per-session backfill
+4. `subscribe_chat` 메시지 핸들러 → backfill 실행
+
+**핵심 결정: authenticate와 subscribe_chat 모두 one-shot backfill 사용. long-running poller 없음.**
 
 ## 대안 검토
 
 | 방식 | 장점 | 단점 | 선택 |
 |------|------|------|------|
-| A: pollControlForApp 패턴 재사용 (long-running poller) | 기존 패턴. 실시간 갱신 | 즉시 forward와 중복 전달 | ❌ |
-| B: one-shot backfill (XREAD 1회) | 중복 없음. 캐치업 후 종료 | 실시간 갱신 없음 (불필요 — 즉시 forward로 커버) | ✅ |
-| C: REST API 추가 (GET /chat/history) | WS 코드 미변경 | 새 엔드포인트 + Redis XRANGE 구현 필요 | ❌ |
+| A: 기존 consume(XREAD BLOCK) 재사용 | 코드 변경 최소 | 빈 stream에서 5초 블로킹. one-shot 불가 | ❌ |
+| B: XRANGE 기반 non-blocking readRange 추가 | 진정한 one-shot. 블로킹 없음 | QueueAdapter 인터페이스 확장 필요 | ✅ |
+| C: REST API 추가 | WS 코드 미변경 | 새 엔드포인트 구현 필요. 과도 | ❌ |
 
-**선택 이유**: 앱이 연결된 상태에서는 daemon→relay→app 즉시 forward로 실시간 메시지를 받음. 오프라인 복구는 재접속 시 놓친 메시지를 한 번 당겨오면 되므로 one-shot backfill이 적합.
+**선택 이유**: XRANGE는 non-blocking이고 범위 지정 가능. one-shot backfill에 정확히 맞음. QueueAdapter 확장은 1개 메서드 추가로 최소.
 
 ## 기술 결정
 
+### QueueAdapter.readRange
+```typescript
+async readRange(stream: string, start: string, end: string, count?: number): Promise<StreamEntry[]>
+```
+- RedisQueue: `redis.xrange(stream, start, end, 'COUNT', count ?? 1000)`
+- non-blocking — 결과 즉시 반환
+- start='0', end='+' → 전체 스트림 읽기
+- start=cursor, end='+' → cursor 이후 전체 읽기
+
+### backfillChatStream (one-shot)
+```
+async function backfillChatStream(userId, sessionId, socket):
+  entries = queue.readRange(`chat:${userId}:${sessionId}`, '0', '+', 1000)
+  for entry in entries:
+    if sender === 'app': continue  // echo 방지
+    send(socket, { type: 'chat', id, sessionId, payload })
+```
+- loop 없음. 1회 실행 후 종료.
+- 즉시 forward 경로와 중복 → App addMessage의 id 기반 idempotent 처리로 안전.
+
+### authenticate 시 chatCursors 처리
+```
+chatCursors = msg.payload?.chatCursors ?? {}
+for [sessionId, cursor] in chatCursors:
+  backfillChatStream(userId, sessionId, socket)  // cursor 이후부터
+```
+- authenticate 경로도 one-shot backfill (long-running poller 아님)
+- readRange의 start를 cursor로 설정하여 이미 수신한 메시지 skip
+
 ### subscribe_chat 재호출 정책
-**idempotent + 무해**: 같은 sessionId로 재호출해도 relay는 '0'부터 다시 읽어 보냄. App의 addMessage가 같은 id를 덮어쓰기(idempotent)하므로 데이터 무결성 유지. 별도 중복 방지 로직 불필요 — app 측 `backfilledSessions` Set이 이미 중복 호출을 방지함.
+**idempotent**: 같은 sessionId로 재호출해도 relay는 '0'부터 다시 읽어 보냄. App의 addMessage가 같은 id를 덮어쓰기하므로 데이터 무결성 유지. relay 측 중복 방지 불필요.
 
-### backfillChatStream 구현
-- `queue.consume(stream, '0', 1000)` — blocking 없이 현재 존재하는 전체 entries 읽기
-- sender === 'app'인 entry는 skip (echo 방지)
-- sessionId가 있으면 type='chat', 없으면 type='control'로 전송
-- 함수 종료 후 poller loop 없음 (one-shot)
+### XRANGE stale cursor 안전성
+XRANGE는 존재하지 않는 ID를 start로 줘도 에러 없이 해당 ID 이후의 entries만 반환. trim된 구간도 안전.
 
-### XREAD stale cursor 안전성
-Redis XREAD는 trim된 ID 이후의 엔트리만 반환. stale cursor는 에러 없이 안전. relay pollControlForApp과 동일한 보장.
+## 범위 / 비범위
+
+**범위(In Scope)**:
+- packages/relay/src/queue/queue-adapter.ts — readRange 메서드 추가
+- packages/relay/src/queue/redis-queue.ts — readRange XRANGE 구현
+- packages/relay/src/routes/ws.ts — backfillChatStream + authenticate chatCursors + subscribe_chat 핸들러
+
+**비범위(Out of Scope)**:
+- App 코드 변경 없음 (이미 구현)
+- Daemon 코드 변경 없음 (이미 구현)
+- IncomingMessage 타입 변경 (chatCursors는 payload 내부이므로 any로 접근 가능)
+
+## API/인터페이스 계약
+
+### App → Relay (authenticate 확장)
+| 필드 | 기존 | 추가 |
+|------|------|------|
+| lastStreamId | control cursor | — |
+| **chatCursors** (신규) | — | `Record<sessionId, streamEntryId>` |
+
+### App → Relay (subscribe_chat 신규)
+```json
+{ "type": "subscribe_chat", "payload": { "sessionId": "..." } }
+```
 
 ## 테스트 전략
-
 | 대상 | 레벨 | 방법 |
 |------|------|------|
-| chatCursors 파싱 | 코드 검사 | authenticate 핸들러에서 msg.payload.chatCursors 읽기 확인 |
-| subscribe_chat 핸들러 | 코드 검사 | msg.type === 'subscribe_chat' 분기 존재 확인 |
-| backfillChatStream | 코드 검사 | queue.consume 1회 호출 + send loop + 함수 종료 확인 |
-| relay ws.ts tsc | CI | `grep "ws.ts" <<< $(cd packages/relay && npx tsc --noEmit 2>&1)` — 에러 0 |
-| end-to-end | 수동 | 앱 종료 → cron 실행 → 앱 재시작 → cron 세션 + AI 응답 확인 |
+| QueueAdapter.readRange | unit | redis-queue.test.ts에 XRANGE 호출 확인 |
+| backfillChatStream | 코드 검사 | readRange 1회 호출 + send loop + 함수 종료 |
+| chatCursors 파싱 | 코드 검사 | authenticate에서 msg.payload.chatCursors 읽기 |
+| subscribe_chat 핸들러 | 코드 검사 | msg.type === 'subscribe_chat' 분기 존재 |
+| relay ws.ts tsc | CI | ws.ts 관련 에러 0 |
