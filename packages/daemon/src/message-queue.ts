@@ -12,15 +12,7 @@ export interface QueuedMessage {
   abortController: AbortController
 }
 
-export interface PendingMessageRequest {
-  messageId: string
-  sessionId: string
-  source: 'user' | 'cron'
-  text: string
-  chainId?: number
-  createdAt: number
-  cronId?: string
-}
+export type PendingMessageRequest = Omit<QueuedMessage, 'userId' | 'abortController'>
 
 export interface CancelResult {
   ok: boolean

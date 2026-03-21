@@ -1,42 +1,36 @@
-import { processChat } from './tool-call-loop.js'
-import type { WDKContext } from './tool-surface.js'
-import type { OpenClawClient } from './openclaw-client.js'
-import type { MessageQueueManager } from './message-queue.js'
 import type { Logger } from 'pino'
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
-export interface CronEntry {
+export interface CronBase {
   id: string
   sessionId: string
   interval: string
+  prompt: string
+  chainId: number | null
+  accountIndex: number
+}
+
+export interface CronEntry extends CronBase {
   intervalMs: number
-  prompt: string
-  chainId: number | null
-  accountIndex: number
   lastRunAt: number
 }
 
-export interface CronRegistration {
-  id: string
-  sessionId: string
-  interval: string
-  prompt: string
-  chainId: number | null
-  accountIndex: number
-}
+export type CronRegistration = CronBase
 
-export interface CronListItem {
-  id: string
-  sessionId: string
-  interval: string
-  prompt: string
-  chainId: number | null
-  accountIndex: number
+export interface CronListItem extends CronBase {
   lastRunAt: number
 }
+
+export type CronDispatch = (
+  cronId: string,
+  sessionId: string,
+  userId: string,
+  prompt: string,
+  chainId: number | null
+) => Promise<void>
 
 interface CronStore {
   listCrons (accountIndex?: number): Promise<Array<{ id: string; accountIndex: number; sessionId: string; interval: string; prompt: string; chainId: number | null; createdAt: number; lastRunAt: number | null; isActive: boolean }>>
@@ -44,9 +38,8 @@ interface CronStore {
   updateCronLastRun (cronId: string, timestamp: number): Promise<void>
 }
 
-export interface CronSchedulerOptions {
-  tickIntervalMs?: number
-  queueManager?: MessageQueueManager | null
+export interface CronSchedulerConfig {
+  tickIntervalMs: number
 }
 
 /**
@@ -60,11 +53,9 @@ export interface CronSchedulerOptions {
  */
 export class CronScheduler {
   private _store: CronStore
-  private _wdkContext: WDKContext
-  private _openclawClient: OpenClawClient
   private _logger: Logger
+  private _dispatch: CronDispatch
   private _tickIntervalMs: number
-  private _queueManager: MessageQueueManager | null
 
   // In-memory cache of active crons
   private _crons: Map<string, CronEntry>
@@ -73,17 +64,14 @@ export class CronScheduler {
 
   constructor (
     store: CronStore,
-    wdkContext: WDKContext,
-    openclawClient: OpenClawClient,
     logger: Logger,
-    opts: CronSchedulerOptions = {}
+    dispatch: CronDispatch,
+    config: CronSchedulerConfig
   ) {
     this._store = store
-    this._wdkContext = wdkContext
-    this._openclawClient = openclawClient
     this._logger = logger
-    this._tickIntervalMs = opts.tickIntervalMs || 60000
-    this._queueManager = opts.queueManager || null
+    this._dispatch = dispatch
+    this._tickIntervalMs = config.tickIntervalMs
 
     this._crons = new Map()
     this._timer = null
@@ -180,33 +168,8 @@ export class CronScheduler {
 
         const userId = `cron:${cronId}`
 
-        // Use queue manager if available, otherwise process directly
-        if (this._queueManager) {
-          this._queueManager.enqueue(cron.sessionId, {
-            sessionId: cron.sessionId,
-            source: 'cron',
-            userId,
-            text: cron.prompt,
-            chainId: cron.chainId ?? undefined,
-            cronId
-          })
-          this._logger.info({ cronId }, 'Cron prompt enqueued')
-        } else {
-          // Run the prompt through OpenClaw directly
-          const result = await processChat(
-            userId,
-            cron.sessionId,
-            cron.prompt,
-            this._wdkContext,
-            this._openclawClient,
-            { maxIterations: 10 }
-          )
-
-          this._logger.info(
-            { cronId, iterations: result.iterations, tools: result.toolResults.length },
-            'Cron execution completed'
-          )
-        }
+        await this._dispatch(cronId, cron.sessionId, userId, cron.prompt, cron.chainId)
+        this._logger.info({ cronId }, 'Cron dispatched')
       } catch (err) {
         this._logger.error({ err, cronId }, 'Cron execution failed')
       }

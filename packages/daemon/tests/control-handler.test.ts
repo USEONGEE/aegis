@@ -1,7 +1,7 @@
 import { jest } from '@jest/globals'
 import { createHash } from 'node:crypto'
 import { handleControlMessage } from '../src/control-handler.js'
-import type { ControlMessage, ControlResult } from '../src/control-handler.js'
+import type { ControlMessage, ControlResult, SignedApprovalFields } from '../src/control-handler.js'
 
 // ---------------------------------------------------------------------------
 // Mock helpers
@@ -38,6 +38,26 @@ function createMockStore (overrides: Record<string, any> = {}): any {
     savePolicy: jest.fn<() => Promise<undefined>>().mockResolvedValue(undefined),
     loadPendingByRequestId: jest.fn<() => Promise<null>>().mockResolvedValue(null),
     getPolicyVersion: jest.fn<() => Promise<number>>().mockResolvedValue(0),
+    ...overrides
+  }
+}
+
+/**
+ * Factory that returns default SignedApprovalFields. Tests override specific fields.
+ */
+function defaultApprovalFields (overrides: Partial<SignedApprovalFields> = {}): SignedApprovalFields {
+  return {
+    requestId: '',
+    signature: '',
+    approverPubKey: '',
+    chainId: 0,
+    accountIndex: 0,
+    signerId: '',
+    targetHash: '',
+    policyVersion: 0,
+    expiresAt: 0,
+    nonce: 0,
+    content: '',
     ...overrides
   }
 }
@@ -93,6 +113,7 @@ describe('handleControlMessage', () => {
     const msg: ControlMessage = {
       type: 'pairing_confirm',
       payload: {
+        signerId: 'signer_1',
         identityPubKey: '0xpubkey123',
         encryptionPubKey: '0xenckey456',
         pairingToken: 'tok_abc',
@@ -122,7 +143,9 @@ describe('handleControlMessage', () => {
     const msg: ControlMessage = {
       type: 'pairing_confirm',
       payload: {
+        signerId: 'signer_2',
         identityPubKey: '0xnewkey',
+        encryptionPubKey: '',
         pairingToken: 'tok_pair',
         sas: '5678'
       }
@@ -136,7 +159,13 @@ describe('handleControlMessage', () => {
   test('pairing_confirm: returns error when identityPubKey is missing', async () => {
     const msg: ControlMessage = {
       type: 'pairing_confirm',
-      payload: {}
+      payload: {
+        signerId: '',
+        identityPubKey: '',
+        encryptionPubKey: '',
+        pairingToken: '',
+        sas: ''
+      }
     }
 
     const result = await handleControlMessage(msg, broker, logger as any)
@@ -154,8 +183,11 @@ describe('handleControlMessage', () => {
     const msg: ControlMessage = {
       type: 'policy_approval',
       payload: {
-        requestId: 'req_pol_1',
-        signature: '0xsig'
+        ...defaultApprovalFields({
+          requestId: 'req_pol_1',
+          signature: '0xsig'
+        }),
+        policies: []
       }
     }
 
@@ -174,9 +206,11 @@ describe('handleControlMessage', () => {
     const msg: ControlMessage = {
       type: 'policy_approval',
       payload: {
-        requestId: 'req_pol_2',
-        chainId: 1,
-        accountIndex: 0,
+        ...defaultApprovalFields({
+          requestId: 'req_pol_2',
+          chainId: 1,
+          accountIndex: 0
+        }),
         policies: [{ type: 'auto', maxUsd: 500 }]
       }
     }
@@ -203,9 +237,11 @@ describe('handleControlMessage', () => {
     const msg: ControlMessage = {
       type: 'policy_approval',
       payload: {
-        requestId: 'req_pol_desc',
-        chainId: 1,
-        accountIndex: 0,
+        ...defaultApprovalFields({
+          requestId: 'req_pol_desc',
+          chainId: 1,
+          accountIndex: 0
+        }),
         policies: [{ type: 'auto', maxUsd: 500 }]
       }
     }
@@ -224,9 +260,11 @@ describe('handleControlMessage', () => {
     const msg: ControlMessage = {
       type: 'policy_approval',
       payload: {
-        requestId: 'req_pol_fail',
-        chainId: 1,
-        accountIndex: 0,
+        ...defaultApprovalFields({
+          requestId: 'req_pol_fail',
+          chainId: 1,
+          accountIndex: 0
+        }),
         policies: [{ type: 'auto', maxUsd: 500 }]
       }
     }
@@ -242,7 +280,10 @@ describe('handleControlMessage', () => {
 
     const msg: ControlMessage = {
       type: 'policy_approval',
-      payload: { requestId: 'req_pol_3' }
+      payload: {
+        ...defaultApprovalFields({ requestId: 'req_pol_3' }),
+        policies: []
+      }
     }
 
     const result = await handleControlMessage(msg, broker, logger as any)
@@ -258,10 +299,10 @@ describe('handleControlMessage', () => {
   test('policy_reject: calls broker.submitApproval with type "policy_reject"', async () => {
     const msg: ControlMessage = {
       type: 'policy_reject',
-      payload: {
+      payload: defaultApprovalFields({
         requestId: 'req_rej_1',
         signature: '0xsig'
-      }
+      })
     }
 
     const result = await handleControlMessage(msg, broker, logger as any)
@@ -279,8 +320,8 @@ describe('handleControlMessage', () => {
   // -------------------------------------------------------------------------
 
   test('device_revoke: calls broker.submitApproval with expectedTargetHash', async () => {
-    const targetPublicKey = '0xpubkey_to_revoke'
-    const expectedHash = '0x' + createHash('sha256').update(targetPublicKey).digest('hex')
+    const signerToRevoke = '0xpubkey_to_revoke'
+    const expectedHash = '0x' + createHash('sha256').update(signerToRevoke).digest('hex')
 
     store.listSigners.mockResolvedValue([
       { publicKey: '0xactive1', revokedAt: null },
@@ -289,10 +330,10 @@ describe('handleControlMessage', () => {
 
     const msg: ControlMessage = {
       type: 'device_revoke',
-      payload: {
+      payload: { ...defaultApprovalFields({
         requestId: 'req_rev_1',
-        targetPublicKey
-      }
+        signerId: signerToRevoke
+      }), targetPublicKey: signerToRevoke }
     }
 
     const result = await handleControlMessage(msg, broker, logger as any, undefined, store)
@@ -316,10 +357,10 @@ describe('handleControlMessage', () => {
 
     const msg: ControlMessage = {
       type: 'device_revoke',
-      payload: {
+      payload: { ...defaultApprovalFields({
         requestId: 'req_rev_2',
-        targetPublicKey: '0xdev_x'
-      }
+        signerId: '0xdev_x'
+      }), targetPublicKey: '0xdev_x' }
     }
 
     await handleControlMessage(msg, broker, logger as any, undefined, store)
@@ -332,10 +373,10 @@ describe('handleControlMessage', () => {
 
     const msg: ControlMessage = {
       type: 'device_revoke',
-      payload: {
+      payload: { ...defaultApprovalFields({
         requestId: 'req_rev_3',
-        targetPublicKey: '0xdev_y'
-      }
+        signerId: '0xdev_y'
+      }), targetPublicKey: '0xdev_y' }
     }
 
     const result = await handleControlMessage(msg, broker, logger as any)
@@ -349,10 +390,10 @@ describe('handleControlMessage', () => {
   // -------------------------------------------------------------------------
 
   test('unknown type: returns error with unknown type message', async () => {
-    const msg: ControlMessage = {
+    const msg = {
       type: 'banana',
       payload: { requestId: 'r1' }
-    }
+    } as any
 
     const result = await handleControlMessage(msg, broker, logger as any)
 

@@ -1,6 +1,7 @@
 import { jest } from '@jest/globals'
-import { executeToolCall, TOOL_DEFINITIONS } from '../src/tool-surface.js'
-import type { WDKContext, ToolResult, ToolDefinition } from '../src/tool-surface.js'
+import { TOOL_DEFINITIONS } from '../src/ai-tool-schema.js'
+import { executeToolCall } from '../src/tool-surface.js'
+import type { ToolExecutionContext, AnyToolResult } from '../src/tool-surface.js'
 
 // ---------------------------------------------------------------------------
 // Mock helpers
@@ -88,7 +89,7 @@ function createMockJournal (): any {
   }
 }
 
-function buildContext (overrides: Record<string, any> = {}): WDKContext {
+function buildContext (overrides: Record<string, any> = {}): ToolExecutionContext & { wdk: any; broker: any; store: any; logger: MockLogger; journal: any } {
   return {
     wdk: createMockWdk(overrides),
     broker: createMockBroker(overrides.broker),
@@ -130,7 +131,7 @@ describe('executeToolCall', () => {
       data: '0x',
       value: '1000000000000000000',
       accountIndex: 0
-    }, ctx)
+    }, ctx) as any
 
     expect(result.status).toBe('executed')
     expect(result.hash).toBe('0xabc123')
@@ -151,7 +152,7 @@ describe('executeToolCall', () => {
       data: '0x',
       value: '0',
       accountIndex: 0
-    }, ctx)
+    }, ctx) as any
 
     expect(result.status).toBe('duplicate')
     expect(result.intentHash).toBeDefined()
@@ -174,7 +175,7 @@ describe('executeToolCall', () => {
       data: '0x',
       value: '999999',
       accountIndex: 0
-    }, ctx)
+    }, ctx) as any
 
     expect(result.status).toBe('rejected')
     expect(result.reason).toBe('Amount exceeds daily limit')
@@ -205,7 +206,7 @@ describe('executeToolCall', () => {
       to: '0xrecipient',
       amount: '100',
       accountIndex: 0
-    }, ctx)
+    }, ctx) as any
 
     expect(result.status).toBe('rejected')
     expect(ctx.store.saveRejection).toHaveBeenCalledTimes(1)
@@ -229,7 +230,7 @@ describe('executeToolCall', () => {
       to: '0xrecipient',
       amount: '100',
       accountIndex: 0
-    }, ctx)
+    }, ctx) as any
 
     expect(result.status).toBe('executed')
     expect(result.hash).toBe('0xabc123')
@@ -243,7 +244,7 @@ describe('executeToolCall', () => {
 
     const result = await executeToolCall('getBalance', {
       chain: 'ethereum'
-    }, ctx)
+    }, ctx) as any
 
     expect(result.balances).toHaveLength(2)
     expect((result.balances as any[])[0].token).toBe('ETH')
@@ -256,7 +257,7 @@ describe('executeToolCall', () => {
 
     const result = await executeToolCall('policyList', {
       chain: 'ethereum'
-    }, ctx)
+    }, ctx) as any
 
     expect(result.policies).toHaveLength(1)
     expect((result.policies as any[])[0].type).toBe('auto')
@@ -268,7 +269,7 @@ describe('executeToolCall', () => {
 
     const result = await executeToolCall('policyPending', {
       chain: 'ethereum'
-    }, ctx)
+    }, ctx) as any
 
     expect(result.pending).toHaveLength(1)
     expect((result.pending as any[])[0].requestId).toBe('req_1')
@@ -283,7 +284,7 @@ describe('executeToolCall', () => {
       description: 'Increase daily limit',
       policies: [{ type: 'auto', maxUsd: 500 }],
       accountIndex: 0
-    }, ctx)
+    }, ctx) as any
 
     expect(result.status).toBe('pending')
     expect(result.policyHash).toBeDefined()
@@ -308,7 +309,7 @@ describe('executeToolCall', () => {
       chain: 'ethereum',
       sessionId: 'session_001',
       accountIndex: 0
-    }, ctx)
+    }, ctx) as any
 
     expect(result.status).toBe('registered')
     expect(result.cronId).toBe('mock-cron-id')
@@ -324,7 +325,7 @@ describe('executeToolCall', () => {
   test('listCrons returns crons from store', async () => {
     const ctx = buildContext()
 
-    const result = await executeToolCall('listCrons', {}, ctx)
+    const result = await executeToolCall('listCrons', {}, ctx) as any
 
     expect(result.crons).toHaveLength(1)
     expect((result.crons as any[])[0].id).toBe('cron_1')
@@ -337,7 +338,7 @@ describe('executeToolCall', () => {
 
     const result = await executeToolCall('removeCron', {
       cronId: 'cron_1'
-    }, ctx)
+    }, ctx) as any
 
     expect(result.status).toBe('removed')
     expect(ctx.store.removeCron).toHaveBeenCalledWith('cron_1')
@@ -347,7 +348,7 @@ describe('executeToolCall', () => {
   test('unknown tool returns { status: "error" }', async () => {
     const ctx = buildContext()
 
-    const result = await executeToolCall('nonExistentTool', {}, ctx)
+    const result = await executeToolCall('nonExistentTool', {}, ctx) as any
 
     expect(result.status).toBe('error')
     expect(result.error).toBe('Unknown tool: nonExistentTool')
@@ -362,7 +363,7 @@ describe('executeToolCall', () => {
 
     const result = await executeToolCall('getBalance', {
       chain: 'unsupported_chain'
-    }, ctx)
+    }, ctx) as any
 
     expect(result.status).toBe('error')
     expect(result.error).toBe('Chain not supported')
@@ -375,7 +376,7 @@ describe('executeToolCall', () => {
 
     const result = await executeToolCall('policyList', {
       chain: 'ethereum'
-    }, ctx)
+    }, ctx) as any
 
     expect(result.policies).toEqual([])
   })
@@ -390,7 +391,7 @@ describe('executeToolCall', () => {
       data: '0x',
       value: '1000000000000000000',
       accountIndex: 0
-    }, ctx)
+    }, ctx) as any
 
     expect(result.status).toBe('signed')
     expect(result.signedTx).toBe('0xsigned_tx_data')
@@ -417,7 +418,7 @@ describe('executeToolCall', () => {
       data: '0x',
       value: '999999',
       accountIndex: 0
-    }, ctx)
+    }, ctx) as any
 
     expect(result.status).toBe('rejected')
     expect(result.reason).toBe('Amount exceeds daily limit')
@@ -435,7 +436,7 @@ describe('executeToolCall', () => {
       data: '0x',
       value: '0',
       accountIndex: 0
-    }, ctx)
+    }, ctx) as any
 
     expect(result.status).toBe('duplicate')
     expect(result.intentHash).toBeDefined()
@@ -465,7 +466,7 @@ describe('executeToolCall', () => {
       data: '0xdeadbeef',
       value: '0',
       accountIndex: 0
-    }, ctx)
+    }, ctx) as any
 
     expect(result.status).toBe('rejected')
     expect(result.context).toEqual(expect.objectContaining({
@@ -489,7 +490,7 @@ describe('executeToolCall', () => {
     const result = await executeToolCall('listRejections', {
       chain: 'ethereum',
       accountIndex: 0
-    }, ctx)
+    }, ctx) as any
 
     expect(result.rejections).toHaveLength(1)
     expect((result.rejections as any[])[0].reason).toBe('no match')
@@ -509,7 +510,7 @@ describe('executeToolCall', () => {
     const result = await executeToolCall('listPolicyVersions', {
       chain: 'ethereum',
       accountIndex: 0
-    }, ctx)
+    }, ctx) as any
 
     expect(result.policyVersions).toHaveLength(1)
     expect((result.policyVersions as any[])[0].description).toBe('initial')

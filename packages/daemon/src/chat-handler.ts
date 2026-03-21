@@ -1,5 +1,5 @@
 import { processChat } from './tool-call-loop.js'
-import type { WDKContext } from './tool-surface.js'
+import type { ToolExecutionContext } from './tool-surface.js'
 import type { OpenClawClient } from './openclaw-client.js'
 import type { RelayClient } from './relay-client.js'
 import type { MessageQueueManager } from './message-queue.js'
@@ -30,11 +30,11 @@ export async function handleChatMessage (
   msg: ChatMessage,
   openclawClient: OpenClawClient,
   relayClient: RelayClient,
-  wdkContext: WDKContext,
+  ctx: ToolExecutionContext,
   opts: ChatHandlerOptions = {},
   queueManager?: MessageQueueManager | null
 ): Promise<void> {
-  const { logger } = wdkContext
+  const { logger } = ctx
   const { userId, sessionId, text } = msg
 
   if (!userId || !text) {
@@ -64,7 +64,7 @@ export async function handleChatMessage (
   }
 
   // Direct processing (no queue manager)
-  await _processChatDirect(userId, sessionId, text, openclawClient, relayClient, wdkContext, opts)
+  await _processChatDirect(userId, sessionId, text, openclawClient, relayClient, ctx, opts)
 }
 
 /**
@@ -76,11 +76,11 @@ export async function _processChatDirect (
   text: string,
   openclawClient: OpenClawClient,
   relayClient: RelayClient,
-  wdkContext: WDKContext,
+  ctx: ToolExecutionContext,
   opts: ChatHandlerOptions = {},
   signal?: AbortSignal
 ): Promise<void> {
-  const { logger } = wdkContext
+  const { logger } = ctx
 
   // Send typing indicator
   relayClient.send('chat', {
@@ -94,7 +94,7 @@ export async function _processChatDirect (
       userId,
       sessionId,
       text,
-      wdkContext,
+      ctx,
       openclawClient,
       {
         maxIterations: opts.maxIterations || 10,

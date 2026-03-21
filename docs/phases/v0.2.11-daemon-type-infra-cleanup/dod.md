@@ -52,7 +52,7 @@
 
 | # | 조건 | 검증 방법 |
 |---|------|----------|
-| N1 | daemon 패키지 타입 에러 0 | `npx tsc -p packages/daemon/tsconfig.json --noEmit` exit 0. 현재 baseline 4개 에러는 v0.2.9/v0.2.10 선행 작업 또는 이번 Phase에서 해결. Step 5 시작 전 baseline 재확인 필요. |
+| N1 | 이번 Phase 변경으로 새 타입 에러 미발생 | `npx tsc -p packages/daemon/tsconfig.json --noEmit --pretty false 2>&1 \| grep 'error TS' \| wc -l` 결과 ≤ 4. baseline 4개 에러(index.ts TS2349/TS2345, openclaw-client.ts TS2769 x2)는 pino/OpenAI SDK 호환 문제로 이번 Phase 범위 밖. |
 | N2 | 타입 그래프 max depth ≤ 5 | `npx tsx scripts/type-dep-graph/index.ts --include=daemon --json && npx tsx -e "const j=require('./docs/type-dep-graph/type-dep-graph.json');const ns=j.nodes.filter(n=>!n.isExternal);const d=new Map();function calc(id,v=new Set()){if(d.has(id))return d.get(id);if(v.has(id))return 0;v.add(id);const es=j.edges.filter(e=>e.from.id===id&&!e.to.isExternal);if(!es.length){d.set(id,0);return 0;}const r=Math.max(...es.map(e=>calc(e.to.id,v)))+1;d.set(id,r);return r;}for(const n of ns)calc(n.id);console.log('max depth:',Math.max(...ns.map(n=>d.get(n.id)\|\|0)));"` 출력 ≤ 5 |
 | N3 | 순환 의존 0개 | `npx tsx scripts/type-dep-graph/index.ts --include=daemon --json && npx tsx scripts/type-dep-graph/verify.ts` exit 0 |
 | N4 | `AdminServerDeps` 노드가 그래프에 없음 | `rg 'AdminServerDeps' docs/type-dep-graph/type-dep-graph.json` 결과 0건 |

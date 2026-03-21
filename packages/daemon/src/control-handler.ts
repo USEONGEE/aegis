@@ -9,26 +9,48 @@ import type { MessageQueueManager } from './message-queue.js'
 // Types
 // ---------------------------------------------------------------------------
 
-export interface ControlMessage {
-  type: string
-  payload: ControlPayload
+export interface SignedApprovalFields {
+  requestId: string
+  signature: string
+  approverPubKey: string
+  chainId: number
+  accountIndex: number
+  signerId: string
+  targetHash: string
+  policyVersion: number
+  expiresAt: number
+  nonce: number
+  content: string
 }
 
-export interface ControlPayload {
-  requestId?: string
-  signature?: string
-  approverPubKey?: string
-  chainId?: number
-  accountIndex?: number
-  content?: string
-  signerId?: string
-  identityPubKey?: string
-  encryptionPubKey?: string
-  pairingToken?: string
-  sas?: string
-  policies?: Record<string, unknown>[]
-  [key: string]: unknown
+export interface PolicyApprovalPayload extends SignedApprovalFields {
+  policies: Record<string, unknown>[]
 }
+
+export interface PairingConfirmPayload {
+  signerId: string
+  identityPubKey: string
+  encryptionPubKey: string
+  pairingToken: string
+  sas: string
+}
+
+export interface DeviceRevokePayload extends SignedApprovalFields {
+  targetPublicKey: string
+}
+
+export interface CancelMessagePayload {
+  messageId: string
+}
+
+export type ControlMessage =
+  | { type: 'policy_approval'; payload: PolicyApprovalPayload }
+  | { type: 'policy_reject'; payload: SignedApprovalFields }
+  | { type: 'device_revoke'; payload: DeviceRevokePayload }
+  | { type: 'wallet_create'; payload: SignedApprovalFields }
+  | { type: 'wallet_delete'; payload: SignedApprovalFields }
+  | { type: 'pairing_confirm'; payload: PairingConfirmPayload }
+  | { type: 'cancel_message'; payload: CancelMessagePayload }
 
 export interface ControlResult {
   ok: boolean
@@ -59,19 +81,19 @@ export interface PairingSession {
  * Map wire payload fields to guarded-wdk SignedApproval shape.
  * Wire uses `signature`/`approverPubKey`, guarded-wdk uses `sig`/`approver`.
  */
-function toSignedApproval (payload: ControlPayload, type: string): SignedApproval {
+function toSignedApproval (fields: SignedApprovalFields, type: SignedApproval['type']): SignedApproval {
   return {
-    type: type as SignedApproval['type'],
-    requestId: (payload.requestId || '') as string,
-    chainId: (payload.chainId || 0) as number,
-    targetHash: (payload.targetHash || '') as string,
-    approver: (payload.approverPubKey || '') as string,
-    accountIndex: (payload.accountIndex || 0) as number,
-    policyVersion: (payload.policyVersion || 0) as number,
-    expiresAt: (payload.expiresAt || 0) as number,
-    nonce: (payload.nonce || 0) as number,
-    sig: (payload.signature || '') as string,
-    content: (payload.content || '') as string
+    type,
+    requestId: fields.requestId,
+    chainId: fields.chainId,
+    targetHash: fields.targetHash,
+    approver: fields.approverPubKey,
+    accountIndex: fields.accountIndex,
+    policyVersion: fields.policyVersion,
+    expiresAt: fields.expiresAt,
+    nonce: fields.nonce,
+    sig: fields.signature,
+    content: fields.content
   }
 }
 
@@ -96,20 +118,19 @@ export async function handleControlMessage (
   pairingSession?: PairingSession | null,
   queueManager?: MessageQueueManager | null
 ): Promise<ControlResult> {
-  const { type, payload } = msg
-
-  if (!type || !payload) {
+  if (!msg.type || !msg.payload) {
     logger.warn({ msg }, 'Malformed control message: missing type or payload')
     return { ok: false, error: 'Malformed control message' }
   }
 
-  logger.info({ type, requestId: payload.requestId }, 'Processing control message')
+  logger.info({ type: msg.type, requestId: 'requestId' in msg.payload ? (msg.payload as SignedApprovalFields).requestId : undefined }, 'Processing control message')
 
-  switch (type) {
+  switch (msg.type) {
     // -----------------------------------------------------------------------
     // policy_approval -- owner approved a pending policy change
     // -----------------------------------------------------------------------
     case 'policy_approval': {
+      const payload = msg.payload
       try {
         const signedApproval = toSignedApproval(payload, 'policy')
 
@@ -129,10 +150,10 @@ export async function handleControlMessage (
 
         await broker.submitApproval(signedApproval, context)
 
-        if (approvalStore && payload.policies && payload.chainId !== undefined) {
+        if (approvalStore && payload.policies) {
           await approvalStore.savePolicy(
-            payload.accountIndex as number,
-            payload.chainId as number,
+            payload.accountIndex,
+            payload.chainId,
             { policies: payload.policies as unknown[], signature: {} },
             description
           )
@@ -151,6 +172,7 @@ export async function handleControlMessage (
     // policy_reject -- owner rejected a pending policy request
     // -----------------------------------------------------------------------
     case 'policy_reject': {
+      const payload = msg.payload
       try {
         const signedApproval = toSignedApproval(payload, 'policy_reject')
         await broker.submitApproval(signedApproval)
@@ -167,17 +189,17 @@ export async function handleControlMessage (
     // device_revoke -- owner revoked a signer
     // -----------------------------------------------------------------------
     case 'device_revoke': {
+      const payload = msg.payload
       try {
         const signedApproval = toSignedApproval(payload, 'device_revoke')
 
         // The signed approval's targetHash = SHA-256(publicKey of signer being revoked)
         // Verifier Step 6 checks targetHash matches expectedTargetHash if provided.
-        // We compute expectedTargetHash from payload if targetPublicKey is available,
-        // otherwise skip (verifier trusts the signed targetHash).
-        const targetPublicKey = (payload.targetPublicKey || payload.signerId) as string | undefined
+        // App sends targetPublicKey (the public key of the signer to revoke).
         const context: VerificationContext = {}
-        if (targetPublicKey) {
-          context.expectedTargetHash = '0x' + createHash('sha256').update(targetPublicKey).digest('hex')
+        const targetPubKey = payload.targetPublicKey || payload.signerId
+        if (targetPubKey) {
+          context.expectedTargetHash = '0x' + createHash('sha256').update(targetPubKey).digest('hex')
         }
 
         await broker.submitApproval(signedApproval, context)
@@ -204,6 +226,7 @@ export async function handleControlMessage (
     // wallet_create -- owner approved wallet creation
     // -----------------------------------------------------------------------
     case 'wallet_create': {
+      const payload = msg.payload
       try {
         const signedApproval = toSignedApproval(payload, 'wallet_create')
         await broker.submitApproval(signedApproval)
@@ -220,6 +243,7 @@ export async function handleControlMessage (
     // wallet_delete -- owner approved wallet deletion
     // -----------------------------------------------------------------------
     case 'wallet_delete': {
+      const payload = msg.payload
       try {
         const signedApproval = toSignedApproval(payload, 'wallet_delete')
         await broker.submitApproval(signedApproval)
@@ -236,6 +260,7 @@ export async function handleControlMessage (
     // pairing_confirm -- app completed SAS verification and sent its keys
     // -----------------------------------------------------------------------
     case 'pairing_confirm': {
+      const payload = msg.payload
       try {
         const { identityPubKey, encryptionPubKey, pairingToken, sas } = payload
 
@@ -273,7 +298,7 @@ export async function handleControlMessage (
 
         // Register signer in store and update trusted approvers
         if (approvalStore) {
-          await approvalStore.saveSigner(identityPubKey as string)
+          await approvalStore.saveSigner(identityPubKey)
           logger.info({ identityPubKey }, 'Signer registered in store')
 
           // Re-read from store (source of truth) and update broker
@@ -289,7 +314,7 @@ export async function handleControlMessage (
         if (encryptionPubKey && relayClient) {
           try {
             const nacl = await import('tweetnacl')
-            const peerPubKeyBytes = Buffer.from(encryptionPubKey as string, 'base64')
+            const peerPubKeyBytes = Buffer.from(encryptionPubKey, 'base64')
             const sharedSecret = nacl.default
               ? nacl.default.box.before(peerPubKeyBytes, pairingSession.daemonEncryptionSecretKey)
               : (nacl as Record<string, unknown> & { box: { before: (pk: Uint8Array, sk: Uint8Array) => Uint8Array } }).box.before(peerPubKeyBytes, pairingSession.daemonEncryptionSecretKey)
@@ -312,25 +337,27 @@ export async function handleControlMessage (
     // cancel_message -- cancel a pending or in-progress message
     // -----------------------------------------------------------------------
     case 'cancel_message': {
-      const { messageId } = payload
-      if (!messageId || !queueManager) {
+      const payload = msg.payload
+      if (!payload.messageId || !queueManager) {
         return { ok: false, type: 'cancel_message_result', error: 'Missing messageId or queue' }
       }
-      const cancelResult = queueManager.cancel(messageId as string)
+      const cancelResult = queueManager.cancel(payload.messageId)
       return {
         ok: cancelResult.ok,
         type: 'cancel_message_result',
-        messageId: messageId as string,
+        messageId: payload.messageId,
         reason: cancelResult.reason,
         wasProcessing: cancelResult.wasProcessing
       }
     }
 
     // -----------------------------------------------------------------------
-    // Unknown
+    // Unknown (runtime safety — wire may send unexpected types)
     // -----------------------------------------------------------------------
-    default:
-      logger.warn({ type }, 'Unknown control message type')
-      return { ok: false, error: `Unknown control type: ${type}` }
+    default: {
+      const unknownType: string = (msg as { type: string }).type
+      logger.warn({ type: unknownType }, 'Unknown control message type')
+      return { ok: false, error: `Unknown control type: ${unknownType}` }
+    }
   }
 }

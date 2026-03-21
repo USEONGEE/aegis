@@ -1,6 +1,6 @@
 import OpenAI from 'openai'
 import type { DaemonConfig } from './config.js'
-import type { ToolDefinition } from './tool-surface.js'
+import type { ToolDefinition } from './ai-tool-schema.js'
 
 // ---------------------------------------------------------------------------
 // Types

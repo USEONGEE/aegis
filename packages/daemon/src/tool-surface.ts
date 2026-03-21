@@ -2,56 +2,184 @@ import { randomUUID } from 'node:crypto'
 import { intentHash, policyHash, CHAIN_IDS } from '@wdk-app/canonical'
 import type { Logger } from 'pino'
 import type { WDKInstance } from './wdk-host.js'
-import type { RelayClient } from './relay-client.js'
 import type { ExecutionJournal } from './execution-journal.js'
+import type { ToolStorePort, ApprovalBrokerPort } from './ports.js'
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
-export interface ToolDefinition {
-  type: 'function'
-  function: {
-    name: string
-    description: string
-    parameters: {
-      type: 'object'
-      properties: Record<string, { type: string; description: string; items?: { type: string }; enum?: string[] }>
-      required?: string[]
-    }
-  }
-}
-
-export interface WDKContext {
+export interface ToolExecutionContext {
   wdk: WDKInstance
-  broker: any
-  store: any
+  broker: ApprovalBrokerPort
+  store: ToolStorePort
   logger: Logger
   journal: ExecutionJournal | null
-  relayClient?: RelayClient
 }
 
-export interface ToolResult {
-  status?: string
-  hash?: string | null
-  fee?: string | null
-  intentHash?: string
-  error?: string
-  reason?: string
-  requestId?: string
-  signedTx?: string
-  policyHash?: string
-  token?: string
-  amount?: string
-  cronId?: string
-  balances?: unknown[]
-  policies?: unknown[]
-  pending?: unknown[]
-  crons?: unknown[]
-  context?: unknown
-  rejections?: unknown[]
-  policyVersions?: unknown[]
+// ---------------------------------------------------------------------------
+// Per-tool result types (v0.2.9 — discriminated union)
+// ---------------------------------------------------------------------------
+
+// Common error/rejection types
+export interface ToolErrorResult {
+  status: 'error'
+  error: string
 }
+
+export interface IntentErrorResult {
+  status: 'error'
+  error: string
+  intentHash: string
+}
+
+export interface IntentRejectedResult {
+  status: 'rejected'
+  reason: string
+  intentHash: string
+  context: unknown
+}
+
+export interface TransferRejectedResult {
+  status: 'rejected'
+  reason: string
+  context: unknown
+}
+
+// 1. sendTransaction
+interface SendTransactionExecuted {
+  status: 'executed'
+  hash: string | null
+  fee: string | null
+  intentHash: string
+}
+
+interface SendTransactionDuplicate {
+  status: 'duplicate'
+  intentHash: string
+}
+
+export type SendTransactionResult =
+  | SendTransactionExecuted
+  | SendTransactionDuplicate
+  | IntentRejectedResult
+  | IntentErrorResult
+
+// 2. transfer
+interface TransferExecuted {
+  status: 'executed'
+  hash: string | null
+  fee: string | null
+  token: string
+  amount: string
+}
+
+export type TransferResult =
+  | TransferExecuted
+  | TransferRejectedResult
+  | ToolErrorResult
+
+// 3. getBalance
+interface GetBalanceSuccess {
+  balances: unknown[]
+}
+
+export type GetBalanceResult = GetBalanceSuccess | ToolErrorResult
+
+// 4. policyList
+interface PolicyListSuccess {
+  policies: unknown[]
+}
+
+export type PolicyListResult = PolicyListSuccess | ToolErrorResult
+
+// 5. policyPending
+interface PolicyPendingSuccess {
+  pending: unknown[]
+}
+
+export type PolicyPendingResult = PolicyPendingSuccess | ToolErrorResult
+
+// 6. policyRequest
+interface PolicyRequestPending {
+  status: 'pending'
+  policyHash: string
+}
+
+export type PolicyRequestResult = PolicyRequestPending | ToolErrorResult
+
+// 7. registerCron
+interface RegisterCronRegistered {
+  cronId: string
+  status: 'registered'
+}
+
+export type RegisterCronResult = RegisterCronRegistered | ToolErrorResult
+
+// 8. listCrons
+interface ListCronsSuccess {
+  crons: unknown[]
+}
+
+export type ListCronsResult = ListCronsSuccess | ToolErrorResult
+
+// 9. removeCron
+interface RemoveCronRemoved {
+  status: 'removed'
+}
+
+export type RemoveCronResult = RemoveCronRemoved | ToolErrorResult
+
+// 10. signTransaction
+interface SignTransactionSigned {
+  status: 'signed'
+  signedTx: string | null
+  intentHash: string
+  requestId: string
+}
+
+interface SignTransactionDuplicate {
+  status: 'duplicate'
+  intentHash: string
+}
+
+export type SignTransactionResult =
+  | SignTransactionSigned
+  | SignTransactionDuplicate
+  | IntentRejectedResult
+  | IntentErrorResult
+
+// 11. listRejections
+interface ListRejectionsSuccess {
+  rejections: unknown[]
+}
+
+export type ListRejectionsResult = ListRejectionsSuccess | ToolErrorResult
+
+// 12. listPolicyVersions
+interface ListPolicyVersionsSuccess {
+  policyVersions: unknown[]
+}
+
+export type ListPolicyVersionsResult = ListPolicyVersionsSuccess | ToolErrorResult
+
+// All tool results union
+export type AnyToolResult =
+  | SendTransactionResult
+  | TransferResult
+  | GetBalanceResult
+  | PolicyListResult
+  | PolicyPendingResult
+  | PolicyRequestResult
+  | RegisterCronResult
+  | ListCronsResult
+  | RemoveCronResult
+  | SignTransactionResult
+  | ListRejectionsResult
+  | ListPolicyVersionsResult
+
+/** @deprecated Use AnyToolResult instead */
+export type ToolResult = AnyToolResult
 
 interface SendTransactionArgs {
   chain: string
@@ -108,218 +236,14 @@ interface PolicyVersionListArgs {
 type ToolArgs = SendTransactionArgs | TransferArgs | ChainArgs | PolicyRequestArgs | RegisterCronArgs | CronIdArgs | RejectionListArgs | PolicyVersionListArgs | Record<string, unknown>
 
 // ---------------------------------------------------------------------------
-// 9 Agent Tool Definitions (OpenAI function calling JSON schema)
-// ---------------------------------------------------------------------------
-
-export const TOOL_DEFINITIONS: ToolDefinition[] = [
-  {
-    type: 'function',
-    function: {
-      name: 'sendTransaction',
-      description: 'Send a raw transaction on-chain. Returns execution result or requests approval.',
-      parameters: {
-        type: 'object',
-        properties: {
-          chain: { type: 'string', description: 'Target chain identifier (e.g. "ethereum")' },
-          to: { type: 'string', description: 'Destination address (0x-prefixed)' },
-          data: { type: 'string', description: 'Calldata hex string (0x-prefixed)' },
-          value: { type: 'string', description: 'Value in wei as decimal string' },
-          accountIndex: { type: 'number', description: 'BIP-44 account index' }
-        },
-        required: ['chain', 'to', 'data', 'value', 'accountIndex']
-      }
-    }
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'transfer',
-      description: 'Transfer a token to an address. High-level wrapper around sendTransaction.',
-      parameters: {
-        type: 'object',
-        properties: {
-          chain: { type: 'string', description: 'Target chain identifier' },
-          token: { type: 'string', description: 'Token symbol or contract address' },
-          to: { type: 'string', description: 'Recipient address' },
-          amount: { type: 'string', description: 'Amount as decimal string (human-readable)' },
-          accountIndex: { type: 'number', description: 'BIP-44 account index' }
-        },
-        required: ['chain', 'token', 'to', 'amount', 'accountIndex']
-      }
-    }
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'getBalance',
-      description: 'Get token balances for the active wallet on the specified chain.',
-      parameters: {
-        type: 'object',
-        properties: {
-          chain: { type: 'string', description: 'Target chain identifier' },
-          accountIndex: { type: 'number', description: 'BIP-44 account index' }
-        },
-        required: ['chain']
-      }
-    }
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'policyList',
-      description: 'List active policies for the specified chain.',
-      parameters: {
-        type: 'object',
-        properties: {
-          chain: { type: 'string', description: 'Target chain identifier' },
-          accountIndex: { type: 'number', description: 'BIP-44 account index' }
-        },
-        required: ['chain']
-      }
-    }
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'policyPending',
-      description: 'List pending policy approval requests for the specified chain.',
-      parameters: {
-        type: 'object',
-        properties: {
-          chain: { type: 'string', description: 'Target chain identifier' },
-          accountIndex: { type: 'number', description: 'BIP-44 account index' }
-        },
-        required: ['chain']
-      }
-    }
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'policyRequest',
-      description: 'Request a policy change. Creates a pending request that requires owner approval.',
-      parameters: {
-        type: 'object',
-        properties: {
-          chain: { type: 'string', description: 'Target chain identifier' },
-          description: { type: 'string', description: 'Human-readable description for the policy change' },
-          policies: {
-            type: 'array',
-            description: 'Array of policy objects to apply',
-            items: { type: 'object' }
-          },
-          accountIndex: { type: 'number', description: 'BIP-44 account index' }
-        },
-        required: ['chain', 'description', 'policies', 'accountIndex']
-      }
-    }
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'registerCron',
-      description: 'Register a cron job that runs a prompt at a regular interval.',
-      parameters: {
-        type: 'object',
-        properties: {
-          interval: { type: 'string', description: 'Cron expression or duration (e.g. "5m", "1h", "0 * * * *")' },
-          prompt: { type: 'string', description: 'Prompt to execute on each tick' },
-          chain: { type: 'string', description: 'Target chain for the cron context' },
-          sessionId: { type: 'string', description: 'Session ID for the cron conversation' },
-          accountIndex: { type: 'number', description: 'BIP-44 account index' }
-        },
-        required: ['interval', 'prompt', 'chain', 'sessionId', 'accountIndex']
-      }
-    }
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'listCrons',
-      description: 'List all registered cron jobs.',
-      parameters: {
-        type: 'object',
-        properties: {
-          accountIndex: { type: 'number', description: 'BIP-44 account index' }
-        }
-      }
-    }
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'removeCron',
-      description: 'Remove a registered cron job by its ID.',
-      parameters: {
-        type: 'object',
-        properties: {
-          cronId: { type: 'string', description: 'The cron job ID to remove' },
-          accountIndex: { type: 'number', description: 'BIP-44 account index' }
-        },
-        required: ['cronId']
-      }
-    }
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'signTransaction',
-      description: 'Sign a transaction without broadcasting. Returns signed tx data for later submission.',
-      parameters: {
-        type: 'object',
-        properties: {
-          chain: { type: 'string', description: 'Target chain identifier (e.g. "ethereum")' },
-          to: { type: 'string', description: 'Destination address (0x-prefixed)' },
-          data: { type: 'string', description: 'Calldata hex string (0x-prefixed)' },
-          value: { type: 'string', description: 'Value in wei as decimal string' },
-          accountIndex: { type: 'number', description: 'BIP-44 account index' }
-        },
-        required: ['chain', 'to', 'data', 'value', 'accountIndex']
-      }
-    }
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'listRejections',
-      description: 'List transaction rejection history for the specified chain and account.',
-      parameters: {
-        type: 'object',
-        properties: {
-          chain: { type: 'string', description: 'Target chain identifier' },
-          accountIndex: { type: 'number', description: 'BIP-44 account index' },
-          limit: { type: 'number', description: 'Maximum number of entries to return' }
-        },
-        required: ['chain', 'accountIndex']
-      }
-    }
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'listPolicyVersions',
-      description: 'List policy version history for the specified chain and account.',
-      parameters: {
-        type: 'object',
-        properties: {
-          chain: { type: 'string', description: 'Target chain identifier' },
-          accountIndex: { type: 'number', description: 'BIP-44 account index' }
-        },
-        required: ['chain', 'accountIndex']
-      }
-    }
-  }
-]
-
-// ---------------------------------------------------------------------------
 // Tool call dispatcher
 // ---------------------------------------------------------------------------
 
 /**
  * Execute a single tool call.
  */
-export async function executeToolCall (name: string, args: ToolArgs, wdkContext: WDKContext): Promise<ToolResult> {
-  const { wdk, broker, store, logger, journal } = wdkContext
+export async function executeToolCall (name: string, args: ToolArgs, ctx: ToolExecutionContext): Promise<AnyToolResult> {
+  const { wdk, broker, store, logger, journal } = ctx
   const accountIndex = (args as Record<string, unknown>).accountIndex as number | undefined
 
   switch (name) {

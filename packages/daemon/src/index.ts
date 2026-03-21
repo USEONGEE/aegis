@@ -6,15 +6,16 @@ import { initWDK } from './wdk-host.js'
 import { createOpenClawClient } from './openclaw-client.js'
 import { RelayClient } from './relay-client.js'
 import { handleControlMessage } from './control-handler.js'
-import type { PairingSession } from './control-handler.js'
+import type { ControlMessage, PairingSession } from './control-handler.js'
 import { handleChatMessage } from './chat-handler.js'
 import { ExecutionJournal } from './execution-journal.js'
 import { CronScheduler } from './cron-scheduler.js'
+import type { CronDispatch } from './cron-scheduler.js'
 import { AdminServer } from './admin-server.js'
 import { MessageQueueManager } from './message-queue.js'
 import type { QueuedMessage } from './message-queue.js'
 import { _processChatDirect } from './chat-handler.js'
-import type { WDKContext } from './tool-surface.js'
+import type { ToolExecutionContext } from './tool-surface.js'
 
 // ---------------------------------------------------------------------------
 // Daemon entry point
@@ -50,16 +51,13 @@ async function main (): Promise<void> {
     heartbeatIntervalMs: config.heartbeatIntervalMs
   })
 
-  // 6. Build WDK context (passed to tool execution)
-  // relayClient is included so tool-surface can send follow-up messages
-  // (e.g., control results after tx execution)
-  const wdkContext: WDKContext = {
+  // 6. Build tool execution context (passed to tool execution)
+  const ctx: ToolExecutionContext = {
     wdk: wdk!,
-    broker,
+    broker: broker!,
     store,
     logger,
-    journal,
-    relayClient
+    journal
   }
 
   // Pairing session state (populated when daemon starts pairing flow)
@@ -74,7 +72,7 @@ async function main (): Promise<void> {
         msg.text,
         openclawClient,
         relayClient,
-        wdkContext,
+        ctx,
         { maxIterations: config.toolCallMaxIterations },
         signal
       )
@@ -84,7 +82,8 @@ async function main (): Promise<void> {
   relayClient.onMessage((type, payload, raw) => {
     switch (type) {
       case 'control':
-        handleControlMessage(payload, broker!, logger, relayClient, store, pairingSession, queueManager)
+        // TODO: v0.2.9+ — wire JSON parse/validate 후 ControlMessage로 변환. 현재는 as cast.
+        handleControlMessage(payload as ControlMessage, broker!, logger, relayClient, store, pairingSession, queueManager)
           .then((result) => {
             // Forward control result to app via relay (preserving the result's own type)
             relayClient.send('control', result)
@@ -93,7 +92,7 @@ async function main (): Promise<void> {
         break
 
       case 'chat':
-        handleChatMessage(payload, openclawClient, relayClient, wdkContext, {
+        handleChatMessage(payload, openclawClient, relayClient, ctx, {
           maxIterations: config.toolCallMaxIterations
         }, queueManager)
           .catch((err: Error) => logger.error({ err }, 'Unhandled error in chat handler'))
@@ -137,22 +136,28 @@ async function main (): Promise<void> {
   }
 
   // 7. Start cron scheduler
+  const cronDispatch: CronDispatch = async (cronId, sessionId, userId, prompt, chainId) => {
+    queueManager.enqueue(sessionId, {
+      sessionId,
+      source: 'cron',
+      userId,
+      text: prompt,
+      chainId: chainId ?? undefined,
+      cronId
+    })
+  }
+
   const cronScheduler = new CronScheduler(
-    store, wdkContext, openclawClient, logger,
-    { tickIntervalMs: config.cronTickIntervalMs, queueManager }
+    store, logger, cronDispatch,
+    { tickIntervalMs: config.cronTickIntervalMs }
   )
   await cronScheduler.start()
 
   // 8. Start admin server
-  const adminServer = new AdminServer({
-    socketPath: config.socketPath,
-    store,
-    journal,
-    cronScheduler,
-    relayClient,
-    wdkContext,
-    logger
-  })
+  const adminServer = new AdminServer(
+    { socketPath: config.socketPath },
+    { store, journal, cronScheduler, relayClient, logger }
+  )
   await adminServer.start()
 
   // ---------------------------------------------------------------------------

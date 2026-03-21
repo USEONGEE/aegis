@@ -12,7 +12,7 @@
 design.md 6.2절 + 8절 Step 2 기반:
 
 - `tool-call-loop.ts`의 `ToolResultEntry` 인터페이스를 name-discriminated union으로 재정의:
-  - 12개 known tool variant: `{ toolCallId: string; name: 'sendTransaction'; args: SendTransactionArgs; result: SendTransactionResult }` 등
+  - 12개 known tool variant: `{ toolCallId: string; name: 'sendTransaction'; args: Record<string, unknown>; result: SendTransactionResult }` 등 (args는 JSON.parse 결과이므로 Record<string, unknown>)
   - 1개 unknown tool fallback variant: `{ toolCallId: string; name: string; args: Record<string, unknown>; result: ToolErrorResult }`
 - `ToolResult` import를 `AnyToolResult` + per-tool result 타입들로 변경
 - `allToolResults.push(...)` 로직에서 `name`이 리터럴이 되도록 타입 처리:

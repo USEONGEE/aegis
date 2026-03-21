@@ -3,7 +3,7 @@ import type { Server, Socket } from 'node:net'
 import { chmodSync } from 'node:fs'
 import { unlink } from 'node:fs/promises'
 import type { Logger } from 'pino'
-import type { WDKContext } from './tool-surface.js'
+import type { AdminStorePort } from './ports.js'
 import type { RelayClient } from './relay-client.js'
 import type { ExecutionJournal, JournalListOptions } from './execution-journal.js'
 import type { CronScheduler } from './cron-scheduler.js'
@@ -12,13 +12,15 @@ import type { CronScheduler } from './cron-scheduler.js'
 // Types
 // ---------------------------------------------------------------------------
 
-export interface AdminServerOptions {
+export interface AdminServerConfig {
   socketPath: string
-  store: any
+}
+
+interface AdminServerDeps {
+  store: AdminStorePort
   journal: ExecutionJournal | null
   cronScheduler: CronScheduler | null
   relayClient: RelayClient
-  wdkContext: WDKContext
   logger: Logger
 }
 
@@ -54,23 +56,21 @@ interface AdminResponse {
  */
 export class AdminServer {
   private _socketPath: string
-  private _store: any
+  private _store: AdminStorePort
   private _journal: ExecutionJournal | null
   private _cronScheduler: CronScheduler | null
   private _relayClient: RelayClient
-  private _wdkContext: WDKContext
   private _logger: Logger
   private _server: Server | null
   private _startedAt: number
 
-  constructor (opts: AdminServerOptions) {
-    this._socketPath = opts.socketPath
-    this._store = opts.store
-    this._journal = opts.journal
-    this._cronScheduler = opts.cronScheduler
-    this._relayClient = opts.relayClient
-    this._wdkContext = opts.wdkContext
-    this._logger = opts.logger
+  constructor (config: AdminServerConfig, deps: AdminServerDeps) {
+    this._socketPath = config.socketPath
+    this._store = deps.store
+    this._journal = deps.journal
+    this._cronScheduler = deps.cronScheduler
+    this._relayClient = deps.relayClient
+    this._logger = deps.logger
     this._server = null
     this._startedAt = Date.now()
   }

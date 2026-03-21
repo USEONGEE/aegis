@@ -1,17 +1,33 @@
-import { TOOL_DEFINITIONS, executeToolCall } from './tool-surface.js'
-import type { WDKContext, ToolResult, ToolDefinition } from './tool-surface.js'
+import { TOOL_DEFINITIONS } from './ai-tool-schema.js'
+import { executeToolCall } from './tool-surface.js'
+import type {
+  ToolExecutionContext, AnyToolResult,
+  SendTransactionResult, TransferResult, GetBalanceResult,
+  PolicyListResult, PolicyPendingResult, PolicyRequestResult,
+  RegisterCronResult, ListCronsResult, RemoveCronResult,
+  SignTransactionResult, ListRejectionsResult, ListPolicyVersionsResult,
+  ToolErrorResult
+} from './tool-surface.js'
 import type { OpenClawClient, ChatMessage } from './openclaw-client.js'
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
-export interface ToolResultEntry {
-  toolCallId: string
-  name: string
-  args: Record<string, unknown>
-  result: ToolResult
-}
+export type ToolResultEntry =
+  | { toolCallId: string; name: 'sendTransaction'; args: Record<string, unknown>; result: SendTransactionResult }
+  | { toolCallId: string; name: 'transfer'; args: Record<string, unknown>; result: TransferResult }
+  | { toolCallId: string; name: 'getBalance'; args: Record<string, unknown>; result: GetBalanceResult }
+  | { toolCallId: string; name: 'policyList'; args: Record<string, unknown>; result: PolicyListResult }
+  | { toolCallId: string; name: 'policyPending'; args: Record<string, unknown>; result: PolicyPendingResult }
+  | { toolCallId: string; name: 'policyRequest'; args: Record<string, unknown>; result: PolicyRequestResult }
+  | { toolCallId: string; name: 'registerCron'; args: Record<string, unknown>; result: RegisterCronResult }
+  | { toolCallId: string; name: 'listCrons'; args: Record<string, unknown>; result: ListCronsResult }
+  | { toolCallId: string; name: 'removeCron'; args: Record<string, unknown>; result: RemoveCronResult }
+  | { toolCallId: string; name: 'signTransaction'; args: Record<string, unknown>; result: SignTransactionResult }
+  | { toolCallId: string; name: 'listRejections'; args: Record<string, unknown>; result: ListRejectionsResult }
+  | { toolCallId: string; name: 'listPolicyVersions'; args: Record<string, unknown>; result: ListPolicyVersionsResult }
+  | { toolCallId: string; name: string; args: Record<string, unknown>; result: ToolErrorResult }
 
 export interface ProcessChatResult {
   content: string | null
@@ -39,11 +55,11 @@ export async function processChat (
   userId: string,
   sessionId: string,
   userMessage: string,
-  wdkContext: WDKContext,
+  ctx: ToolExecutionContext,
   openclawClient: OpenClawClient,
   opts: ProcessChatOptions = {}
 ): Promise<ProcessChatResult> {
-  const { logger } = wdkContext
+  const { logger } = ctx
   const maxIterations = opts.maxIterations || 10
   const onDelta = opts.onDelta || null
   const signal = opts.signal
@@ -126,9 +142,9 @@ export async function processChat (
 
       logger.info({ tool: fnName, args: fnArgs }, 'Executing tool call')
 
-      let result: ToolResult
+      let result: AnyToolResult
       try {
-        result = await executeToolCall(fnName, fnArgs, wdkContext)
+        result = await executeToolCall(fnName, fnArgs, ctx)
       } catch (err: any) {
         logger.error({ err, tool: fnName }, 'Unhandled tool execution error')
         result = { status: 'error', error: err.message }
@@ -141,7 +157,7 @@ export async function processChat (
         name: fnName,
         args: fnArgs,
         result
-      })
+      } as ToolResultEntry)
 
       followUpMessages.push({
         role: 'tool',
