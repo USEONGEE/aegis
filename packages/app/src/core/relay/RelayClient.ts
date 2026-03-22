@@ -391,7 +391,7 @@ export class RelayClient {
    */
   async sendControl(envelope: ControlEnvelope): Promise<void> {
     this.ensureConnected();
-    const innerPayload = { type: envelope.type, ...((envelope.payload ?? {}) as Record<string, unknown>) };
+    const innerPayload = { ...((envelope.payload ?? {}) as Record<string, unknown>), type: envelope.type };
     this.ws!.send(this.buildEnvelope('control', innerPayload));
   }
 
