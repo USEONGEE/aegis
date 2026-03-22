@@ -17,7 +17,7 @@
 | protocol+manifest+canonical | 13 | ~10 | ~3 |
 | **합계** | **240** | **~197** | **~43** |
 
-> 240건 중 ~197건은 DB nullable column, 조회 결과 없음, 런타임 상태(초기화 전), JSON primitive 등으로 **정당한 null 사용**이다. 이번 Phase의 대상은 도메인 모델 ~43건이다.
+> 240건 중 ~197건은 DB nullable column, 조회 결과 없음, 런타임 상태(초기화 전), JSON primitive 등으로 **정당한 null 사용**이다. 이번 Phase의 대상은 도메인 모델 ~38건이다 (Relay Envelope ~5건은 별도 후속 Phase).
 
 ### 대상 판정 기준
 
@@ -59,11 +59,13 @@ context: EvaluationContext | null
 matchedPermission: Rule | null
 ```
 
-**3. Dead 필드가 null로 남아있는 경우**
+**3. Dead 필드 또는 단일 caller null**
 
 ```typescript
 // 항상 null — dead 필드
 currentPolicyVersion: number | null
+
+// null = "해시 검증 skip" — 도메인 의미이므로 DU 전환 대상
 expectedTargetHash: string | null
 ```
 
@@ -77,15 +79,15 @@ expectedTargetHash: string | null
 
 - **원칙 위반**: "No Optional" 원칙이 `| null`에 대해서는 미적용 상태
 - **의미 모호**: `null`이 "없음", "전체", "초기화 전", "해당 없음" 등 여러 의미로 사용됨. 코드를 읽는 사람이 null의 의미를 추론해야 함
-- **Dead 코드**: `currentPolicyVersion`, `expectedTargetHash`는 항상 null — 코드 복잡성만 증가
+- **Dead 코드**: `currentPolicyVersion`은 항상 null (dead field). `expectedTargetHash`는 "검증 skip" 의미로 null 사용 중 (DU 전환 대상)
 - **확산 위험**: 기존 패턴을 참고해 새 코드에서도 `| null` 사용이 계속됨
 
 ### 목표
 
 이 Phase가 완료되면:
 
-1. **도메인 모델에서 `| null` 제거**: 약 43건의 도메인 모델 null을 DU, 기본값, 또는 삭제로 해소
-2. **Dead 필드 삭제**: `currentPolicyVersion`, `expectedTargetHash` 등 항상 null인 필드 제거
+1. **도메인 모델에서 `| null` 제거**: 총 발견 ~43건 중 ~38건(Relay Envelope ~5건 제외)을 DU, 기본값, 또는 삭제로 해소
+2. **Dead 필드 삭제**: `currentPolicyVersion` 삭제 + `expectedTargetHash` DU 전환
 3. **패턴 확립**: `chainId` 같은 "전체/단일" 의미는 DU로, `walletName` 같은 "이름 없음"은 기본값으로 — 각 패턴의 해결 방식이 일관됨
 
 ### 비목표 (Out of Scope)
