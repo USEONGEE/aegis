@@ -27,6 +27,12 @@ AI DeFi Agent 서명 엔진 + 제어 인프라.
 - **Codex Session ID**: `/Users/mousebook/Documents/GitHub/WDK-APP/docs/phases/v0.4.7-dead-exports-cleanup`
 - **시작일**: 2026-03-22
 
+### v0.4.9 — 도메인 모델 Null 제거
+- **상태**: Step 1 - PRD
+- **문서**: [docs/phases/v0.4.9-domain-null-cleanup/](docs/phases/v0.4.9-domain-null-cleanup/)
+- **Codex Session ID**: `/Users/mousebook/Documents/GitHub/WDK-APP/docs/phases/v0.4.9-domain-null-cleanup`
+- **시작일**: 2026-03-22
+
 ### v0.4.0 — No Optional 원칙 전면 적용
 - **상태**: Step 1 - PRD
 - **문서**: [docs/phases/v0.4.0-no-optional-cleanup/](docs/phases/v0.4.0-no-optional-cleanup/)
@@ -73,6 +79,7 @@ AI DeFi Agent 서명 엔진 + 제어 인프라.
 | v0.4.1 | Strict CI Checks (no-empty-catch, no-console, no-explicit-any) |
 | v0.4.2 | WDK 이벤트 단일화 + 타입 규격화 |
 | v0.4.4 | App WDK 이벤트 마이그레이션 — sendApproval() 전환 + eventName→event.type + 이벤트 자동 소비 |
+| v0.4.8 | WS 채널 재설계 + Protocol 타입 강제 적용 |
 
 ## 프로젝트 구조
 

@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.4.8 - WS 채널 재설계 + Protocol 타입 강제 적용 (2026-03-22)
+
+- **채널 단방향 통일**: control을 app→daemon 단방향으로 전환. cancel 결과(CancelCompleted/CancelFailed)를 event_stream으로 이동하여 control/event_stream 방향 일관성 확보
+- **단일 전달 경로**: 영속 채널(chat, control, event_stream)의 직접 forward 제거. Redis XADD → poller XREAD 단일 경로로 통일하여 메시지 중복 수신 해소
+- **query/query_result 채널 신설**: app이 daemon에게 데이터를 직접 조회할 수 있는 WS 전용 채널. policyList, pendingApprovals, signerList, walletList 4종 초기 지원. Redis 미경유(영속 불필요)
+- **protocol 타입 강제 적용**: daemon/relay/app 모든 메시지 송수신에서 protocol 패키지 타입 import + 적용. 리터럴 직접 작성 제거. 컴파일 타임 체크 확보
+- **DaemonStore query 인터페이스 확장**: listPolicies, listPendingApprovals, listSigners, listWallets 4종 조회 메서드를 DaemonStore + ports에 추가
+- 📝 [Phase 문서](../archive/v0.4.8-ws-channel-protocol-enforcement/README.md)
+
+### 수치
+- daemon 4 suite / 169 tests pass, protocol + daemon tsc clean
+- 28 files changed, +632 -1,206
+
 ## v0.4.4 - App WDK 이벤트 마이그레이션 (2026-03-22)
 
 - **sendApproval() WDK 이벤트 전환**: ControlResult 대기 → event_stream 기반. 6종 승인 타입별 성공 이벤트 매핑 (tx→ExecutionBroadcasted, policy→PolicyApplied, revoke→SignerRevoked, wallet→WalletCreated/Deleted). ApprovalFailed로 실패 처리.
