@@ -1,3 +1,17 @@
+// =========================================================================
+// IMPORTANT: Relay 채널 아키텍처 (v0.4.8 확정)
+// =========================================================================
+//
+// 모든 영속 메시지(chat, control)는 Redis Stream만 거친다.
+// 직접 WS socket.send() forward는 금지 — 이중 전달(메시지 중복) 방지.
+//
+// 영속 채널: relay → Redis XADD → poller XREAD BLOCK → 소켓 전달
+// 비영속 채널(query/query_result): WS 직접 전달 (의도적 예외)
+//
+// XREAD BLOCK 주의: blocking Redis 연결 1개를 여러 poller가 공유하면
+// head-of-line blocking 발생. chat poller 추가 시 별도 연결 필요.
+// =========================================================================
+
 import { verifyToken } from './auth.js'
 import type { JwtPayload } from './auth.js'
 import { sendPushNotification } from './push.js'
@@ -218,7 +232,9 @@ export default async function wsRoutes (fastify: FastifyInstance): Promise<void>
           if (msg.encrypted) entry.encrypted = '1'
           const id = await queue.publish(stream, entry)
 
-          // v0.4.8: 직접 forward 제거. Redis → poller가 유일한 전달 경로.
+          // IMPORTANT: Daemon→App 방향은 직접 forward 하지 않는다 (v0.4.8 원칙).
+          // Redis XADD → pollChatForApp() / pollControlForApp()이 유일한 전달 경로.
+          // 이중 전달(직접+poller) 시 메시지 중복 발생하므로 절대 socket.send() 추가 금지.
 
           const apps = appBuckets.get(userId)
           if (!apps || apps.size === 0) {
@@ -272,9 +288,6 @@ export default async function wsRoutes (fastify: FastifyInstance): Promise<void>
       try { msg = JSON.parse(raw.toString()) } catch {
         return send(socket, { type: 'error', message: 'Invalid JSON' })
       }
-
-      // DEBUG v0.5.0: log all app WS messages
-      fastify.log.info({ type: msg.type, userId, sessionId: msg.sessionId }, 'App WS message received')
 
       /* ---- authenticate ---- */
       if (msg.type === 'authenticate') {
@@ -375,7 +388,12 @@ export default async function wsRoutes (fastify: FastifyInstance): Promise<void>
         if (msg.encrypted) entry.encrypted = '1'
         await queue.publish(stream, entry)
 
-        // v0.5.0: Chat은 daemon에 직접 forward (sessionId 기반이라 polling 불가)
+        // IMPORTANT: App→Daemon chat은 직접 forward한다.
+        // v0.4.8 원칙(Redis poller만 전달)의 의도적 예외.
+        // 이유: chat stream 키가 chat:{userId}:{sessionId}라서
+        // daemon이 sessionId를 미리 알 수 없어 polling 대상을 특정할 수 없다.
+        // Redis에도 저장(위 XADD)하므로 이력은 보존된다.
+        // control은 pollControlForDaemon()이 전달한다.
         if (msg.type === 'chat') {
           const daemonId = userToDaemon.get(userId)
           if (daemonId) {
@@ -385,7 +403,6 @@ export default async function wsRoutes (fastify: FastifyInstance): Promise<void>
             }
           }
         }
-        // control은 pollControlForDaemon()이 전달
         return
       }
 
@@ -497,6 +514,11 @@ export default async function wsRoutes (fastify: FastifyInstance): Promise<void>
 
   // -----------------------------------------------------------------------
   // Chat polling — App (continuous, per session)
+  // IMPORTANT: non-blocking readRange + sleep(200ms)을 사용한다.
+  // queue.consume() (XREAD BLOCK)을 쓰면 blocking Redis 연결을
+  // control poller와 공유하여 head-of-line blocking이 발생한다.
+  // 근본 해결은 chat용 별도 blocking Redis 연결 분리이지만,
+  // 현재는 non-blocking polling으로 200ms 이내 지연을 보장한다.
   // -----------------------------------------------------------------------
 
   async function pollChatForApp (
