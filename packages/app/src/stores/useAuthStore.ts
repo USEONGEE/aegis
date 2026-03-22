@@ -5,7 +5,7 @@ const TOKEN_KEY = 'wdk_auth_token';
 const REFRESH_KEY = 'wdk_refresh_token';
 const USER_ID_KEY = 'wdk_user_id';
 
-export interface AuthState {
+interface AuthState {
   userId: string | null;
   token: string | null;
   refreshToken: string | null;

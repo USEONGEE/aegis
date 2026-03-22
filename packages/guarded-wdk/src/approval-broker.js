@@ -2,7 +2,7 @@
 
 import { ApprovalTimeoutError } from './errors.js'
 
-export class InMemoryApprovalBroker {
+class InMemoryApprovalBroker {
   constructor () {
     this._pending = new Map()
   }

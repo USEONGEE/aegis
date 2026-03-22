@@ -15,17 +15,6 @@ export type { SignedApprovalFields }
 export type ApprovalType = 'tx' | 'policy' | 'policy_reject' | 'device_revoke' | 'wallet_create' | 'wallet_delete';
 
 /**
- * Unsigned intent — the tx format that WDK receives from any source (AI, DeFi CLI, etc).
- * intentHash = SHA-256(canonical { chain, to, data, value })
- */
-export interface UnsignedIntent {
-  chainId: number;
-  to: string;
-  data: string;
-  value: string;
-}
-
-/**
  * SignedApproval — the unified envelope for all approval types.
  * tx, policy, policy_reject, device_revoke all use the same structure.
  * Signed with Ed25519 identity key.

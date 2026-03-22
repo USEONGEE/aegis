@@ -9,7 +9,7 @@
 // Base
 // ---------------------------------------------------------------------------
 
-export interface WDKEventBase {
+interface WDKEventBase {
   type: string
   timestamp: number
 }
@@ -18,31 +18,31 @@ export interface WDKEventBase {
 // Policy evaluation wire types (structurally compatible with guarded-wdk)
 // ---------------------------------------------------------------------------
 
-export interface PolicyArgConditionWire {
+interface PolicyArgConditionWire {
   condition: string
   value: string | string[]
 }
 
-export interface PolicyRuleWire {
+interface PolicyRuleWire {
   order: number
   args?: Record<string, PolicyArgConditionWire>
   valueLimit?: string | number
   decision: 'ALLOW' | 'REJECT'
 }
 
-export interface PolicyFailedArgWire {
+interface PolicyFailedArgWire {
   argIndex: string
   condition: string
   expected: string | string[]
   actual: string
 }
 
-export interface PolicyRuleFailureWire {
+interface PolicyRuleFailureWire {
   rule: PolicyRuleWire
   failedArgs: PolicyFailedArgWire[]
 }
 
-export interface PolicyEvaluationContextWire {
+interface PolicyEvaluationContextWire {
   target: string
   selector: string
   effectiveRules: PolicyRuleWire[]
@@ -53,14 +53,14 @@ export interface PolicyEvaluationContextWire {
 // Transaction Lifecycle (from guarded-middleware)
 // ---------------------------------------------------------------------------
 
-export interface IntentProposedEvent extends WDKEventBase {
+interface IntentProposedEvent extends WDKEventBase {
   type: 'IntentProposed'
   requestId: string
   tx: { to: string; data: string | undefined; value: string | undefined }
   chainId: number
 }
 
-export interface PolicyEvaluatedEvent extends WDKEventBase {
+interface PolicyEvaluatedEvent extends WDKEventBase {
   type: 'PolicyEvaluated'
   requestId: string
   decision: 'ALLOW' | 'REJECT'
@@ -69,14 +69,14 @@ export interface PolicyEvaluatedEvent extends WDKEventBase {
   context: PolicyEvaluationContextWire | null
 }
 
-export interface ExecutionBroadcastedEvent extends WDKEventBase {
+interface ExecutionBroadcastedEvent extends WDKEventBase {
   type: 'ExecutionBroadcasted'
   requestId: string
   hash: string
   fee: string | null
 }
 
-export interface ExecutionSettledEvent extends WDKEventBase {
+interface ExecutionSettledEvent extends WDKEventBase {
   type: 'ExecutionSettled'
   requestId: string
   hash: string
@@ -84,13 +84,13 @@ export interface ExecutionSettledEvent extends WDKEventBase {
   confirmedAt: number
 }
 
-export interface ExecutionFailedEvent extends WDKEventBase {
+interface ExecutionFailedEvent extends WDKEventBase {
   type: 'ExecutionFailed'
   requestId: string
   error: string
 }
 
-export interface TransactionSignedEvent extends WDKEventBase {
+interface TransactionSignedEvent extends WDKEventBase {
   type: 'TransactionSigned'
   requestId: string
   intentHash: string
@@ -100,25 +100,25 @@ export interface TransactionSignedEvent extends WDKEventBase {
 // Approval (from signed-approval-broker)
 // ---------------------------------------------------------------------------
 
-export interface PendingPolicyRequestedEvent extends WDKEventBase {
+interface PendingPolicyRequestedEvent extends WDKEventBase {
   type: 'PendingPolicyRequested'
   requestId: string
   chainId: number
 }
 
-export interface ApprovalVerifiedEvent extends WDKEventBase {
+interface ApprovalVerifiedEvent extends WDKEventBase {
   type: 'ApprovalVerified'
   requestId: string
   approvalType: string
   approver: string
 }
 
-export interface ApprovalRejectedEvent extends WDKEventBase {
+interface ApprovalRejectedEvent extends WDKEventBase {
   type: 'ApprovalRejected'
   requestId: string
 }
 
-export interface PolicyAppliedEvent extends WDKEventBase {
+interface PolicyAppliedEvent extends WDKEventBase {
   type: 'PolicyApplied'
   requestId: string
   chainId: number
@@ -128,20 +128,20 @@ export interface PolicyAppliedEvent extends WDKEventBase {
 // Identity (from signed-approval-broker)
 // ---------------------------------------------------------------------------
 
-export interface SignerRevokedEvent extends WDKEventBase {
+interface SignerRevokedEvent extends WDKEventBase {
   type: 'SignerRevoked'
   requestId: string
   publicKey: string
 }
 
-export interface WalletCreatedEvent extends WDKEventBase {
+interface WalletCreatedEvent extends WDKEventBase {
   type: 'WalletCreated'
   requestId: string
   accountIndex: number
   name: string
 }
 
-export interface WalletDeletedEvent extends WDKEventBase {
+interface WalletDeletedEvent extends WDKEventBase {
   type: 'WalletDeleted'
   requestId: string
   accountIndex: number
@@ -151,7 +151,7 @@ export interface WalletDeletedEvent extends WDKEventBase {
 // Failure (new in v0.4.2)
 // ---------------------------------------------------------------------------
 
-export interface ApprovalFailedEvent extends WDKEventBase {
+interface ApprovalFailedEvent extends WDKEventBase {
   type: 'ApprovalFailed'
   requestId: string
   approvalType: string

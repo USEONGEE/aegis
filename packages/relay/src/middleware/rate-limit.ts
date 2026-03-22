@@ -5,12 +5,12 @@ import type { FastifyRequest, FastifyReply, HookHandlerDoneFunction } from 'fast
 // Types
 // ---------------------------------------------------------------------------
 
-export interface RateLimitOptions {
+interface RateLimitOptions {
   max?: number
   windowMs?: number
 }
 
-export interface RateLimitCheckResult {
+interface RateLimitCheckResult {
   allowed: boolean
   remaining: number
   retryAfterMs: number

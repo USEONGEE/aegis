@@ -1,6 +1,6 @@
 import nacl from 'tweetnacl'
 
-export interface KeyPair {
+interface KeyPair {
   publicKey: string
   secretKey: string
 }
@@ -18,7 +18,7 @@ export function verify (message: Buffer | Uint8Array, signatureHex: string, publ
 /**
  * Sign a message with Ed25519.
  */
-export function sign (message: Buffer | Uint8Array, secretKeyHex: string): string {
+function sign (message: Buffer | Uint8Array, secretKeyHex: string): string {
   const sk = hexToBytes(secretKeyHex)
   const msg = message instanceof Uint8Array ? message : new Uint8Array(message)
   const sig = nacl.sign.detached(msg, sk)
@@ -28,7 +28,7 @@ export function sign (message: Buffer | Uint8Array, secretKeyHex: string): strin
 /**
  * Generate an Ed25519 keypair.
  */
-export function generateKeyPair (): KeyPair {
+function generateKeyPair (): KeyPair {
   const kp = nacl.sign.keyPair()
   return {
     publicKey: '0x' + bytesToHex(kp.publicKey),

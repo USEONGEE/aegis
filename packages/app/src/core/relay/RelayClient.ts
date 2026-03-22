@@ -26,14 +26,14 @@ export interface RelayMessage {
   sessionId: string | null;
 }
 
-export interface ControlEnvelope {
+interface ControlEnvelope {
   type: string;
   payload: unknown;
   messageId: string;
   timestamp: number;
 }
 
-export interface EncryptedPayload {
+interface EncryptedPayload {
   nonce: string;
   ciphertext: string;
 }

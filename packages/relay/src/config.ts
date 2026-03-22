@@ -2,7 +2,7 @@
 // Relay server configuration types
 // ---------------------------------------------------------------------------
 
-export interface RelayConfig {
+interface RelayConfig {
   port: number
   host: string
 

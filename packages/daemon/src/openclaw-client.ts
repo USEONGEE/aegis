@@ -13,7 +13,7 @@ export interface ChatMessage {
   tool_call_id?: string
 }
 
-export interface ToolCall {
+interface ToolCall {
   id: string
   type: 'function'
   function: {
@@ -23,7 +23,7 @@ export interface ToolCall {
   index?: number
 }
 
-export interface ChatChoice {
+interface ChatChoice {
   index: number
   message: {
     role: string
@@ -33,7 +33,7 @@ export interface ChatChoice {
   finish_reason: string
 }
 
-export interface ChatResponse {
+interface ChatResponse {
   choices: ChatChoice[]
 }
 

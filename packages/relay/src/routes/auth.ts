@@ -122,7 +122,7 @@ export interface JwtPayload {
 // Password utilities
 // ---------------------------------------------------------------------------
 
-export function hashPassword (password: string): string {
+function hashPassword (password: string): string {
   const salt = randomBytes(16).toString('hex')
   const hash = createHash('sha256')
     .update(salt + password)
@@ -130,7 +130,7 @@ export function hashPassword (password: string): string {
   return `${salt}:${hash}`
 }
 
-export function verifyPassword (password: string, stored: string): boolean {
+function verifyPassword (password: string, stored: string): boolean {
   const [salt, expectedHex] = stored.split(':')
   const actual = createHash('sha256')
     .update(salt + password)

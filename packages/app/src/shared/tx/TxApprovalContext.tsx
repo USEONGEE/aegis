@@ -14,9 +14,7 @@ import type { ApprovalRequest } from '../../core/approval/types';
 
 // --- Types ---
 
-export type TxApprovalStatus = 'idle' | 'pending' | 'signing' | 'success' | 'error';
-
-export type TxApprovalState =
+type TxApprovalState =
   | { status: 'idle' }
   | { status: 'pending'; request: ApprovalRequest }
   | { status: 'signing' }
@@ -29,13 +27,13 @@ interface QueueItem {
   reject: (error: Error) => void;
 }
 
-export interface TxApprovalContextValue {
+interface TxApprovalContextValue {
   state: TxApprovalState;
   requestApproval: (request: ApprovalRequest) => Promise<{ txHash: string }>;
   reject: () => void;
 }
 
-export interface TxApprovalInternalValue {
+interface TxApprovalInternalValue {
   approve: () => void;
   dismiss: () => void;
   reopen: () => void;

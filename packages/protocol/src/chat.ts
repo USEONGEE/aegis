@@ -2,7 +2,7 @@
 // Chat channel wire types (app <-> daemon)
 // ---------------------------------------------------------------------------
 
-export interface ToolResultWire {
+interface ToolResultWire {
   toolCallId: string
   name: string
   args: Record<string, unknown>
@@ -15,13 +15,13 @@ export interface RelayChatInput {
   text: string
 }
 
-export interface ChatTypingEvent {
+interface ChatTypingEvent {
   type: 'typing'
   userId: string
   sessionId: string
 }
 
-export interface ChatStreamEvent {
+interface ChatStreamEvent {
   type: 'stream'
   userId: string
   sessionId: string
@@ -29,7 +29,7 @@ export interface ChatStreamEvent {
   source?: 'user' | 'cron'
 }
 
-export interface ChatDoneEvent {
+interface ChatDoneEvent {
   type: 'done'
   userId: string
   sessionId: string
@@ -39,7 +39,7 @@ export interface ChatDoneEvent {
   source?: 'user' | 'cron'
 }
 
-export interface ChatErrorEvent {
+interface ChatErrorEvent {
   type: 'error'
   userId: string
   sessionId: string
@@ -47,14 +47,14 @@ export interface ChatErrorEvent {
   source?: 'user' | 'cron'
 }
 
-export interface ChatCancelledEvent {
+interface ChatCancelledEvent {
   type: 'cancelled'
   userId: string
   sessionId: string
   source?: 'user' | 'cron'
 }
 
-export interface ChatToolStartEvent {
+interface ChatToolStartEvent {
   type: 'tool_start'
   userId: string
   sessionId: string
@@ -63,7 +63,7 @@ export interface ChatToolStartEvent {
   source?: 'user' | 'cron'
 }
 
-export interface ChatToolDoneEvent {
+interface ChatToolDoneEvent {
   type: 'tool_done'
   userId: string
   sessionId: string

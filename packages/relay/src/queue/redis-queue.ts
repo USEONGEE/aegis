@@ -7,7 +7,7 @@ import config from '../config.js'
 // Types
 // ---------------------------------------------------------------------------
 
-export interface RedisQueueOptions {
+interface RedisQueueOptions {
   url?: string
 }
 

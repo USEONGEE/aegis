@@ -14,7 +14,7 @@ import type { OpenClawClient, ChatMessage } from './openclaw-client.js'
 // Types
 // ---------------------------------------------------------------------------
 
-export type ToolResultEntry =
+type ToolResultEntry =
   | { toolCallId: string; name: 'sendTransaction'; args: Record<string, unknown>; result: SendTransactionResult }
   | { toolCallId: string; name: 'transfer'; args: Record<string, unknown>; result: TransferResult }
   | { toolCallId: string; name: 'getBalance'; args: Record<string, unknown>; result: GetBalanceResult }
@@ -29,13 +29,13 @@ export type ToolResultEntry =
   | { toolCallId: string; name: 'listPolicyVersions'; args: Record<string, unknown>; result: ListPolicyVersionsResult }
   | { toolCallId: string; name: string; args: Record<string, unknown>; result: ToolErrorResult }
 
-export interface ProcessChatResult {
+interface ProcessChatResult {
   content: string | null
   toolResults: ToolResultEntry[]
   iterations: number
 }
 
-export interface ProcessChatOptions {
+interface ProcessChatOptions {
   maxIterations?: number
   onDelta?: ((delta: string) => void) | null
   onToolStart?: ((toolName: string, toolCallId: string) => void) | null

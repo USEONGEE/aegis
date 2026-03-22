@@ -172,7 +172,7 @@ function ChatNavigator() {
 
 // --- Root Tabs ---
 
-export type RootTabParamList = {
+type RootTabParamList = {
   Chat: undefined;
   Policy: undefined;
   Approval: undefined;

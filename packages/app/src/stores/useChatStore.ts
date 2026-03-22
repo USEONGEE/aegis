@@ -28,14 +28,14 @@ export interface TextChatMessage extends ChatMessageBase {
   role: 'user' | 'assistant';
 }
 
-export interface ToolChatMessage extends ChatMessageBase {
+interface ToolChatMessage extends ChatMessageBase {
   kind: 'tool';
   role: 'system';
   toolCall: string;
   toolStatus: 'running' | 'done' | 'error';
 }
 
-export interface StatusChatMessage extends ChatMessageBase {
+interface StatusChatMessage extends ChatMessageBase {
   kind: 'status';
   role: 'system';
   status: 'cancelled';

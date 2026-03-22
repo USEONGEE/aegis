@@ -30,7 +30,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 // Types
 // ---------------------------------------------------------------------------
 
-export interface PgRegistryOptions {
+interface PgRegistryOptions {
   connectionString?: string
 }
 

@@ -7,20 +7,20 @@ import type { Logger } from 'pino'
 // Types
 // ---------------------------------------------------------------------------
 
-export interface RelayClientOptions {
+interface RelayClientOptions {
   reconnectBaseMs?: number
   reconnectMaxMs?: number
   heartbeatIntervalMs?: number
 }
 
-export interface EncryptedPayload {
+interface EncryptedPayload {
   nonce: string
   ciphertext: string
 }
 
 import type { RelayEnvelope } from '@wdk-app/protocol'
 
-export type MessageHandler = (type: string, payload: Record<string, unknown>, raw: Record<string, unknown>) => void
+type MessageHandler = (type: string, payload: Record<string, unknown>, raw: Record<string, unknown>) => void
 
 // ---------------------------------------------------------------------------
 // RelayClient

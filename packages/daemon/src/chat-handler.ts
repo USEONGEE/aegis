@@ -9,7 +9,7 @@ import type { RelayChatInput } from '@wdk-app/protocol'
 // Types
 // ---------------------------------------------------------------------------
 
-export interface ChatHandlerOptions {
+interface ChatHandlerOptions {
   maxIterations?: number
 }
 

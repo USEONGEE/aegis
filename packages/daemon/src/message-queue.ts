@@ -12,37 +12,37 @@ export interface QueuedMessage {
   abortController: AbortController
 }
 
-export interface CancelResultOk {
+interface CancelResultOk {
   ok: true
   wasProcessing: boolean
 }
 
-export interface CancelResultFailed {
+interface CancelResultFailed {
   ok: false
   reason: 'not_found' | 'already_completed'
 }
 
-export type CancelResult = CancelResultOk | CancelResultFailed
+type CancelResult = CancelResultOk | CancelResultFailed
 
-export interface ProcessResult {
+interface ProcessResult {
   ok: boolean
   error?: string
 }
 
-export type MessageProcessor = (msg: QueuedMessage, signal: AbortSignal) => Promise<ProcessResult>
+type MessageProcessor = (msg: QueuedMessage, signal: AbortSignal) => Promise<ProcessResult>
 
-export interface QueueLogger {
+interface QueueLogger {
   error(obj: Record<string, unknown>, msg: string): void
   warn(obj: Record<string, unknown>, msg: string): void
 }
 
-export interface MessageQueueOptions {
+interface MessageQueueOptions {
   maxQueueSize?: number       // default 100
   processTimeout?: number     // default 120000 (2 min)
   logger?: QueueLogger
 }
 
-export class SessionMessageQueue {
+class SessionMessageQueue {
   private _queue: QueuedMessage[] = []
   private _processing: QueuedMessage | null = null
   private _sessionId: string

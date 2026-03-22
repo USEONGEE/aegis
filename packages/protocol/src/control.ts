@@ -20,19 +20,19 @@ export interface SignedApprovalFields {
   content: string
 }
 
-export interface PolicyApprovalPayload extends SignedApprovalFields {
+interface PolicyApprovalPayload extends SignedApprovalFields {
   policies: Record<string, unknown>[]
 }
 
-export interface DeviceRevokePayload extends SignedApprovalFields {
+interface DeviceRevokePayload extends SignedApprovalFields {
   targetPublicKey: string
 }
 
-export interface CancelQueuedPayload {
+interface CancelQueuedPayload {
   messageId: string
 }
 
-export interface CancelActivePayload {
+interface CancelActivePayload {
   messageId: string
 }
 
@@ -48,55 +48,55 @@ export type ControlMessage =
 
 // --- daemon -> app: ControlResult ---
 
-export type ApprovalType = 'tx_approval' | 'policy_approval' | 'policy_reject' | 'device_revoke' | 'wallet_create' | 'wallet_delete'
+type ApprovalType = 'tx_approval' | 'policy_approval' | 'policy_reject' | 'device_revoke' | 'wallet_create' | 'wallet_delete'
 
-export interface ControlResultApprovalOk {
+interface ControlResultApprovalOk {
   ok: true
   type: ApprovalType
   requestId: string
 }
 
-export interface ControlResultApprovalError {
+interface ControlResultApprovalError {
   ok: false
   type: ApprovalType
   requestId: string
   error: string
 }
 
-export interface ControlResultCancelQueuedOk {
+interface ControlResultCancelQueuedOk {
   ok: true
   type: 'cancel_queued'
   messageId: string
 }
 
-export interface ControlResultCancelQueuedError {
+interface ControlResultCancelQueuedError {
   ok: false
   type: 'cancel_queued'
   messageId: string
   reason: 'not_found' | 'already_completed'
 }
 
-export interface ControlResultCancelActiveOk {
+interface ControlResultCancelActiveOk {
   ok: true
   type: 'cancel_active'
   messageId: string
   wasProcessing: boolean
 }
 
-export interface ControlResultCancelActiveError {
+interface ControlResultCancelActiveError {
   ok: false
   type: 'cancel_active'
   messageId: string
   reason: 'not_found' | 'already_completed'
 }
 
-export interface ControlResultCancelError {
+interface ControlResultCancelError {
   ok: false
   type: 'cancel_queued' | 'cancel_active'
   error: string
 }
 
-export interface ControlResultGenericError {
+interface ControlResultGenericError {
   ok: false
   error: string
 }
@@ -113,28 +113,28 @@ export type ControlResult =
 
 // --- daemon -> app: ControlEvent (async notifications) ---
 
-export interface MessageQueuedEvent {
+interface MessageQueuedEvent {
   type: 'message_queued'
   userId: string
   sessionId: string
   messageId: string
 }
 
-export interface MessageStartedEvent {
+interface MessageStartedEvent {
   type: 'message_started'
   userId: string
   sessionId: string
   messageId: string
 }
 
-export interface CronSessionCreatedEvent {
+interface CronSessionCreatedEvent {
   type: 'cron_session_created'
   userId: string
   sessionId: string
   cronId: string
 }
 
-export interface EventStreamEvent {
+interface EventStreamEvent {
   type: 'event_stream'
   event: AnyWDKEvent
 }
