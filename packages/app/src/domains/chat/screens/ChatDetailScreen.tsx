@@ -103,7 +103,7 @@ export function ChatDetailScreen({ route }: Props) {
       if (message.channel !== 'chat') return;
 
       const msgSessionId = data.sessionId ?? currentSessionId;
-      const msgSource = data.source ?? 'user';
+      const msgSource = (data.source === 'cron' ? 'cron' : 'user') as 'user' | 'cron';
 
       // Store messages for all sessions (not just current) for cron/offline recovery
       // But only update UI state (typing, stream, loading) for current session
@@ -122,7 +122,7 @@ export function ChatDetailScreen({ route }: Props) {
             timestamp: message.timestamp,
             sessionId: msgSessionId!,
             source: msgSource,
-            toolCall: data.toolName,
+            toolCall: data.toolName ?? '',
             toolStatus: 'running',
           });
           return;
@@ -139,7 +139,7 @@ export function ChatDetailScreen({ route }: Props) {
             timestamp: message.timestamp,
             sessionId: msgSessionId!,
             source: msgSource,
-            toolCall: data.toolName,
+            toolCall: data.toolName ?? '',
             toolStatus: data.status === 'success' ? 'done' : 'error',
           });
           return;

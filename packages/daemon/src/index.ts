@@ -88,7 +88,8 @@ async function main (): Promise<void> {
       } catch (err: unknown) {
         return { ok: false, error: err instanceof Error ? err.message : String(err) }
       }
-    }
+    },
+    { logger }
   )
 
   relayClient.onMessage((type, payload, raw) => {

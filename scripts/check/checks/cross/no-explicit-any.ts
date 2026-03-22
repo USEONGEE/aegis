@@ -28,40 +28,39 @@ function describeContext(anyNode: Node): string {
   const parent = anyNode.getParent()
   if (!parent) return 'explicit \'any\' usage'
 
-  // as any
+  // as any — AnyKeyword -> AsExpression
   if (Node.isAsExpression(parent)) {
     return '\'as any\' type assertion'
   }
 
-  // catch (err: any) — parent is TypeAnnotation, grandparent is VariableDeclaration in CatchClause
-  if (Node.isTypeNode(parent)) {
-    const grandparent = parent.getParent()
-    if (grandparent) {
-      const greatGrandparent = grandparent.getParent()
-      if (greatGrandparent && Node.isCatchClause(greatGrandparent)) {
-        return 'catch parameter typed as \'any\' — use \'unknown\''
-      }
-    }
+  // Walk up to find the meaningful ancestor (skip TypeNode wrappers)
+  let ancestor: Node = parent
+  if (Node.isTypeNode(ancestor)) {
+    const gp = ancestor.getParent()
+    if (gp) ancestor = gp
   }
 
-  // function/method parameter: fn(x: any)
-  if (Node.isTypeNode(parent)) {
-    const grandparent = parent.getParent()
-    if (grandparent && Node.isParameterDeclaration(grandparent)) {
-      return `parameter '${grandparent.getName() ?? '?'}' typed as 'any'`
+  // catch (err: any) — VariableDeclaration -> CatchClause
+  if (Node.isVariableDeclaration(ancestor)) {
+    const vdParent = ancestor.getParent()
+    if (vdParent && Node.isCatchClause(vdParent)) {
+      return 'catch parameter typed as \'any\' — use \'unknown\''
     }
-    // variable: const x: any
-    if (grandparent && Node.isVariableDeclaration(grandparent)) {
-      return `variable '${grandparent.getName()}' typed as 'any'`
-    }
-    // property: { key: any }
-    if (grandparent && Node.isPropertySignature(grandparent)) {
-      return `property '${grandparent.getName()}' typed as 'any'`
-    }
+    return `variable '${ancestor.getName()}' typed as 'any'`
   }
 
-  // Generic type argument: Record<string, any>, Array<any>, Promise<any>
-  if (Node.isTypeNode(parent) || parent.getKind() === SyntaxKind.TypeReference) {
+  // fn(x: any) — ParameterDeclaration
+  if (Node.isParameterDeclaration(ancestor)) {
+    return `parameter '${ancestor.getName() ?? '?'}' typed as 'any'`
+  }
+
+  // { key: any } — PropertySignature
+  if (Node.isPropertySignature(ancestor)) {
+    return `property '${ancestor.getName()}' typed as 'any'`
+  }
+
+  // Generic type argument: Record<string, any>, Array<any>, etc.
+  if (Node.isTypeNode(parent)) {
     return '\'any\' in type expression'
   }
 

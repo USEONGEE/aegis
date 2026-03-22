@@ -31,9 +31,15 @@ export interface ProcessResult {
 
 export type MessageProcessor = (msg: QueuedMessage, signal: AbortSignal) => Promise<ProcessResult>
 
+export interface QueueLogger {
+  error(obj: Record<string, unknown>, msg: string): void
+  warn(obj: Record<string, unknown>, msg: string): void
+}
+
 export interface MessageQueueOptions {
   maxQueueSize?: number       // default 100
   processTimeout?: number     // default 120000 (2 min)
+  logger?: QueueLogger
 }
 
 export class SessionMessageQueue {
@@ -43,11 +49,13 @@ export class SessionMessageQueue {
   private _processor: MessageProcessor
   private _maxQueueSize: number
   private _running = false
+  private _logger: QueueLogger | null
 
   constructor (sessionId: string, processor: MessageProcessor, opts?: MessageQueueOptions) {
     this._sessionId = sessionId
     this._processor = processor
     this._maxQueueSize = opts?.maxQueueSize ?? 100
+    this._logger = opts?.logger ?? null
   }
 
   enqueue (msg: Omit<QueuedMessage, 'messageId' | 'abortController' | 'createdAt'>): string {
@@ -105,10 +113,10 @@ export class SessionMessageQueue {
       try {
         const result = await this._processor(msg, msg.abortController.signal)
         if (!result.ok) {
-          process.stderr.write(`[message-queue] processor returned failure: ${result.error}\n`)
+          this._logger?.warn({ error: result.error, messageId: msg.messageId }, 'Processor returned failure')
         }
       } catch (err: unknown) {
-        process.stderr.write(`[message-queue] unexpected processor error: ${err instanceof Error ? err.message : String(err)}\n`)
+        this._logger?.error({ err: err instanceof Error ? err.message : String(err), messageId: msg.messageId }, 'Unexpected processor error')
       }
       this._processing = null
     }

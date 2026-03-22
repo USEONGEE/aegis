@@ -1,5 +1,20 @@
 # Changelog
 
+## v0.4.1 - Strict CI Checks (2026-03-22)
+
+- **no-empty-catch 체크 신규**: CatchClause AST → Block.getStatements().length === 0 판별. 주석만 있는 catch도 위반 (11→0)
+- **no-console 체크 신규**: CallExpression → console.* PropertyAccessExpression 판별. 전체 7개 패키지 대상 (19→0)
+- **no-explicit-any 체크 신규**: AnyKeyword SyntaxKind 판별 + 부모 컨텍스트별 메시지 (as any / catch :any / parameter :any / variable :any / type expression). daemon/relay/app/manifest 4개 패키지 대상 (91→0)
+- **shared/ast-source-files.ts**: ts-morph Project 기반 first-party 소스 파일 수집 유틸. .tsx 포함, tests/dist/node_modules 제외
+- **ProcessResult 타입 도입**: message-queue의 MessageProcessor가 void → ProcessResult 반환. empty catch 대신 명시적 성공/실패 값
+- **QueueLogger 인터페이스**: message-queue에 구조화 로거 주입. process.stderr 직출력 제거
+- 📝 [Phase 문서](../archive/v0.4.1-strict-ci-checks/README.md)
+
+### 수치
+- CI 체크 18개 (기존 15 + 신규 3), 신규 3개 모두 0 violations PASS
+- 228 tests pass, tsc daemon/app clean
+- 40 files changed, +665 -225
+
 ## v0.3.6 - Daemon Self-Register (2026-03-22)
 
 - **Self-register 자동화**: daemon 첫 실행 시 login 401 → `POST /auth/daemon/register` 자동 호출 → login 재시도. 수동 등록 없이 relay에 자동 연결

@@ -14,4 +14,4 @@ const s = 'console.log("not a call")'
 // console.log('commented')
 
 // NON-VIOLATION: bracket notation (intentionally out of scope — E10)
-// console['log']('bracket')
+console['log']('bracket')
