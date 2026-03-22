@@ -1,0 +1,33 @@
+FROM node:20-alpine
+
+# better-sqlite3 requires native build tools
+RUN apk add --no-cache python3 make g++
+
+WORKDIR /app
+
+# ── package files (layer cache) ──────────────────────────────────────
+COPY package.json package-lock.json ./
+COPY packages/canonical/package.json   packages/canonical/package.json
+COPY packages/protocol/package.json    packages/protocol/package.json
+COPY packages/guarded-wdk/package.json packages/guarded-wdk/package.json
+COPY packages/manifest/package.json    packages/manifest/package.json
+COPY packages/daemon/package.json      packages/daemon/package.json
+
+# Strip workspaces that aren't needed (app has RN native deps)
+RUN node -e "\
+  const p=JSON.parse(require('fs').readFileSync('package.json','utf8'));\
+  p.workspaces=['packages/canonical','packages/protocol','packages/guarded-wdk','packages/manifest','packages/daemon'];\
+  require('fs').writeFileSync('package.json',JSON.stringify(p,null,2))"
+
+RUN npm install
+
+# ── source ───────────────────────────────────────────────────────────
+COPY packages/canonical/   packages/canonical/
+COPY packages/protocol/    packages/protocol/
+COPY packages/guarded-wdk/ packages/guarded-wdk/
+COPY packages/manifest/    packages/manifest/
+COPY packages/daemon/      packages/daemon/
+
+WORKDIR /app/packages/daemon
+
+CMD ["node", "--loader", "ts-node/esm", "src/index.ts"]

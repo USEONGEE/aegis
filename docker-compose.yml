@@ -1,0 +1,100 @@
+# WDK-APP Demo Stack
+# Usage:
+#   1. cp docker/.env.example .env  (edit secrets)
+#   2. docker compose up -d
+#   3. App (Expo) connects to relay at http://<host>:3000
+
+services:
+  # ═══════════════════════════════════════════════════════════════════
+  # Infrastructure
+  # ═══════════════════════════════════════════════════════════════════
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: wdk
+      POSTGRES_PASSWORD: wdk
+      POSTGRES_DB: wdk_relay
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+      - ./packages/relay/src/registry/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U wdk -d wdk_relay"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    restart: unless-stopped
+
+  openclaw:
+    image: ghcr.io/openclaw/openclaw:latest
+    ports:
+      - "18789:18789"
+    volumes:
+      - openclaw_home:/home/node/.openclaw
+    environment:
+      OPENCLAW_GATEWAY_BIND: "0.0.0.0"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:18789/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # ═══════════════════════════════════════════════════════════════════
+  # Services
+  # ═══════════════════════════════════════════════════════════════════
+
+  relay:
+    build:
+      context: .
+      dockerfile: docker/relay.Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      PORT: 3000
+      NODE_ENV: production
+      REDIS_URL: redis://redis:6379
+      DATABASE_URL: postgresql://wdk:wdk@postgres:5432/wdk_relay
+      JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    restart: unless-stopped
+
+  daemon:
+    build:
+      context: .
+      dockerfile: docker/daemon.Dockerfile
+    volumes:
+      - daemon_wdk:/root/.wdk
+    environment:
+      WDK_HOME: /root/.wdk
+      LOG_LEVEL: info
+      # Relay connection
+      RELAY_URL: http://relay:3000
+      DAEMON_ID: ${DAEMON_ID:-demo-daemon}
+      DAEMON_SECRET: ${DAEMON_SECRET:-demo-secret}
+      # OpenClaw
+      OPENCLAW_BASE_URL: http://openclaw:18789
+      OPENCLAW_TOKEN: ${OPENCLAW_TOKEN:-}
+    depends_on:
+      relay:
+        condition: service_started
+      openclaw:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  pg_data:
+  redis_data:
+  openclaw_home:
+  daemon_wdk:
