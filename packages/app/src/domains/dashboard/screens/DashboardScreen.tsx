@@ -52,19 +52,16 @@ export function DashboardScreen() {
       if (message.channel !== 'control') return;
       const data = message.payload as {
         type?: string;
-        eventName?: string;
-        event?: Record<string, unknown>;
+        event?: { type?: string; balances?: TokenBalance[]; positions?: DeFiPosition[] } & Record<string, unknown>;
         balances?: TokenBalance[];
         positions?: DeFiPosition[];
       };
 
-      // Handle event_stream from daemon (ExecutionSettled / ExecutionBroadcasted carry balance updates)
-      if (data.type === 'event_stream') {
+      // v0.4.4: event_stream에서 event.type으로 판별 (eventName 제거됨)
+      if (data.type === 'event_stream' && data.event) {
         if (
-          (data.eventName === 'ExecutionSettled' || data.eventName === 'ExecutionBroadcasted') &&
-          data.event
+          (data.event.type === 'ExecutionSettled' || data.event.type === 'ExecutionBroadcasted')
         ) {
-          // Extract balances/positions from event payload if available
           const eventBalances = data.event.balances as TokenBalance[] | undefined;
           const eventPositions = data.event.positions as DeFiPosition[] | undefined;
           if (eventBalances) {

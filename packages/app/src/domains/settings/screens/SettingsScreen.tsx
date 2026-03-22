@@ -56,13 +56,12 @@ export function SettingsScreen() {
       if (message.channel !== 'control') return;
       const data = message.payload as {
         type?: string;
-        eventName?: string;
-        event?: Record<string, unknown>;
+        event?: { type?: string } & Record<string, unknown>;
         signers?: PairedSigner[];
       };
 
-      // Handle event_stream SignerRevoked events
-      if (data.type === 'event_stream' && data.eventName === 'SignerRevoked') {
+      // v0.4.4: event.type으로 판별 (eventName 제거됨)
+      if (data.type === 'event_stream' && data.event?.type === 'SignerRevoked') {
         // Refresh signer list via chat on signer revocation
         fetchSignerListViaChat();
         return;

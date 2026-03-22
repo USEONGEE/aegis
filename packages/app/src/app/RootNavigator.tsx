@@ -12,6 +12,7 @@ import { SettingsScreen } from '../domains/settings/screens/SettingsScreen';
 import { TxApprovalSheet } from '../shared/tx/TxApprovalSheet';
 import { useChatStore, type TextChatMessage } from '../stores/useChatStore';
 import { useAuthStore } from '../stores/useAuthStore';
+import { useActivityStore } from '../stores/useActivityStore';
 import { LoginScreen } from '../domains/auth/screens/LoginScreen';
 import { EnrollmentScreen } from '../domains/auth/screens/EnrollmentScreen';
 import { RelayClient } from '../core/relay/RelayClient';
@@ -82,6 +83,22 @@ function ChatNavigator() {
       // Track chat cursor
       if (entryId && message.channel === 'chat' && data.sessionId) {
         updateCursor(data.sessionId, entryId);
+      }
+
+      // v0.4.4: event_stream → activity store 적재
+      if (message.channel === 'control' && data.type === 'event_stream') {
+        const event = (data as { event?: { type?: string; requestId?: string; chainId?: number; timestamp?: number } }).event;
+        if (event && event.type) {
+          const { addEvent } = useActivityStore.getState();
+          addEvent({
+            id: event.requestId || `${event.type}:${event.timestamp || Date.now()}`,
+            type: event.type as import('../stores/useActivityStore').ActivityEventType,
+            chainId: (event.chainId as number) ?? null,
+            summary: event.type,
+            details: event as Record<string, unknown>,
+            timestamp: event.timestamp || Date.now(),
+          });
+        }
       }
 
       // Control: cron_session_created (typed as ControlEvent from @wdk-app/protocol)

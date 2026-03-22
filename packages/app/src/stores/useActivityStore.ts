@@ -11,12 +11,16 @@ export type ActivityEventType =
   | 'ApprovalRequested'
   | 'ApprovalVerified'
   | 'ApprovalRejected'
+  | 'ApprovalFailed'
   | 'ExecutionBroadcasted'
   | 'ExecutionSettled'
   | 'ExecutionFailed'
+  | 'TransactionSigned'
   | 'PendingPolicyRequested'
   | 'PolicyApplied'
-  | 'SignerRevoked';
+  | 'SignerRevoked'
+  | 'WalletCreated'
+  | 'WalletDeleted';
 
 export interface ActivityEvent {
   id: string;

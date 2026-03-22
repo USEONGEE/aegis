@@ -170,7 +170,7 @@ export class SignedApprovalBroker {
           this._trustedApprovers = activeSigs.map(s => s.publicKey)
           pendingEvents.push({
             name: 'SignerRevoked',
-            payload: { type: 'SignerRevoked', publicKey: target.publicKey, timestamp: Date.now() }
+            payload: { type: 'SignerRevoked', requestId, publicKey: target.publicKey, timestamp: Date.now() }
           })
           break
         }
@@ -183,7 +183,7 @@ export class SignedApprovalBroker {
           await this._store.removePendingApproval(requestId)
           pendingEvents.push({
             name: 'WalletCreated',
-            payload: { type: 'WalletCreated', accountIndex, name, timestamp: Date.now() }
+            payload: { type: 'WalletCreated', requestId, accountIndex, name, timestamp: Date.now() }
           })
           break
         }
@@ -194,7 +194,7 @@ export class SignedApprovalBroker {
           await this._store.deleteWallet(accountIndex)
           pendingEvents.push({
             name: 'WalletDeleted',
-            payload: { type: 'WalletDeleted', accountIndex, timestamp: Date.now() }
+            payload: { type: 'WalletDeleted', requestId, accountIndex, timestamp: Date.now() }
           })
           break
         }

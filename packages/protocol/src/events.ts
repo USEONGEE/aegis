@@ -95,17 +95,20 @@ export interface PolicyAppliedEvent extends WDKEventBase {
 
 export interface SignerRevokedEvent extends WDKEventBase {
   type: 'SignerRevoked'
+  requestId: string
   publicKey: string
 }
 
 export interface WalletCreatedEvent extends WDKEventBase {
   type: 'WalletCreated'
+  requestId: string
   accountIndex: number
   name: string
 }
 
 export interface WalletDeletedEvent extends WDKEventBase {
   type: 'WalletDeleted'
+  requestId: string
   accountIndex: number
 }
 

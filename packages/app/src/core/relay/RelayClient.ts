@@ -382,10 +382,9 @@ export class RelayClient {
   }
 
   /**
-   * Send a SignedApproval (tx or policy) via control channel.
-   * Sends the specific approval type (tx_approval, policy_approval, etc.)
-   * that the daemon's control-handler expects, rather than generic 'signed_approval'.
-   * Returns when daemon acknowledges.
+   * Send a SignedApproval via control channel.
+   * v0.4.4: WDK event_stream 기반으로 성공/실패를 판정.
+   * daemon이 ControlResult를 보내지 않으므로 (v0.4.2), WDK 이벤트로 결과를 받는다.
    */
   async sendApproval(signedApproval: unknown): Promise<{ txHash: string }> {
     return new Promise((resolve, reject) => {
@@ -403,26 +402,38 @@ export class RelayClient {
       };
       const controlType = approvalTypeMap[approval?.type ?? ''] ?? 'tx_approval';
 
-      // Listen for response
+      // Map approval type → success WDK event type
+      const successEventMap: Record<string, string> = {
+        tx: 'ExecutionBroadcasted',
+        policy: 'PolicyApplied',
+        policy_reject: 'ApprovalRejected',
+        device_revoke: 'SignerRevoked',
+        wallet_create: 'WalletCreated',
+        wallet_delete: 'WalletDeleted',
+      };
+      const successEventType = successEventMap[approval?.type ?? ''] ?? 'ApprovalVerified';
+
+      // v0.4.4: Listen for WDK event_stream (not ControlResult)
       const handler = (message: RelayMessage) => {
         if (message.channel !== 'control') return;
-        const data = message.payload as { type?: string; requestId?: string; txHash?: string; hash?: string; error?: string };
-        if (data.requestId !== requestId) return;
+        const data = message.payload as { type?: string; event?: { type?: string; requestId?: string; hash?: string; error?: string } };
+        if (data.type !== 'event_stream') return;
+        const event = data.event;
+        if (!event || event.requestId !== requestId) return;
 
-        this.removeMessageHandler(handler);
+        // ApprovalFailed → reject
+        if (event.type === 'ApprovalFailed') {
+          this.removeMessageHandler(handler);
+          reject(new Error((event as { error?: string }).error ?? 'Approval failed'));
+          return;
+        }
 
-        if (data.type === 'approval_result' && (data.txHash || data.hash)) {
-          resolve({ txHash: (data.txHash ?? data.hash)! });
-        } else if (data.type === 'wallet_create' || data.type === 'wallet_delete') {
-          // Wallet lifecycle responses don't have txHash
-          const walletData = data as { type?: string; requestId?: string; ok?: boolean; error?: string };
-          if (walletData.ok) {
-            resolve({ txHash: '' });
-          } else {
-            reject(new Error(walletData.error ?? 'Wallet operation failed'));
-          }
-        } else if (data.type === 'approval_error') {
-          reject(new Error(data.error ?? 'Approval failed'));
+        // Success event → resolve
+        if (event.type === successEventType) {
+          this.removeMessageHandler(handler);
+          const txHash = (event as { hash?: string }).hash ?? '';
+          resolve({ txHash });
+          return;
         }
       };
 
