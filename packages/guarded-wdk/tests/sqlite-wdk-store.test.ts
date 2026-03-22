@@ -68,25 +68,23 @@ describe('SqliteWdkStore', () => {
     })
 
     test('createWallet creates a wallet', async () => {
-      const wallet = await store.createWallet(0, 'main', '0xaddr0')
+      const wallet = await store.createWallet(0, 'main')
       expect(wallet.accountIndex).toBe(0)
       expect(wallet.name).toBe('main')
-      expect(wallet.address).toBe('0xaddr0')
       expect(wallet.createdAt).toBeGreaterThan(0)
     })
 
     test('listWallets returns all wallets', async () => {
-      await store.createWallet(0, 'first', '0xaddr0')
-      await store.createWallet(1, 'second', '0xaddr1')
+      await store.createWallet(0, 'first')
+      await store.createWallet(1, 'second')
       const wallets = await store.listWallets()
       expect(wallets).toHaveLength(2)
     })
 
     test('getWallet returns wallet by accountIndex', async () => {
-      await store.createWallet(0, 'test', '0xaddr0')
+      await store.createWallet(0, 'test')
       const found = await store.getWallet(0)
       expect(found!.name).toBe('test')
-      expect(found!.address).toBe('0xaddr0')
     })
 
     test('getWallet returns null for unknown accountIndex', async () => {
@@ -95,14 +93,14 @@ describe('SqliteWdkStore', () => {
     })
 
     test('deleteWallet removes wallet', async () => {
-      await store.createWallet(0, 'test', '0xaddr0')
+      await store.createWallet(0, 'test')
       await store.deleteWallet(0)
       const wallets = await store.listWallets()
       expect(wallets).toHaveLength(0)
     })
 
     test('deleteWallet cleans up related data but preserves history', async () => {
-      await store.createWallet(0, 'test', '0xaddr0')
+      await store.createWallet(0, 'test')
       await store.savePolicy(0, 1, { policies: [], signature: {} })
       await store.savePendingApproval(0, { requestId: 'r1', type: 'tx', chainId: 1, targetHash: '0x1', accountIndex: 0, content: '', createdAt: Date.now() })
       await store.appendHistory({ accountIndex: 0, requestId: 'r1', type: 'tx', chainId: 1, targetHash: '0x1', approver: 'a', action: 'approved', content: '', signedApproval: mockApproval({ requestId: 'r1', targetHash: '0x1' }), timestamp: Date.now() })
@@ -125,7 +123,7 @@ describe('SqliteWdkStore', () => {
 
     beforeEach(async () => {
       await store.setMasterSeed('mnemonic')
-      await store.createWallet(accountIndex, 'test-wallet', '0xaddr0')
+      await store.createWallet(accountIndex, 'test-wallet')
     })
 
     test('loadPolicy returns null when no policy exists', async () => {
@@ -165,7 +163,7 @@ describe('SqliteWdkStore', () => {
     })
 
     test('policies are scoped to accountIndex+chain', async () => {
-      await store.createWallet(1, 'second', '0xaddr1')
+      await store.createWallet(1, 'second')
       await store.savePolicy(accountIndex, 1, { policies: [{ a0: 'eth' }], signature: {} })
       await store.savePolicy(1, 1, { policies: [{ a1: 'eth' }], signature: {} })
       await store.savePolicy(accountIndex, 900, { policies: [{ a0: 'sol' }], signature: {} })
@@ -205,7 +203,7 @@ describe('SqliteWdkStore', () => {
 
     beforeEach(async () => {
       await store.setMasterSeed('mnemonic')
-      await store.createWallet(accountIndex, 'test-wallet', '0xaddr0')
+      await store.createWallet(accountIndex, 'test-wallet')
     })
 
     test('savePendingApproval + loadPendingApprovals round-trips', async () => {
@@ -266,7 +264,7 @@ describe('SqliteWdkStore', () => {
 
     beforeEach(async () => {
       await store.setMasterSeed('mnemonic')
-      await store.createWallet(accountIndex, 'test-wallet', '0xaddr0')
+      await store.createWallet(accountIndex, 'test-wallet')
     })
 
     test('appendHistory + getHistory round-trips', async () => {
@@ -289,7 +287,7 @@ describe('SqliteWdkStore', () => {
     })
 
     test('getHistory filters by accountIndex, type, chain', async () => {
-      await store.createWallet(1, 'second', '0xaddr1')
+      await store.createWallet(1, 'second')
       await store.appendHistory({ accountIndex, requestId: 'r1', type: 'tx', chainId: 1, targetHash: '0x1', approver: 'a', action: 'approved', content: '', signedApproval: mockApproval({ requestId: 'r1', targetHash: '0x1' }), timestamp: Date.now() })
       await store.appendHistory({ accountIndex, requestId: 'r2', type: 'policy', chainId: 1, targetHash: '0x2', approver: 'a', action: 'approved', content: '', signedApproval: mockApproval({ type: 'policy', requestId: 'r2', targetHash: '0x2' }), timestamp: Date.now() })
       await store.appendHistory({ accountIndex: 1, requestId: 'r3', type: 'tx', chainId: 900, targetHash: '0x3', approver: 'a', action: 'rejected', content: '', signedApproval: mockApproval({ requestId: 'r3', chainId: 900, targetHash: '0x3', accountIndex: 1 }), timestamp: Date.now() })
@@ -435,7 +433,7 @@ describe('SqliteWdkStore', () => {
 
     beforeEach(async () => {
       await store.setMasterSeed('mnemonic')
-      await store.createWallet(accountIndex, 'test-wallet', '0xaddr0')
+      await store.createWallet(accountIndex, 'test-wallet')
     })
 
     test('E3: first policy creates version=1 with diff=null', async () => {
@@ -466,7 +464,7 @@ describe('SqliteWdkStore', () => {
 
     beforeEach(async () => {
       await store.setMasterSeed('mnemonic')
-      await store.createWallet(accountIndex, 'test-wallet', '0xaddr0')
+      await store.createWallet(accountIndex, 'test-wallet')
     })
 
     test('saveJournalEntry + getJournalEntry round-trips', async () => {
@@ -525,7 +523,7 @@ describe('SqliteWdkStore', () => {
     })
 
     test('listJournal filters by accountIndex, status, chain', async () => {
-      await store.createWallet(1, 'second', '0xaddr1')
+      await store.createWallet(1, 'second')
       await store.saveJournalEntry({ intentHash: 'i1', accountIndex, chainId: 1, dedupKey: '0x1', status: 'received' })
       await store.saveJournalEntry({ intentHash: 'i2', accountIndex, chainId: 1, dedupKey: '0x2', status: 'settled' })
       await store.saveJournalEntry({ intentHash: 'i3', accountIndex: 1, chainId: 900, dedupKey: '0x3', status: 'received' })

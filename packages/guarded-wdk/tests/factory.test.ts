@@ -74,7 +74,7 @@ class MockWdkStore extends WdkStore {
   override async getMasterSeed () { return null }
   override async setMasterSeed () {}
   override async getWallet () { return null }
-  override async createWallet () { return { accountIndex: 0, name: '', address: '', createdAt: 0 } }
+  override async createWallet () { return { accountIndex: 0, name: '', createdAt: 0 } }
   override async deleteWallet () {}
   override async listPolicyChains () { return [] }
   override async loadPendingByRequestId () { return null }

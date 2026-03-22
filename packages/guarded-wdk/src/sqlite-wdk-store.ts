@@ -71,7 +71,6 @@ export class SqliteWdkStore extends WdkStore {
       CREATE TABLE IF NOT EXISTS wallets (
         account_index INTEGER PRIMARY KEY,
         name TEXT NOT NULL,
-        address TEXT NOT NULL,
         created_at INTEGER NOT NULL
       );
 
@@ -183,7 +182,6 @@ export class SqliteWdkStore extends WdkStore {
     return rows.map(row => ({
       accountIndex: row.account_index,
       name: row.name,
-      address: row.address,
       createdAt: row.created_at
     }))
   }
@@ -194,18 +192,17 @@ export class SqliteWdkStore extends WdkStore {
     return {
       accountIndex: row.account_index,
       name: row.name,
-      address: row.address,
       createdAt: row.created_at
     }
   }
 
-  override async createWallet (accountIndex: number, name: string, address: string): Promise<StoredWallet> {
+  override async createWallet (accountIndex: number, name: string): Promise<StoredWallet> {
     const now = Date.now()
     this._db!.prepare(`
-      INSERT INTO wallets (account_index, name, address, created_at)
-      VALUES (?, ?, ?, ?)
-    `).run(accountIndex, name, address, now)
-    return { accountIndex, name, address, createdAt: now }
+      INSERT INTO wallets (account_index, name, created_at)
+      VALUES (?, ?, ?)
+    `).run(accountIndex, name, now)
+    return { accountIndex, name, createdAt: now }
   }
 
   override async deleteWallet (accountIndex: number): Promise<void> {

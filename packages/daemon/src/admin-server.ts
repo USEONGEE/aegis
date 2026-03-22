@@ -237,10 +237,9 @@ export class AdminServer {
         return {
           ok: true,
           data: {
-            wallets: wallets.map((w: { accountIndex: number; name: string; address: string; createdAt: number }) => ({
+            wallets: wallets.map((w: { accountIndex: number; name: string; createdAt: number }) => ({
               accountIndex: w.accountIndex,
               name: w.name,
-              address: w.address,
               createdAt: w.createdAt
             }))
           }

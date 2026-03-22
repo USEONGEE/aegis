@@ -180,7 +180,7 @@ export class SignedApprovalBroker {
           const accountIndex = signedApproval.accountIndex
           const pending = await this._store.loadPendingByRequestId(requestId)
           const name = (pending as PendingApprovalRequest | null)?.walletName ?? `Wallet ${accountIndex}`
-          await this._store.createWallet(accountIndex, name, '')
+          await this._store.createWallet(accountIndex, name)
           await this._store.removePendingApproval(requestId)
           pendingEvents.push({
             name: 'WalletCreated',

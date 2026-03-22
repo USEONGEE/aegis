@@ -68,25 +68,23 @@ describe('JsonWdkStore', () => {
     })
 
     test('createWallet creates a wallet', async () => {
-      const wallet = await store.createWallet(0, 'main', '0xaddr0')
+      const wallet = await store.createWallet(0, 'main')
       expect(wallet.accountIndex).toBe(0)
       expect(wallet.name).toBe('main')
-      expect(wallet.address).toBe('0xaddr0')
       expect(wallet.createdAt).toBeGreaterThan(0)
     })
 
     test('listWallets returns all wallets', async () => {
-      await store.createWallet(0, 'first', '0xaddr0')
-      await store.createWallet(1, 'second', '0xaddr1')
+      await store.createWallet(0, 'first')
+      await store.createWallet(1, 'second')
       const wallets = await store.listWallets()
       expect(wallets).toHaveLength(2)
     })
 
     test('getWallet returns wallet by accountIndex', async () => {
-      await store.createWallet(0, 'test', '0xaddr0')
+      await store.createWallet(0, 'test')
       const found = await store.getWallet(0)
       expect(found!.name).toBe('test')
-      expect(found!.address).toBe('0xaddr0')
     })
 
     test('getWallet returns null for unknown accountIndex', async () => {
@@ -95,14 +93,14 @@ describe('JsonWdkStore', () => {
     })
 
     test('deleteWallet removes wallet', async () => {
-      await store.createWallet(0, 'test', '0xaddr0')
+      await store.createWallet(0, 'test')
       await store.deleteWallet(0)
       const wallets = await store.listWallets()
       expect(wallets).toHaveLength(0)
     })
 
     test('deleteWallet cleans up related data but preserves history', async () => {
-      await store.createWallet(0, 'test', '0xaddr0')
+      await store.createWallet(0, 'test')
       await store.savePolicy(0, 1, { policies: [], signature: {} })
       await store.savePendingApproval(0, { requestId: 'r1', type: 'tx', chainId: 1, targetHash: '0x1', accountIndex: 0, content: '', createdAt: Date.now() })
       await store.appendHistory({ accountIndex: 0, requestId: 'r1', type: 'tx', chainId: 1, targetHash: '0x1', approver: 'a', action: 'approved', content: '', signedApproval: mockApproval({ requestId: 'r1', targetHash: '0x1' }), timestamp: Date.now() })
@@ -125,7 +123,7 @@ describe('JsonWdkStore', () => {
 
     beforeEach(async () => {
       await store.setMasterSeed('mnemonic')
-      await store.createWallet(accountIndex, 'test-wallet', '0xaddr0')
+      await store.createWallet(accountIndex, 'test-wallet')
     })
 
     test('loadPolicy returns null when no policy exists', async () => {
@@ -179,7 +177,7 @@ describe('JsonWdkStore', () => {
 
     beforeEach(async () => {
       await store.setMasterSeed('mnemonic')
-      await store.createWallet(accountIndex, 'test-wallet', '0xaddr0')
+      await store.createWallet(accountIndex, 'test-wallet')
     })
 
     test('savePendingApproval + loadPendingApprovals round-trips', async () => {
@@ -387,7 +385,7 @@ describe('JsonWdkStore', () => {
 
     beforeEach(async () => {
       await store.setMasterSeed('mnemonic')
-      await store.createWallet(accountIndex, 'test-wallet', '0xaddr0')
+      await store.createWallet(accountIndex, 'test-wallet')
     })
 
     test('E3: first policy creates version=1 with diff=null', async () => {

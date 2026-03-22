@@ -147,7 +147,7 @@ export async function createGuardedWDK (config: GuardedWDKConfig): Promise<Guard
   if (Object.keys(wallets).length > 0) {
     const existing = await approvalStore.getWallet(0)
     if (!existing) {
-      await approvalStore.createWallet(0, 'Default Wallet', '')
+      await approvalStore.createWallet(0, 'Default Wallet')
     }
   }
 

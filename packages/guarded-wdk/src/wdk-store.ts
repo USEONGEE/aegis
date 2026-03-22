@@ -26,7 +26,6 @@ export interface MasterSeed {
 export interface StoredWallet {
   accountIndex: number
   name: string
-  address: string
   createdAt: number
 }
 
@@ -180,7 +179,7 @@ export abstract class WdkStore {
 
   abstract listWallets (): Promise<StoredWallet[]>
   abstract getWallet (accountIndex: number): Promise<StoredWallet | null>
-  abstract createWallet (accountIndex: number, name: string, address: string): Promise<StoredWallet>
+  abstract createWallet (accountIndex: number, name: string): Promise<StoredWallet>
   abstract deleteWallet (accountIndex: number): Promise<void>
 
   // --- Active Policy ---

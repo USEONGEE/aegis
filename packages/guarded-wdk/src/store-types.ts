@@ -76,7 +76,6 @@ export interface MasterSeedRow {
 export interface WalletRow {
   account_index: number
   name: string
-  address: string
   created_at: number
 }
 

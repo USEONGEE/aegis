@@ -121,7 +121,6 @@ export class JsonWdkStore extends WdkStore {
     return wallets.map(row => ({
       accountIndex: row.account_index,
       name: row.name,
-      address: row.address,
       createdAt: row.created_at
     }))
   }
@@ -133,17 +132,15 @@ export class JsonWdkStore extends WdkStore {
     return {
       accountIndex: row.account_index,
       name: row.name,
-      address: row.address,
       createdAt: row.created_at
     }
   }
 
-  override async createWallet (accountIndex: number, name: string, address: string): Promise<StoredWallet> {
+  override async createWallet (accountIndex: number, name: string): Promise<StoredWallet> {
     const wallets = await this._read<WalletRow[]>('wallets.json') || []
     const row: WalletRow = {
       account_index: accountIndex,
       name,
-      address,
       created_at: Date.now()
     }
     wallets.push(row)
@@ -151,7 +148,6 @@ export class JsonWdkStore extends WdkStore {
     return {
       accountIndex: row.account_index,
       name: row.name,
-      address: row.address,
       createdAt: row.created_at
     }
   }
