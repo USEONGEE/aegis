@@ -57,7 +57,7 @@ async function main (): Promise<void> {
 
   // 6. Build tool execution context (passed to tool execution)
   const ctx: ToolExecutionContext = {
-    facade: facade!,
+    facade,
     daemonStore,
     logger
   }
@@ -97,7 +97,11 @@ async function main (): Promise<void> {
     switch (type) {
       case 'control':
         // v0.4.8: 승인 6종 null 반환. cancel 2종은 CancelEventPayload → event_stream으로 전송.
-        handleControlMessage(payload as ControlMessage, { facade: facade!, logger, queueManager })
+        if (!facade) {
+          logger.warn('Control message received but WDK not initialized (no master seed)')
+          break
+        }
+        handleControlMessage(payload as ControlMessage, { facade, logger, queueManager })
           .then((result) => {
             if (result === null) return // 승인 타입: WDK 이벤트가 대신 전달
             const incomingUserId = (payload as Record<string, unknown>)?.userId as string | undefined
@@ -113,15 +117,23 @@ async function main (): Promise<void> {
           .catch((err: Error) => logger.error({ err }, 'Unhandled error in chat handler'))
         break
 
-      case 'query':
+      case 'query': {
         // v0.4.8: query → query-handler → query_result (WS 직접 전달)
-        handleQueryMessage(payload as unknown as QueryMessage, { facade: facade!, logger })
+        if (!facade) {
+          const queryMsg = payload as unknown as QueryMessage
+          const errorResult = { requestId: queryMsg.requestId, status: 'error', error: 'WDK not initialized (no master seed)' }
+          const incomingUserId = (raw as Record<string, unknown>)?.userId as string | undefined
+          relayClient.send('query_result', errorResult as unknown as Record<string, unknown>, incomingUserId)
+          break
+        }
+        handleQueryMessage(payload as unknown as QueryMessage, { facade, logger })
           .then((result) => {
             const incomingUserId = (raw as Record<string, unknown>)?.userId as string | undefined
             relayClient.send('query_result', result as unknown as Record<string, unknown>, incomingUserId)
           })
           .catch((err: Error) => logger.error({ err }, 'Unhandled error in query handler'))
         break
+      }
 
       default:
         logger.debug({ type }, 'Ignoring message on unknown type')
@@ -172,7 +184,7 @@ async function main (): Promise<void> {
       try {
         const enrollRes = await fetch(`${relayHttpBase}/api/auth/daemon/enroll`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+          headers: { 'Authorization': `Bearer ${token}` },
         })
         if (enrollRes.ok) {
           const { enrollmentCode, expiresIn } = await enrollRes.json() as { enrollmentCode: string, expiresIn: number }
@@ -224,7 +236,7 @@ async function main (): Promise<void> {
   // 8. Start admin server
   const adminServer = new AdminServer(
     { socketPath: config.socketPath },
-    { facade: facade!, cronScheduler, relayClient, logger, relayHttpBase, relayToken }
+    { facade, cronScheduler, relayClient, logger, relayHttpBase, relayToken }
   )
   await adminServer.start()
 

@@ -42,7 +42,7 @@ interface ToolAccount {
 // ---------------------------------------------------------------------------
 
 export interface ToolExecutionContext {
-  facade: WDKInstance & ToolFacadePort
+  facade: (WDKInstance & ToolFacadePort) | null
   daemonStore: DaemonStore
   logger: Logger
 }
@@ -338,8 +338,18 @@ type ToolArgs = SendTransactionArgs | TransferArgs | ChainArgs | PolicyRequestAr
  * Execute a single tool call.
  */
 export async function executeToolCall (name: string, args: ToolArgs, ctx: ToolExecutionContext): Promise<AnyToolResult> {
-  const { facade, daemonStore, logger } = ctx
+  const { facade: facadeOrNull, daemonStore, logger } = ctx
   const accountIndex = (args as Record<string, unknown>).accountIndex as number | undefined
+
+  // Tools that require facade (WDK) — fail fast if not initialized
+  const FACADE_REQUIRED = ['sendTransaction', 'transfer', 'getBalance', 'policyList', 'policyPending', 'policyRequest', 'signTransaction', 'listRejections', 'listPolicyVersions']
+  if (FACADE_REQUIRED.includes(name) && !facadeOrNull) {
+    return { status: 'error', error: 'WDK not initialized (no master seed)' }
+  }
+
+  // After the guard, facade is non-null for FACADE_REQUIRED tools.
+  // Non-facade tools (cron, kitten) never access this variable.
+  const facade = facadeOrNull!
 
   switch (name) {
     // -----------------------------------------------------------------------

@@ -16,7 +16,7 @@ interface AdminServerConfig {
 }
 
 interface AdminServerDeps {
-  facade: AdminFacadePort
+  facade: AdminFacadePort | null
   cronScheduler: CronScheduler | null
   relayClient: RelayClient
   logger: Logger
@@ -60,7 +60,7 @@ type AdminResponse = AdminResponseOk | AdminResponseError
  */
 export class AdminServer {
   private _socketPath: string
-  private _facade: AdminFacadePort
+  private _facade: AdminFacadePort | null
   private _cronScheduler: CronScheduler | null
   private _relayClient: RelayClient
   private _logger: Logger
@@ -199,6 +199,7 @@ export class AdminServer {
       // signer_list -- paired signers
       // -------------------------------------------------------------------
       case 'signer_list': {
+        if (!this._facade) return { ok: false, error: 'WDK not initialized (no master seed)' }
         const signers = await this._facade.listSigners()
         return {
           ok: true,
@@ -229,6 +230,7 @@ export class AdminServer {
       // wallet_list -- wallets
       // -------------------------------------------------------------------
       case 'wallet_list': {
+        if (!this._facade) return { ok: false, error: 'WDK not initialized (no master seed)' }
         const wallets = await this._facade.listWallets()
 
         return {
