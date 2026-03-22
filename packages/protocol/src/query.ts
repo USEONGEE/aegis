@@ -10,6 +10,7 @@ export type QueryType =
   | 'signerList'
   | 'walletList'
   | 'getPortfolio'
+  | 'getWalletAddress'
 
 export type QueryMessage =
   | { type: 'policyList'; requestId: string; params: { accountIndex: number; chainId: number } }
@@ -17,6 +18,7 @@ export type QueryMessage =
   | { type: 'signerList'; requestId: string; params: Record<string, never> }
   | { type: 'walletList'; requestId: string; params: Record<string, never> }
   | { type: 'getPortfolio'; requestId: string; params: { accountIndex: number } }
+  | { type: 'getWalletAddress'; requestId: string; params: { chain: string; accountIndex: number } }
 
 interface QueryResultOk {
   requestId: string

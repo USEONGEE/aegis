@@ -11,6 +11,7 @@ import { usePolicyStore, type Policy, type PendingPolicyRequest, type PolicyGrou
 import { useTxApproval } from '../../../shared/tx/TxApprovalContext';
 import { useToast } from '../../../shared/ui/ToastProvider';
 import { RelayClient } from '../../../core/relay/RelayClient';
+import { useWalletStore } from '../../../stores/useWalletStore';
 
 /**
  * Daemon's CallPolicy format: { type: 'call', permissions: { [target]: { [selector]: Rule[] } } }
@@ -55,6 +56,7 @@ export function PolicyScreen() {
   const { activePolicies, pendingPolicies, setPendingPolicies } = usePolicyStore();
   const { requestApproval } = useTxApproval();
   const { showToast } = useToast();
+  const selectedAccountIndex = useWalletStore((s) => s.selectedAccountIndex);
 
   // Fetch pending approvals from daemon via query channel
   useEffect(() => {
@@ -69,7 +71,7 @@ export function PolicyScreen() {
       content: string;
       createdAt: number;
       policies: unknown[];
-    }>>('pendingApprovals', { accountIndex: 0 }).then(approvals => {
+    }>>('pendingApprovals', { accountIndex: selectedAccountIndex }).then(approvals => {
       const policyApprovals = approvals.filter(a => a.type === 'policy');
       const pending: PendingPolicyRequest[] = policyApprovals.map(a => ({
         requestId: a.requestId,
@@ -96,7 +98,7 @@ export function PolicyScreen() {
           type: 'policy',
           chainId: pending.chainId,
           targetHash: '',
-          accountIndex: pending.accountIndex ?? 0,
+          accountIndex: pending.accountIndex ?? selectedAccountIndex,
           content: pending.reason,
           policyVersion: 0,
           createdAt: pending.createdAt,
@@ -119,7 +121,7 @@ export function PolicyScreen() {
           type: 'policy_reject',
           chainId: pending.chainId,
           targetHash: '',
-          accountIndex: pending.accountIndex ?? 0,
+          accountIndex: pending.accountIndex ?? selectedAccountIndex,
           content: `Rejected: ${pending.reason}`,
           policyVersion: 0,
           createdAt: pending.createdAt,

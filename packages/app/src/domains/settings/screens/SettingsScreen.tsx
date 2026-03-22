@@ -11,6 +11,7 @@ import { IdentityKeyManager } from '../../../core/identity/IdentityKeyManager';
 import { RelayClient, type RelayMessage } from '../../../core/relay/RelayClient';
 import { SignedApprovalBuilder } from '../../../core/approval/SignedApprovalBuilder';
 import { useToast } from '../../../shared/ui/ToastProvider';
+import { useWalletStore } from '../../../stores/useWalletStore';
 
 /**
  * SettingsScreen — Signer management.
@@ -35,6 +36,7 @@ export function SettingsScreen() {
   const [signers, setSigners] = useState<PairedSigner[]>([]);
   const [connected, setConnected] = useState(false);
   const { showToast } = useToast();
+  const selectedAccountIndex = useWalletStore((s) => s.selectedAccountIndex);
 
   // Singletons — stable references, safe in dependency arrays
   const identity = React.useMemo(() => IdentityKeyManager.getInstance(), []);
@@ -167,7 +169,7 @@ export function SettingsScreen() {
                 const signedApproval = builder.forDeviceRevoke({
                   targetPublicKey: signer.publicKey,
                   chainId: 1, // ethereum mainnet
-                  accountIndex: 0,
+                  accountIndex: selectedAccountIndex,
                   content: `Revoke signer ${signer.publicKey.slice(0, 16)}`,
                 });
                 await relay.sendApproval(signedApproval);

@@ -52,6 +52,15 @@ export async function handleQueryMessage (
         return { requestId: msg.requestId, status: 'ok', data: wallets }
       }
 
+      case 'getWalletAddress': {
+        if (!facade.getAccount) {
+          return { requestId: msg.requestId, status: 'error', error: 'Account provider not available' }
+        }
+        const account = await facade.getAccount(msg.params.chain, msg.params.accountIndex)
+        const address = await (account as unknown as { getAddress: () => Promise<string> }).getAddress()
+        return { requestId: msg.requestId, status: 'ok', data: { address } }
+      }
+
       case 'getPortfolio': {
         if (!facade.getAccount) {
           return { requestId: msg.requestId, status: 'error', error: 'Account provider not available' }
