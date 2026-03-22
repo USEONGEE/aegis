@@ -4,6 +4,17 @@ AI DeFi Agent 서명 엔진 + 제어 인프라.
 
 ## 현재 페이즈
 
+### v0.5.9 — Chat Markdown 렌더링
+- **상태**: Step 5 완료 (커밋 대기)
+- **문서**: [docs/phases/v0.5.9-chat-markdown-render/](docs/phases/v0.5.9-chat-markdown-render/)
+- **시작일**: 2026-03-23
+
+### v0.5.8 — 세션별 isLoading 분리
+- **상태**: Step 1 - PRD
+- **문서**: [docs/phases/v0.5.8-session-loading-isolation/](docs/phases/v0.5.8-session-loading-isolation/)
+- **Codex Session ID**: `/Users/mousebook/Documents/GitHub/WDK-APP/docs/phases/v0.5.8-session-loading-isolation`
+- **시작일**: 2026-03-23
+
 ### v0.5.2 — Chat Protocol 타입 강제 적용
 - **상태**: Step 1 - PRD
 - **문서**: [docs/phases/v0.5.2-chat-protocol-enforcement/](docs/phases/v0.5.2-chat-protocol-enforcement/)
