@@ -4,6 +4,25 @@ AI DeFi Agent 서명 엔진 + 제어 인프라.
 
 ## 현재 페이즈
 
+### v0.4.3 — Relay 타입 구조 정리
+- **상태**: Step 1 - PRD
+- **문서**: [docs/phases/v0.4.3-relay-type-structure/](docs/phases/v0.4.3-relay-type-structure/)
+- **Codex Session ID**: `/Users/mousebook/Documents/GitHub/WDK-APP/docs/phases/v0.4.3-relay-type-structure`
+- **시작일**: 2026-03-22
+- **선행 조건**: v0.4.0 완료 후 진행
+
+### v0.4.1 — Strict CI Checks (no-empty-catch, no-console, no-explicit-any)
+- **상태**: Step 1 - PRD
+- **문서**: [docs/phases/v0.4.1-strict-ci-checks/](docs/phases/v0.4.1-strict-ci-checks/)
+- **Codex Session ID**: `/Users/mousebook/Documents/GitHub/WDK-APP/docs/phases/v0.4.1-strict-ci-checks`
+- **시작일**: 2026-03-22
+
+### v0.4.0 — No Optional 원칙 전면 적용
+- **상태**: Step 1 - PRD
+- **문서**: [docs/phases/v0.4.0-no-optional-cleanup/](docs/phases/v0.4.0-no-optional-cleanup/)
+- **Codex Session ID**: `/Users/mousebook/Documents/GitHub/WDK-APP/docs/phases/v0.4.0-no-optional-cleanup`
+- **시작일**: 2026-03-22
+
 ## 완료된 페이즈
 
 모든 완료 문서는 [docs/archive/](docs/archive/)에 보관.
@@ -40,6 +59,8 @@ AI DeFi Agent 서명 엔진 + 제어 인프라.
 | v0.3.4 | Dead Code 정리 + Pairing 전면 제거 |
 | v0.3.5 | Dead Exports CI 체크 포팅 |
 | v0.3.6 | Daemon Self-Register |
+| v0.4.0 | No Optional 원칙 전면 적용 |
+| v0.4.2 | WDK 이벤트 단일화 + 타입 규격화 |
 
 ## 프로젝트 구조
 
