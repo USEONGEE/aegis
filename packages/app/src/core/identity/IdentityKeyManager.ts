@@ -116,7 +116,7 @@ export class IdentityKeyManager {
   async getPublicKeyHex(): Promise<string | null> {
     const kp = await this.load();
     if (!kp) return null;
-    return '0x' + Buffer.from(kp.publicKey).toString('hex');
+    return '0x' + Array.from(kp.publicKey).map((b: number) => b.toString(16).padStart(2, '0')).join('');
   }
 
   /**
