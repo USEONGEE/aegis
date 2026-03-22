@@ -126,7 +126,7 @@ async function main (): Promise<void> {
           relayClient.send('query_result', errorResult as unknown as Record<string, unknown>, incomingUserId)
           break
         }
-        handleQueryMessage(payload as unknown as QueryMessage, { facade, logger })
+        handleQueryMessage(payload as unknown as QueryMessage, { facade, logger, evmRpcUrl: config.evmRpcUrl })
           .then((result) => {
             const incomingUserId = (raw as Record<string, unknown>)?.userId as string | undefined
             relayClient.send('query_result', result as unknown as Record<string, unknown>, incomingUserId)

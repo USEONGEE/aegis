@@ -71,7 +71,7 @@ export class ToolApiServer {
     }
 
     // POST /api/tools/:name
-    const match = req.url?.match(/^\/api\/tools\/([a-zA-Z]+)$/)
+    const match = req.url?.match(/^\/api\/tools\/([a-zA-Z0-9]+)$/)
     if (req.method !== 'POST' || !match) {
       this._json(res, 404, { ok: false, error: 'Not found' })
       return

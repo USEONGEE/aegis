@@ -9,8 +9,6 @@ import type { TokenInfo } from './token/types.js'
 // RPC helpers
 // ---------------------------------------------------------------------------
 
-const HL_RPC_URL = 'https://api.hyperliquid.xyz/evm'
-
 // ERC-20 balanceOf(address) selector
 const BALANCE_OF_SELECTOR = '0x70a08231'
 
@@ -18,8 +16,8 @@ function encodeAddress (addr: string): string {
   return addr.replace(/^0x/i, '').toLowerCase().padStart(64, '0')
 }
 
-async function rpcCall (method: string, params: unknown[]): Promise<unknown> {
-  const res = await fetch(HL_RPC_URL, {
+async function rpcCall (rpcUrl: string, method: string, params: unknown[]): Promise<unknown> {
+  const res = await fetch(rpcUrl, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
@@ -32,15 +30,15 @@ async function rpcCall (method: string, params: unknown[]): Promise<unknown> {
 }
 
 /** Fetch native HYPE balance (wei) */
-async function fetchNativeBalance (wallet: string): Promise<bigint> {
-  const result = await rpcCall('eth_getBalance', [wallet, 'latest'])
+async function fetchNativeBalance (rpcUrl: string, wallet: string): Promise<bigint> {
+  const result = await rpcCall(rpcUrl, 'eth_getBalance', [wallet, 'latest'])
   return BigInt(result as string)
 }
 
 /** Fetch ERC-20 balance (raw units) */
-async function fetchErc20Balance (token: `0x${string}`, wallet: string): Promise<bigint> {
+async function fetchErc20Balance (rpcUrl: string, token: `0x${string}`, wallet: string): Promise<bigint> {
   const data = BALANCE_OF_SELECTOR + encodeAddress(wallet)
-  const result = await rpcCall('eth_call', [{ to: token, data }, 'latest'])
+  const result = await rpcCall(rpcUrl, 'eth_call', [{ to: token, data }, 'latest'])
   const hex = result as string
   if (!hex || hex === '0x' || hex === '0x0') return 0n
   return BigInt(hex)
@@ -81,6 +79,7 @@ export interface PortfolioResult {
 export async function getPortfolio (
   walletAddress: string,
   logger: Logger,
+  rpcUrl: string = 'https://rpc.hyperliquid.xyz/evm',
 ): Promise<PortfolioResult> {
   const chainId = 999
   const tokens = getTokensByChain(chainId)
@@ -88,7 +87,7 @@ export async function getPortfolio (
   // 1. Fetch all balances in parallel
   const balanceResults = await Promise.allSettled(
     tokens.map(async (token): Promise<{ token: TokenInfo; raw: bigint }> => {
-      const raw = await fetchErc20Balance(token.address, walletAddress)
+      const raw = await fetchErc20Balance(rpcUrl, token.address, walletAddress)
       return { token, raw }
     })
   )
@@ -96,7 +95,7 @@ export async function getPortfolio (
   // Also fetch native HYPE balance
   let nativeRaw = 0n
   try {
-    nativeRaw = await fetchNativeBalance(walletAddress)
+    nativeRaw = await fetchNativeBalance(rpcUrl, walletAddress)
   } catch (err: unknown) {
     logger.warn({ err: err instanceof Error ? err.message : String(err) }, 'Failed to fetch native HYPE balance')
   }

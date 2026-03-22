@@ -18,6 +18,7 @@ interface AccountProvider {
 interface QueryHandlerDeps {
   facade: QueryFacadePort & Partial<AccountProvider>
   logger: Logger
+  evmRpcUrl?: string
 }
 
 /**
@@ -31,7 +32,7 @@ export async function handleQueryMessage (
   msg: QueryMessage,
   deps: QueryHandlerDeps
 ): Promise<QueryResult> {
-  const { facade, logger } = deps
+  const { facade, logger, evmRpcUrl } = deps
 
   try {
     switch (msg.type) {
@@ -71,7 +72,7 @@ export async function handleQueryMessage (
         }
         const account = await facade.getAccount(EVM_CHAIN_KEY, msg.params.accountIndex)
         const walletAddress = await account.getAddress()
-        const result = await getPortfolio(walletAddress, logger)
+        const result = await getPortfolio(walletAddress, logger, evmRpcUrl)
         return { requestId: msg.requestId, status: 'ok', data: result }
       }
 
