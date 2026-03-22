@@ -37,7 +37,7 @@ export function LoginScreen() {
     setLoading(true);
     try {
       // Development: register + login with test credentials
-      const userId = `dev-user-${Date.now()}`;
+      const userId = 'dev-user-1';
       const password = 'devpassword123';
 
       // Register

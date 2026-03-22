@@ -37,7 +37,7 @@ export function EnrollmentScreen({ onEnrolled, onSkip }: { onEnrolled: () => voi
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`,
         },
-        body: JSON.stringify({ enrollmentCode: code }),
+        body: JSON.stringify({ enrollmentCode: code.slice(0, 4) + '-' + code.slice(4) }),
       });
 
       if (!res.ok) {

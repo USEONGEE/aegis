@@ -23,6 +23,7 @@ interface AuthState {
 
   /** Clear auth (logout) */
   clearAuth: () => Promise<void>;
+  logout: () => Promise<void>;
 }
 
 export const useAuthStore = create<AuthState>((set, get) => ({
@@ -88,5 +89,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     await SecureStore.deleteItemAsync(REFRESH_KEY);
     await SecureStore.deleteItemAsync(USER_ID_KEY);
     set({ userId: null, token: null, refreshToken: null, isAuthenticated: false });
+  },
+
+  logout: async () => {
+    await get().clearAuth();
   },
 }));
