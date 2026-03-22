@@ -280,7 +280,11 @@ export function evaluatePolicy (policies: Policy[], chainId: number, tx: Transac
 
   // Collect candidates from matching buckets
   const candidates: Rule[] = []
-  const perms = callPolicy.permissions
+  // Normalize permission keys to lowercase for case-insensitive address matching
+  const perms: PermissionDict = {}
+  for (const [key, val] of Object.entries(callPolicy.permissions)) {
+    perms[key.toLowerCase()] = val
+  }
 
   // Check exact target + exact selector / wildcard selector
   const exactTarget = perms[txTo]
