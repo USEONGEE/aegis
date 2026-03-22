@@ -10,6 +10,11 @@ AI DeFi Agent 서명 엔진 + 제어 인프라.
 - **Codex Session ID**: `/Users/mousebook/Documents/GitHub/WDK-APP/docs/phases/v0.4.3-relay-type-structure`
 - **시작일**: 2026-03-22
 
+### v0.4.5 — 크로스 패키지 Unknown 타입 체인 해소
+- **상태**: 개발 완료 (커밋 대기)
+- **문서**: [docs/phases/v0.4.5-unknown-type-chain/](docs/phases/v0.4.5-unknown-type-chain/)
+- **시작일**: 2026-03-22
+
 ### v0.4.0 — No Optional 원칙 전면 적용
 - **상태**: Step 1 - PRD
 - **문서**: [docs/phases/v0.4.0-no-optional-cleanup/](docs/phases/v0.4.0-no-optional-cleanup/)
@@ -81,6 +86,7 @@ packages/
 2. **No Fallback**: 실패하면 실패. 조용히 우회하거나 대체 경로를 만들지 않는다.
 3. **No Two-Way Implements**: 의존 방향은 단방향. A가 B를 알면 B는 A를 모른다.
 4. **No Optional**: 선택적 필드/파라미터를 만들지 않는다. 필요하면 별도 타입으로 분리한다.
+5. **DU over Optional**: 종류를 구분해야 할 때 optional 필드가 아니라 discriminated union을 쓴다. 분류가 필요하면 string 매칭이 아니라 enum/literal union을 쓴다. enum의 각 variant마다 공통 기능이 필요하지만 구현이 달라서 switch/if 분기가 산재하면, 추상화(strategy/visitor)로 분기를 제거한다.
 
 ## 기술 스택
 
