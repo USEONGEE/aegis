@@ -1,11 +1,14 @@
 import React from 'react';
+import { registerRootComponent } from 'expo';
 import { AppProviders } from './src/app/providers/AppProviders';
 import { RootNavigator } from './src/app/RootNavigator';
 
-export default function App() {
+function App() {
   return (
     <AppProviders>
       <RootNavigator />
     </AppProviders>
   );
 }
+
+registerRootComponent(App);

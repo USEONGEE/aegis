@@ -16,6 +16,7 @@ import { useActivityStore } from '../stores/useActivityStore';
 import { LoginScreen } from '../domains/auth/screens/LoginScreen';
 import { EnrollmentScreen } from '../domains/auth/screens/EnrollmentScreen';
 import { RelayClient } from '../core/relay/RelayClient';
+import { IdentityKeyManager } from '../core/identity/IdentityKeyManager';
 import type { AnyStreamEvent, ChatEvent } from '@wdk-app/protocol';
 import { useEffect, useState, useRef } from 'react';
 import { ActivityIndicator, View } from 'react-native';
@@ -196,6 +197,8 @@ export function RootNavigator() {
   const isAuthenticated = useAuthStore(s => s.isAuthenticated);
   const isAuthLoading = useAuthStore(s => s.isLoading);
   const loadPersistedAuth = useAuthStore(s => s.loadPersistedAuth);
+  const userId = useAuthStore(s => s.userId);
+  const token = useAuthStore(s => s.token);
   const [enrollmentDone, setEnrollmentDone] = useState<boolean | null>(null);
 
   useEffect(() => {
@@ -207,6 +210,40 @@ export function RootNavigator() {
       });
     });
   }, []);
+
+  // Relay connect/disconnect based on auth state
+  useEffect(() => {
+    if (!isAuthenticated || !enrollmentDone || !userId || !token) {
+      // Disconnect if previously connected and auth state changed (logout)
+      const relay = RelayClient.getInstance();
+      if (relay.isConnected()) {
+        relay.disconnect();
+      }
+      return;
+    }
+
+    const relay = RelayClient.getInstance();
+    const relayUrl = process.env.EXPO_PUBLIC_RELAY_URL || 'http://localhost:3000';
+    relay.connect(relayUrl, userId, token).catch(() => {
+      // Connection failure is handled by RelayClient's internal reconnect logic
+    });
+
+    return () => {
+      relay.disconnect();
+    };
+  }, [isAuthenticated, enrollmentDone, userId, token]);
+
+  // Auto-generate identity key if none exists
+  useEffect(() => {
+    if (!isAuthenticated || !enrollmentDone) return;
+
+    const identity = IdentityKeyManager.getInstance();
+    identity.load().then(existing => {
+      if (!existing) {
+        identity.generate();
+      }
+    });
+  }, [isAuthenticated, enrollmentDone]);
 
   if (isAuthLoading) {
     return (

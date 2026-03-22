@@ -59,7 +59,7 @@ interface ApprovalRequestBase {
 
 export type ApprovalRequest =
   | (ApprovalRequestBase & { type: 'tx' })
-  | (ApprovalRequestBase & { type: 'policy' })
+  | (ApprovalRequestBase & { type: 'policy'; policies: unknown[] })
   | (ApprovalRequestBase & { type: 'policy_reject' })
   | (ApprovalRequestBase & { type: 'device_revoke'; targetPublicKey: string })
   | (ApprovalRequestBase & { type: 'wallet_create' })

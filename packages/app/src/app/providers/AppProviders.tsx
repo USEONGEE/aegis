@@ -41,15 +41,18 @@ async function approvalExecutor(request: ApprovalRequest): Promise<{ txHash: `0x
       });
       break;
 
-    case 'policy':
-      signedApproval = builder.forPolicy({
+    case 'policy': {
+      const built = builder.forPolicy({
         targetHash: request.targetHash,
         chainId: request.chainId,
         requestId: request.requestId,
         accountIndex: request.accountIndex,
         content: request.content,
       });
+      // Attach policies for daemon's control-handler (payload.policies)
+      signedApproval = Object.assign(built, { policies: request.policies });
       break;
+    }
 
     case 'policy_reject':
       signedApproval = builder.forPolicyReject({

@@ -29,6 +29,7 @@ export interface PendingPolicyRequest {
   accountIndex: number;
   reason: string;
   policies: Policy[];
+  rawPolicies: unknown[];     // daemon's native CallPolicy format for transmission
   requestedBy: string;        // 'ai' or 'owner'
   createdAt: number;
   expiresAt: number;
