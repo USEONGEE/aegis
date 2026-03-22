@@ -70,6 +70,7 @@ export interface StoredPolicy extends PolicyInput {
 
 export interface PendingApprovalRequest extends ApprovalRequest {
   walletName: string
+  policies: Policy[]
 }
 
 // PendingApprovalRow: see store-types.ts (@internal)

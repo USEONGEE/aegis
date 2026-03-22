@@ -262,6 +262,7 @@ export class JsonWdkStore extends WdkStore {
         accountIndex: p.account_index,
         content: p.content,
         walletName: p.wallet_name ?? `Wallet ${p.account_index}`,
+        policies: p.policies_json ? JSON.parse(p.policies_json) as Policy[] : [],
         createdAt: p.created_at
       }))
   }
@@ -278,13 +279,18 @@ export class JsonWdkStore extends WdkStore {
       accountIndex: row.account_index,
       content: row.content,
       walletName: row.wallet_name ?? `Wallet ${row.account_index}`,
+      policies: row.policies_json ? JSON.parse(row.policies_json) as Policy[] : [],
       createdAt: row.created_at
     }
   }
 
   override async savePendingApproval (accountIndex: number, request: ApprovalRequest): Promise<void> {
     const pending = await this._read<PendingApprovalRow[]>('pending.json') || []
-    const walletName = (request as PendingApprovalRequest).walletName ?? `Wallet ${accountIndex}`
+    const req = request as PendingApprovalRequest
+    const walletName = req.walletName ?? `Wallet ${accountIndex}`
+    const policiesJson = req.policies && req.policies.length > 0
+      ? JSON.stringify(req.policies)
+      : null
     pending.push({
       request_id: request.requestId,
       account_index: accountIndex,
@@ -293,6 +299,7 @@ export class JsonWdkStore extends WdkStore {
       target_hash: request.targetHash,
       content: request.content,
       wallet_name: walletName,
+      policies_json: policiesJson,
       created_at: request.createdAt || Date.now()
     })
     await this._write('pending.json', pending)

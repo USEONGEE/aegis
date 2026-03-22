@@ -13,6 +13,7 @@ interface CreateRequestOptions {
   accountIndex: number
   content: string
   walletName: string
+  policies: Policy[]
 }
 
 interface Waiter {
@@ -55,7 +56,7 @@ export class SignedApprovalBroker {
    * Create an approval request. Returns a request object.
    * Stores as pending for tx, policy, wallet_create, wallet_delete.
    */
-  async createRequest (type: ApprovalType, { chainId, targetHash, requestId, accountIndex, content, walletName }: CreateRequestOptions): Promise<ApprovalRequest> {
+  async createRequest (type: ApprovalType, { chainId, targetHash, requestId, accountIndex, content, walletName, policies }: CreateRequestOptions): Promise<ApprovalRequest> {
     const request: ApprovalRequest = {
       requestId,
       type,
@@ -68,7 +69,7 @@ export class SignedApprovalBroker {
 
     // Store pending for actionable requests (tx path removed — Decision simplified to ALLOW/REJECT)
     if (type === 'policy' || type === 'wallet_create' || type === 'wallet_delete') {
-      const pending: PendingApprovalRequest = { ...request, walletName }
+      const pending: PendingApprovalRequest = { ...request, walletName, policies }
       await this._store.savePendingApproval(accountIndex, pending)
     }
 

@@ -54,6 +54,7 @@ interface CreateRequestOptions {
   accountIndex: number
   content: string
   walletName: string
+  policies: Policy[]
 }
 
 interface GuardedWDKFacade {

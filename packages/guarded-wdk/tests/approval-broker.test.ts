@@ -97,7 +97,8 @@ describe('SignedApprovalBroker', () => {
       targetHash: '0xabc123',
       accountIndex: 0,
       content: 'test',
-      walletName: null
+      walletName: null,
+      policies: []
     })
     expect(request.requestId).toBe('req-1')
     expect(request.type).toBe('policy')
@@ -112,7 +113,8 @@ describe('SignedApprovalBroker', () => {
       targetHash: '0xabc123',
       accountIndex: 0,
       content: 'test',
-      walletName: null
+      walletName: null,
+      policies: []
     })
     expect(request.requestId).toBe('req-1')
     expect(store._pending.length).toBe(0)
@@ -125,7 +127,8 @@ describe('SignedApprovalBroker', () => {
       targetHash: '0xabc123',
       accountIndex: 0,
       content: 'test',
-      walletName: null
+      walletName: null,
+      policies: []
     })
     expect(request.requestId).toBe('explicit-id')
     expect(typeof request.requestId).toBe('string')
@@ -138,7 +141,8 @@ describe('SignedApprovalBroker', () => {
       targetHash: '0xabc123',
       accountIndex: 0,
       content: 'test',
-      walletName: null
+      walletName: null,
+      policies: []
     })
     const approval = makeSignedApproval(keyPair)
     await broker.submitApproval(approval as never)
@@ -170,7 +174,8 @@ describe('SignedApprovalBroker', () => {
       targetHash: '0xabc123',
       accountIndex: 0,
       content: 'test',
-      walletName: null
+      walletName: null,
+      policies: []
     })
     const approval1 = makeSignedApproval(keyPair, { nonce: 1 })
     await broker.submitApproval(approval1 as never)
@@ -186,7 +191,8 @@ describe('SignedApprovalBroker', () => {
       targetHash: '0xpolicyhash',
       accountIndex: 0,
       content: 'test',
-      walletName: null
+      walletName: null,
+      policies: []
     })
 
     expect(store._pending.length).toBe(1)
@@ -215,7 +221,8 @@ describe('SignedApprovalBroker', () => {
       targetHash: '0xabc123',
       accountIndex: 0,
       content: 'test',
-      walletName: null
+      walletName: null,
+      policies: []
     })
     const approval2 = makeSignedApproval(newKeyPair, { requestId: 'req-2' })
     await broker.submitApproval(approval2 as never)
@@ -236,7 +243,8 @@ describe('SignedApprovalBroker', () => {
       targetHash: '0xabc123',
       accountIndex: 0,
       content: 'test',
-      walletName: null
+      walletName: null,
+      policies: []
     })
     const approval = makeSignedApproval(keyPair)
     await broker.submitApproval(approval as never)
@@ -256,7 +264,8 @@ describe('SignedApprovalBroker', () => {
       targetHash: '0xpolicyhash',
       accountIndex: 0,
       content: 'test',
-      walletName: null
+      walletName: null,
+      policies: []
     })
 
     const approval = makeSignedApproval(keyPair, {

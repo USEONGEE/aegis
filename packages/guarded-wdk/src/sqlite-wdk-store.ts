@@ -93,6 +93,7 @@ export class SqliteWdkStore extends WdkStore {
         target_hash TEXT NOT NULL,
         content TEXT NOT NULL DEFAULT '',
         wallet_name TEXT,
+        policies_json TEXT,
         created_at INTEGER NOT NULL
       );
 
@@ -305,6 +306,7 @@ export class SqliteWdkStore extends WdkStore {
       targetHash: p.target_hash,
       content: p.content,
       walletName: p.wallet_name ?? `Wallet ${p.account_index}`,
+      policies: p.policies_json ? JSON.parse(p.policies_json) as Policy[] : [],
       createdAt: p.created_at
     }))
   }
@@ -322,15 +324,20 @@ export class SqliteWdkStore extends WdkStore {
       targetHash: row.target_hash,
       content: row.content,
       walletName: row.wallet_name ?? `Wallet ${row.account_index}`,
+      policies: row.policies_json ? JSON.parse(row.policies_json) as Policy[] : [],
       createdAt: row.created_at
     }
   }
 
   override async savePendingApproval (accountIndex: number, request: ApprovalRequest): Promise<void> {
-    const walletName = (request as PendingApprovalRequest).walletName ?? `Wallet ${accountIndex}`
+    const pending = request as PendingApprovalRequest
+    const walletName = pending.walletName ?? `Wallet ${accountIndex}`
+    const policiesJson = pending.policies && pending.policies.length > 0
+      ? JSON.stringify(pending.policies)
+      : null
     this._db!.prepare(`
-      INSERT INTO pending_requests (request_id, account_index, type, chain_id, target_hash, content, wallet_name, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO pending_requests (request_id, account_index, type, chain_id, target_hash, content, wallet_name, policies_json, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       request.requestId,
       accountIndex,
@@ -339,6 +346,7 @@ export class SqliteWdkStore extends WdkStore {
       request.targetHash,
       request.content,
       walletName,
+      policiesJson,
       request.createdAt || Date.now()
     )
   }

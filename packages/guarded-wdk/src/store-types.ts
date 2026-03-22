@@ -13,6 +13,7 @@ export interface PendingApprovalRow {
   target_hash: string
   content: string
   wallet_name: string | null
+  policies_json: string | null
   created_at: number
 }
 
