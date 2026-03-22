@@ -162,14 +162,30 @@ export function ActivityScreen() {
     requestApproval(rejectRequest).then(() => fetchAll()).catch(() => {});
   }, [requestApproval, fetchAll]);
 
-  // Refetch on mount + relay reconnect
+  // Refetch on mount + relay reconnect + realtime policy events
   useEffect(() => {
     const connHandler = (isConnected: boolean) => {
       if (isConnected) fetchAll();
     };
     relay.addConnectionHandler(connHandler);
     if (relay.isConnected()) fetchAll();
-    return () => relay.removeConnectionHandler(connHandler);
+
+    // Listen for daemon events that affect policy state
+    const msgHandler = (message: { channel: string; payload: unknown }) => {
+      if (message.channel !== 'control') return;
+      const data = message.payload as { type?: string; event?: { type?: string } };
+      if (data.type !== 'event_stream') return;
+      const eventType = data.event?.type;
+      if (eventType === 'PendingPolicyRequested' || eventType === 'PolicyApplied' || eventType === 'ApprovalRejected') {
+        fetchAll();
+      }
+    };
+    relay.addMessageHandler(msgHandler);
+
+    return () => {
+      relay.removeConnectionHandler(connHandler);
+      relay.removeMessageHandler(msgHandler);
+    };
   }, [relay, fetchAll]);
 
   // Refetch on accountIndex change

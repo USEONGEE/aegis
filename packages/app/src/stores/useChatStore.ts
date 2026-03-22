@@ -133,7 +133,7 @@ export const useChatStore = create(
               lastMessageAt: message.timestamp,
               messageCount: updated.length,
               title:
-                sessionList[sessionIdx].title === '새 대화' && message.kind === 'text'
+                sessionList[sessionIdx].title === 'New Chat' && message.kind === 'text'
                   ? message.content.slice(0, 30)
                   : sessionList[sessionIdx].title,
             };
@@ -142,7 +142,7 @@ export const useChatStore = create(
             sessionList = [
               {
                 id: sid,
-                title: message.kind === 'text' ? message.content.slice(0, 30) : '새 대화',
+                title: message.kind === 'text' ? message.content.slice(0, 30) : 'New Chat',
                 lastMessageAt: message.timestamp,
                 source: message.source,
                 messageCount: updated.length,
@@ -179,7 +179,7 @@ export const useChatStore = create(
           sessionList: [
             {
               id,
-              title: '새 대화',
+              title: 'New Chat',
               lastMessageAt: Date.now(),
               source,
               messageCount: 0,
@@ -200,7 +200,7 @@ export const useChatStore = create(
             sessionList: [
               {
                 id,
-                title: '새 대화',
+                title: 'New Chat',
                 lastMessageAt: Date.now(),
                 source,
                 messageCount: 0,

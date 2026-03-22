@@ -149,8 +149,8 @@ export function ChatDetailScreen({ route }: Props) {
             id: `tool_${data.toolCallId}`,
             role: 'system',
             content: data.status === 'success'
-              ? `✅ ${data.toolName} 완료`
-              : `❌ ${data.toolName} 실패`,
+              ? `✅ ${data.toolName} done`
+              : `❌ ${data.toolName} failed`,
             timestamp: message.timestamp,
             sessionId: msgSessionId!,
             source: msgSource,
@@ -170,7 +170,7 @@ export function ChatDetailScreen({ route }: Props) {
             kind: 'status',
             id: `msg_cancelled_${Date.now()}`,
             role: 'system',
-            content: '요청이 취소되었습니다.',
+            content: 'Request cancelled.',
             timestamp: message.timestamp,
             sessionId: msgSessionId!,
             source: msgSource,
@@ -366,9 +366,9 @@ export function ChatDetailScreen({ route }: Props) {
       return (
         <View style={styles.toolIndicator}>
           <Text style={styles.toolText}>
-            {item.toolStatus === 'running' && `🔧 ${item.toolCall} 실행 중...`}
-            {item.toolStatus === 'done' && `✅ ${item.toolCall} 완료`}
-            {item.toolStatus === 'error' && `❌ ${item.toolCall} 실패`}
+            {item.toolStatus === 'running' && `🔧 ${item.toolCall} running...`}
+            {item.toolStatus === 'done' && `✅ ${item.toolCall} done`}
+            {item.toolStatus === 'error' && `❌ ${item.toolCall} failed`}
           </Text>
         </View>
       );
@@ -399,7 +399,7 @@ export function ChatDetailScreen({ route }: Props) {
             {new Date(item.timestamp).toLocaleTimeString()}
           </Text>
           {isUser && queuedMessageId && item.id === messages[messages.length - 1]?.id && (
-            <Text style={styles.queuedStatus}>전송됨 ✓</Text>
+            <Text style={styles.queuedStatus}>Sent ✓</Text>
           )}
         </View>
       </Pressable>

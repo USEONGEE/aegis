@@ -256,8 +256,10 @@ export class RelayClient {
           }
 
           // Dispatch to handlers — map relay's `type` field to our `channel`
+          // Relay sends daemon events as type='event_stream', map to 'control' for handler compat
+          const channelType = data.type === 'event_stream' ? 'control' : data.type;
           const message: RelayMessage = {
-            channel: (data.type as RelayChannel) ?? 'control',
+            channel: (channelType as RelayChannel) ?? 'control',
             messageId: data.messageId ?? data.id ?? '',
             timestamp: data.timestamp ?? Date.now(),
             payload,

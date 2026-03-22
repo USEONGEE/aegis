@@ -170,7 +170,7 @@ function ChatNavigator() {
       <ChatStack.Screen
         name="ChatDetail"
         component={ChatDetailScreen}
-        options={{ title: '대화', headerBackTitle: '목록' }}
+        options={{ title: 'Chat', headerBackTitle: 'Back' }}
       />
     </ChatStack.Navigator>
   );
@@ -238,18 +238,22 @@ export function RootNavigator() {
     const identity = IdentityKeyManager.getInstance();
 
     const registerDevice = async () => {
-      let kp = await identity.load();
-      if (!kp) kp = await identity.generate();
-      const pubKeyHex = '0x' + Buffer.from(kp.publicKey).toString('hex');
-      const deviceId = await identity.getDeviceId() || `device_${Date.now()}`;
-      const relay = RelayClient.getInstance();
-      if (relay.isConnected()) {
-        relay.sendControl({
-          type: 'device_register',
-          payload: { publicKey: pubKeyHex, deviceId },
-          messageId: `dev_reg_${Date.now()}`,
-          timestamp: Date.now(),
-        });
+      try {
+        let kp = await identity.load();
+        if (!kp) kp = await identity.generate();
+        const pubKeyHex = '0x' + Array.from(kp.publicKey).map((b: number) => b.toString(16).padStart(2, '0')).join('');
+        const deviceId = await identity.getDeviceId() || `device_${Date.now()}`;
+        const relay = RelayClient.getInstance();
+        if (relay.isConnected()) {
+          await relay.sendControl({
+            type: 'device_register',
+            payload: { publicKey: pubKeyHex, deviceId },
+            messageId: `dev_reg_${Date.now()}`,
+            timestamp: Date.now(),
+          });
+        }
+      } catch (err) {
+        console.warn('[DeviceRegister] failed:', err instanceof Error ? err.message : String(err));
       }
     };
 
@@ -295,7 +299,7 @@ export function RootNavigator() {
         const identity = IdentityKeyManager.getInstance();
         let kp = await identity.load();
         if (!kp) kp = await identity.generate();
-        const pubKeyHex = '0x' + Buffer.from(kp.publicKey).toString('hex');
+        const pubKeyHex = '0x' + Array.from(kp.publicKey).map((b: number) => b.toString(16).padStart(2, '0')).join('');
         const deviceId = await identity.getDeviceId() || `device_${Date.now()}`;
         const relay = RelayClient.getInstance();
         if (relay.isConnected()) {

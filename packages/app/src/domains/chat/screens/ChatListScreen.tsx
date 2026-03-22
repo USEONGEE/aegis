@@ -53,12 +53,12 @@ export function ChatListScreen({ navigation }: Props) {
   const handleDelete = () => {
     if (selected.size === 0) return;
     Alert.alert(
-      '대화 삭제',
-      `${selected.size}개의 대화를 삭제하시겠습니까?\n삭제된 대화는 복구할 수 없습니다.`,
+      'Delete Chats',
+      `Delete ${selected.size} chat(s)?\nThis cannot be undone.`,
       [
-        { text: '취소', style: 'cancel' },
+        { text: 'Cancel', style: 'cancel' },
         {
-          text: '삭제',
+          text: 'Delete',
           style: 'destructive',
           onPress: () => {
             deleteSessions([...selected]);
@@ -86,7 +86,7 @@ export function ChatListScreen({ navigation }: Props) {
               {item.title}
             </Text>
             {item.source === 'cron' && (
-              <Text style={styles.cronLabel}>자동 실행</Text>
+              <Text style={styles.cronLabel}>Auto</Text>
             )}
           </View>
           <View style={styles.sessionMeta}>
@@ -107,25 +107,25 @@ export function ChatListScreen({ navigation }: Props) {
       <View style={styles.topBar}>
         {editMode ? (
           <Pressable style={styles.editButton} onPress={exitEditMode}>
-            <Text style={styles.editButtonText}>완료</Text>
+            <Text style={styles.editButtonText}>Done</Text>
           </Pressable>
         ) : (
           <Pressable style={styles.newChatButton} onPress={handleNewChat}>
-            <Text style={styles.newChatText}>+ 새 대화</Text>
+            <Text style={styles.newChatText}>+ New Chat</Text>
           </Pressable>
         )}
         {sorted.length > 0 && !editMode && (
           <Pressable style={styles.editButton} onPress={() => setEditMode(true)}>
-            <Text style={styles.editButtonText}>편집</Text>
+            <Text style={styles.editButtonText}>Edit</Text>
           </Pressable>
         )}
       </View>
 
       {sorted.length === 0 ? (
         <View style={styles.emptyState}>
-          <Text style={styles.emptyTitle}>대화 없음</Text>
+          <Text style={styles.emptyTitle}>No Chats</Text>
           <Text style={styles.emptySubtitle}>
-            "새 대화"를 눌러 AI agent와 대화를 시작하세요.
+            Tap "+ New Chat" to start a conversation with your AI agent.
           </Text>
         </View>
       ) : (
@@ -141,7 +141,7 @@ export function ChatListScreen({ navigation }: Props) {
         <View style={styles.bottomBar}>
           <Pressable style={styles.selectAllButton} onPress={handleSelectAll}>
             <Text style={styles.selectAllText}>
-              {selected.size === sorted.length ? '전체 해제' : '전체 선택'}
+              {selected.size === sorted.length ? 'Deselect All' : 'Select All'}
             </Text>
           </Pressable>
           <Pressable
@@ -150,7 +150,7 @@ export function ChatListScreen({ navigation }: Props) {
             disabled={selected.size === 0}
           >
             <Text style={[styles.deleteText, selected.size === 0 && styles.deleteTextDisabled]}>
-              {selected.size > 0 ? `${selected.size}개 삭제` : '삭제'}
+              {selected.size > 0 ? `Delete ${selected.size}` : 'Delete'}
             </Text>
           </Pressable>
         </View>
