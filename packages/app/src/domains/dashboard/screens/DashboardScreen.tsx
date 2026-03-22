@@ -84,8 +84,8 @@ export function DashboardScreen() {
         accountIndex,
       });
       setAddress(accountIndex, result.address);
-    } catch (_err: unknown) {
-      void _err;
+    } catch (err: unknown) {
+      console.warn('[Dashboard] getWalletAddress failed:', err instanceof Error ? err.message : String(err));
     }
   }, [relay, setAddress]);
 
@@ -93,8 +93,8 @@ export function DashboardScreen() {
     try {
       const result = await relay.query<StoredWallet[]>('walletList', {});
       setWallets(result);
-    } catch (_err: unknown) {
-      void _err;
+    } catch (err: unknown) {
+      console.warn('[Dashboard] walletList failed:', err instanceof Error ? err.message : String(err));
     }
   }, [relay, setWallets]);
 
@@ -103,8 +103,8 @@ export function DashboardScreen() {
       const result = await relay.query<PortfolioData>('getPortfolio', { accountIndex: selectedAccountIndex }, 30_000);
       setBalances(result.balances);
       setTotalUSD(result.totalUSD);
-    } catch (_err: unknown) {
-      void _err;
+    } catch (err: unknown) {
+      console.warn('[Dashboard] getPortfolio failed:', err instanceof Error ? err.message : String(err));
     } finally {
       setLoading(false);
     }

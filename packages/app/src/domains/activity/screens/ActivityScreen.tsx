@@ -9,6 +9,8 @@ import {
 } from 'react-native';
 import { RelayClient } from '../../../core/relay/RelayClient';
 import { useWalletStore } from '../../../stores/useWalletStore';
+import { useTxApproval } from '../../../shared/tx/TxApprovalContext';
+import type { ApprovalRequest } from '../../../core/approval/types';
 
 // --- Types ---
 
@@ -26,6 +28,7 @@ interface PendingItem {
   reason: string;
   policies: DisplayPolicy[];
   createdAt: number;
+  raw: ApprovalRequest;
 }
 
 type FetchStatus = 'idle' | 'loading' | 'error' | 'loaded';
@@ -77,6 +80,7 @@ export function ActivityScreen() {
   const [pendingItems, setPendingItems] = useState<PendingItem[]>([]);
   const [status, setStatus] = useState<FetchStatus>('idle');
   const [walletAddress, setWalletAddress] = useState<string | null>(null);
+  const { requestApproval } = useTxApproval();
 
   // Resolve wallet address (from store or query fallback)
   const fetchWalletAddress = useCallback(async () => {
@@ -93,7 +97,8 @@ export function ActivityScreen() {
       });
       setWalletAddress(result.address);
       setAddress(selectedAccountIndex, result.address);
-    } catch {
+    } catch (err: unknown) {
+      console.warn('[Activity] getWalletAddress failed:', err instanceof Error ? err.message : String(err));
       setWalletAddress(null);
     }
   }, [selectedAccountIndex, addresses, relay, setAddress]);
@@ -133,10 +138,12 @@ export function ActivityScreen() {
         reason: a.content,
         policies: flattenCallPolicies(a.policies),
         createdAt: a.createdAt,
+        raw: a as unknown as ApprovalRequest,
       })));
 
       setStatus('loaded');
-    } catch {
+    } catch (err: unknown) {
+      console.warn('[Activity] fetchPolicies failed:', err instanceof Error ? err.message : String(err));
       setStatus('error');
     }
   }, [relay, selectedAccountIndex]);
@@ -145,6 +152,15 @@ export function ActivityScreen() {
     fetchPolicies();
     fetchWalletAddress();
   }, [fetchPolicies, fetchWalletAddress]);
+
+  const handleApprove = useCallback((item: PendingItem) => {
+    requestApproval(item.raw).then(() => fetchAll()).catch(() => {});
+  }, [requestApproval, fetchAll]);
+
+  const handleReject = useCallback((item: PendingItem) => {
+    const rejectRequest: ApprovalRequest = { ...item.raw, type: 'policy_reject' };
+    requestApproval(rejectRequest).then(() => fetchAll()).catch(() => {});
+  }, [requestApproval, fetchAll]);
 
   // Refetch on mount + relay reconnect
   useEffect(() => {
@@ -240,6 +256,14 @@ export function ActivityScreen() {
                     </Text>
                   </View>
                 ))}
+                <View style={styles.pendingActions}>
+                  <Pressable style={styles.approveButton} onPress={() => handleApprove(item)}>
+                    <Text style={styles.approveButtonText}>Approve</Text>
+                  </Pressable>
+                  <Pressable style={styles.rejectButton} onPress={() => handleReject(item)}>
+                    <Text style={styles.rejectButtonText}>Reject</Text>
+                  </Pressable>
+                </View>
               </View>
             ))
           )}
@@ -397,5 +421,34 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: '#d4d4d8',
     fontFamily: 'Menlo',
+  },
+  pendingActions: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 12,
+  },
+  approveButton: {
+    flex: 1,
+    backgroundColor: '#052e16',
+    paddingVertical: 10,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  approveButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#22c55e',
+  },
+  rejectButton: {
+    flex: 1,
+    backgroundColor: '#450a0a',
+    paddingVertical: 10,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  rejectButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#ef4444',
   },
 });

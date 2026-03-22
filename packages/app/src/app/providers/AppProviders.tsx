@@ -21,11 +21,9 @@ async function approvalExecutor(request: ApprovalRequest): Promise<{ txHash: `0x
   const identity = IdentityKeyManager.getInstance();
   const keyPair = await identity.load();
 
-  if (!keyPair) {
-    throw new Error('Identity key not found. Please generate an identity key first.');
-  }
+  const resolvedKeyPair = keyPair ?? await identity.generate();
 
-  const builder = new SignedApprovalBuilder(keyPair);
+  const builder = new SignedApprovalBuilder(resolvedKeyPair);
 
   // Gap 10: branch on request.type to use the correct builder method
   let signedApproval;

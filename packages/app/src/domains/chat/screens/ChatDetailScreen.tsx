@@ -10,8 +10,10 @@ import {
   ActivityIndicator,
   StyleSheet,
 } from 'react-native';
+import * as Clipboard from 'expo-clipboard';
 import { useChatStore, type ChatMessage } from '../../../stores/useChatStore';
 import { RelayClient } from '../../../core/relay/RelayClient';
+import { useToast } from '../../../shared/ui/ToastProvider';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import MarkdownBubble from '../components/MarkdownBubble';
 import type { ChatStackParamList } from '../../../app/RootNavigator';
@@ -49,6 +51,7 @@ export function ChatDetailScreen({ route }: Props) {
     getSessionTransient, setSessionTransient, resetSessionTransient,
   } = useChatStore();
   const { isLoading, isTyping, queuedMessageId, messageState } = getSessionTransient(sessionId);
+  const { showToast } = useToast();
   const [inputText, setInputText] = useState('');
   const [streamError, setStreamError] = useState<string | null>(null);
   const [relayConnected, setRelayConnected] = useState(true);
@@ -371,8 +374,14 @@ export function ChatDetailScreen({ route }: Props) {
       );
     }
 
+    const handleCopy = async () => {
+      await Clipboard.setStringAsync(item.content);
+      showToast('Copied', 'success');
+    };
+
     return (
-      <View
+      <Pressable
+        onLongPress={handleCopy}
         style={[
           styles.messageBubble,
           isUser ? styles.userBubble : isSystem ? styles.systemBubble : styles.assistantBubble,
@@ -393,9 +402,9 @@ export function ChatDetailScreen({ route }: Props) {
             <Text style={styles.queuedStatus}>전송됨 ✓</Text>
           )}
         </View>
-      </View>
+      </Pressable>
     );
-  }, [queuedMessageId, messages]);
+  }, [queuedMessageId, messages, showToast]);
 
   return (
     <KeyboardAvoidingView
