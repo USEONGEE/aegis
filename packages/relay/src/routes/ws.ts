@@ -273,6 +273,9 @@ export default async function wsRoutes (fastify: FastifyInstance): Promise<void>
         return send(socket, { type: 'error', message: 'Invalid JSON' })
       }
 
+      // DEBUG v0.5.0: log all app WS messages
+      fastify.log.info({ type: msg.type, userId, sessionId: msg.sessionId }, 'App WS message received')
+
       /* ---- authenticate ---- */
       if (msg.type === 'authenticate') {
         const authPayload = msg.payload as Record<string, unknown> | undefined
