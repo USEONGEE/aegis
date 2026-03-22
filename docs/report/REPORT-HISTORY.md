@@ -13,6 +13,14 @@
 | 2026-03-22 | [daemon-architecture-one-pager.md](./daemon-architecture-one-pager.md) | daemon 패키지 아키텍처 정리 | 타입 그래프(41 nodes, 50 edges) + 17개 소스 파일 전체 분석 | 4개 도메인(Tool/Message/Relay/Cron) + 3축(AI대화루프/제어채널/자동화인프라). v0.4.6 DaemonStore 추가, facade port 패턴, Journal→WDK 이동, store 경계 해결 |
 | 2026-03-22 | [app-architecture-one-pager.md](./app-architecture-one-pager.md) | app 패키지 아키텍처 정리 | 타입 그래프(31 nodes, 27 edges) + 23개 소스 파일 전체 분석 | 5개 도메인(Approval/Chat/Identity&Crypto/Relay/Policy) + 3축(AI대화/서명승인/실시간동기화) + 3시나리오 |
 
+## 갱신 이력
+
+| 갱신일시 (KST) | 파일명 | Phase | 변경 내용 |
+|---------------|--------|-------|----------|
+| 2026-03-22 | daemon-architecture-one-pager.md | v0.4.8 | 제어채널 축 전면 수정(ControlResult→CancelEventPayload), 통신채널 맵 5채널 구조로 갱신, query 채널+QueryFacadePort 추가, 직접 forward 제거, 알려진 문제 3건 해결됨 |
+| 2026-03-22 | relay-domain-aggregate-analysis.md | v0.4.8 | Socket 도메인: 직접 forward 제거+event_stream 변환+query 라우팅. 축B 메시지 중계 전면 갱신. 시나리오2 Redis 단일 경로 반영 |
+| 2026-03-22 | app-architecture-one-pager.md | v0.4.8 | RelayChannel 5종, query()+pendingQueries, event_stream top-level 분리, CancelCompleted/CancelFailed 수신 |
+
 ---
 
 ## 삭제 이력

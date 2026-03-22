@@ -1,5 +1,20 @@
 # Changelog
 
+## v0.4.9 - 도메인 모델 Null 제거 (2026-03-22)
+
+- **EvaluationResult 3-variant DU**: `context: EvaluationContext | null` + `matchedPermission: Rule | null` 동시 해소. AllowResult / SimpleRejectResult / DetailedRejectResult로 분리. protocol wire 타입도 DU 전환
+- **ChainScope DU**: `chainId: number | null` → `{ kind: 'specific'; chainId: number } | { kind: 'all' }`. Cron, QueuedMessage에 적용
+- **SignerStatus DU**: `revokedAt: number | null` → `{ kind: 'active' } | { kind: 'revoked'; revokedAt: number }`
+- **VerificationTarget DU**: `expectedTargetHash: string | null` → `verify_hash | skip_hash`. `currentPolicyVersion` dead field 삭제
+- **ApprovalRequest DU**: App `targetPublicKey: string | null` → device_revoke variant 전용
+- **Filter 객체 전환**: `loadPendingApprovals(null, null, null)` → `loadPendingApprovals({})`. `listCrons(null)` → `listCrons({})`
+- **기본값 확정**: `walletName`, `StoredSigner.name` → non-null string. NullLogger 패턴 도입
+- 📝 [Phase 문서](../archive/v0.4.9-domain-null-cleanup/README.md)
+
+### 수치
+- 4패키지 tsc 0 errors, 221/222 tests pass (1건 pre-existing)
+- 31 files changed, +422/-329
+
 ## v0.4.8 - WS 채널 재설계 + Protocol 타입 강제 적용 (2026-03-22)
 
 - **채널 단방향 통일**: control을 app→daemon 단방향으로 전환. cancel 결과(CancelCompleted/CancelFailed)를 event_stream으로 이동하여 control/event_stream 방향 일관성 확보
