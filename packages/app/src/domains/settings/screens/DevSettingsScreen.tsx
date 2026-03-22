@@ -55,6 +55,7 @@ export function DevSettingsScreen() {
         onPress: async () => {
           const SecureStore = await import('expo-secure-store');
           await SecureStore.deleteItemAsync('wdk_enrollment_done');
+          logout();
         },
       },
     ]);

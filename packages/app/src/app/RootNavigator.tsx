@@ -198,13 +198,16 @@ export function RootNavigator() {
 
   useEffect(() => {
     loadPersistedAuth();
-    // Check persisted enrollment state
+  }, []);
+
+  // Re-check enrollment state on mount AND when auth state changes (logout → re-login)
+  useEffect(() => {
     import('expo-secure-store').then(SecureStore => {
       SecureStore.getItemAsync('wdk_enrollment_done').then(val => {
         setEnrollmentDone(val === 'true');
       });
     });
-  }, []);
+  }, [isAuthenticated]);
 
   // Relay connect/disconnect based on auth state
   useEffect(() => {
@@ -228,16 +231,37 @@ export function RootNavigator() {
     };
   }, [isAuthenticated, enrollmentDone, userId, token]);
 
-  // Auto-generate identity key if none exists
+  // Auto-generate identity key + register with daemon on every relay connect
   useEffect(() => {
     if (!isAuthenticated || !enrollmentDone) return;
 
     const identity = IdentityKeyManager.getInstance();
-    identity.load().then(existing => {
-      if (!existing) {
-        identity.generate();
+
+    const registerDevice = async () => {
+      let kp = await identity.load();
+      if (!kp) kp = await identity.generate();
+      const pubKeyHex = '0x' + Buffer.from(kp.publicKey).toString('hex');
+      const deviceId = await identity.getDeviceId() || `device_${Date.now()}`;
+      const relay = RelayClient.getInstance();
+      if (relay.isConnected()) {
+        relay.sendControl({
+          type: 'device_register',
+          payload: { publicKey: pubKeyHex, deviceId },
+          messageId: `dev_reg_${Date.now()}`,
+          timestamp: Date.now(),
+        });
       }
-    });
+    };
+
+    // Register on relay connect (handles reconnects too)
+    const relay = RelayClient.getInstance();
+    const connHandler = (connected: boolean) => {
+      if (connected) registerDevice();
+    };
+    relay.addConnectionHandler(connHandler);
+    if (relay.isConnected()) registerDevice();
+
+    return () => relay.removeConnectionHandler(connHandler);
   }, [isAuthenticated, enrollmentDone]);
 
   if (isAuthLoading) {
@@ -266,6 +290,23 @@ export function RootNavigator() {
       onEnrolled={async () => {
         const SecureStore = await import('expo-secure-store');
         await SecureStore.setItemAsync('wdk_enrollment_done', 'true');
+
+        // Device pairing: generate identity key + register with daemon
+        const identity = IdentityKeyManager.getInstance();
+        let kp = await identity.load();
+        if (!kp) kp = await identity.generate();
+        const pubKeyHex = '0x' + Buffer.from(kp.publicKey).toString('hex');
+        const deviceId = await identity.getDeviceId() || `device_${Date.now()}`;
+        const relay = RelayClient.getInstance();
+        if (relay.isConnected()) {
+          relay.sendControl({
+            type: 'device_register',
+            payload: { publicKey: pubKeyHex, deviceId },
+            messageId: `dev_reg_${Date.now()}`,
+            timestamp: Date.now(),
+          });
+        }
+
         setEnrollmentDone(true);
       }}
       onSkip={undefined}

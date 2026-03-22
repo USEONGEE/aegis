@@ -45,10 +45,8 @@ export function EnrollmentScreen({ onEnrolled, onSkip }: { onEnrolled: () => voi
         throw new Error(err.error || `HTTP ${res.status}`);
       }
 
-      const data = await res.json() as { daemonId: string; userId: string; bound: boolean };
-      Alert.alert('Connected', `Linked to daemon: ${data.daemonId}`, [
-        { text: 'OK', onPress: onEnrolled },
-      ]);
+      await res.json();
+      onEnrolled();
     } catch (err: unknown) {
       Alert.alert('Enrollment Failed', err instanceof Error ? err.message : String(err));
     } finally {
