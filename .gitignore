@@ -28,3 +28,7 @@ build/
 *.tsbuildinfo
 docs/type-dep-graph/
 .docker-data/
+
+# Hackathon competitor analysis (private)
+docs/report/hackathon-competitors/
+packages/app/.expo/

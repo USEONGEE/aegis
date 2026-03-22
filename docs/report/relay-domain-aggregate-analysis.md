@@ -57,7 +57,7 @@ Aggregate Root: `RegistryAdapter` — port (`registry-adapter.ts:94`)
   │  PgRegistry ── (core, extends RegistryAdapter)                   │
   │    Pool(PostgreSQL) 기반 구현                                      │
   │                                                                  │
-  │  PgRegistryOptions ── config ── { databaseUrl }                  │
+  │  PgRegistryOptions ── config ── { connectionString? }            │
   │                                                                  │
   └──────────────────────────────────────────────────────────────────┘
 ```
@@ -104,9 +104,9 @@ Aggregate Root: `QueueAdapter` — port (`queue-adapter.ts:19`)
   └──────────────────────────────────────────────────────────────────┘
 ```
 
-- **QueueAdapter** — 추상 클래스. publish/consume/readRange/setWithTtl/exists/trim/close. 스트림 키 규약: `control:{userId}`, `chat:{userId}:{sessionId}`
+- **QueueAdapter** — 추상 클래스. publish/consume/readRange/setWithTtl/exists/trim/ack/close. 스트림 키 규약: `control:{userId}`, `chat:{userId}:{sessionId}`
 - **StreamEntry** — `{ id, data }`. id는 Redis stream entry ID (timestamp 기반), data는 `{ sender, payload, timestamp, sessionId?, encrypted? }`
-- **RedisQueue** — 2개 ioredis 연결 사용. blockingRedis는 XREAD BLOCK 전용 (head-of-line blocking 방지)
+- **RedisQueue** — 2개 ioredis 연결 사용. blockingRedis는 XREAD BLOCK 전용 (head-of-line blocking 방지). consumer-group 지원: `ensureGroup()`, `consumeGroup()`, `ack()`
 
 ---
 
@@ -121,29 +121,32 @@ Aggregate Root: 함수 집합 (auth.ts — 진입점이 여러 라우트)
   ┌──────────────────────────────────────────────────────────────────┐
   │                                                                  │
   │  ── Daemon 인증 ──                                               │
-  │  POST /daemon/register { daemonId, secret }                      │
+  │  POST /auth/daemon/register { daemonId, secret }                  │
   │    → hashPassword → registry.createDaemon                        │
   │                                                                  │
-  │  POST /daemon/login { daemonId, secret }                         │
+  │  POST /auth/daemon/login { daemonId, secret }                    │
   │    → verifyPassword → signDaemonToken → issueRefreshToken        │
   │                                                                  │
   │  ── App 인증 ──                                                   │
-  │  POST /google { idToken }                                        │
+  │  POST /auth/google { idToken, deviceId? }                        │
   │    → verifyGoogleIdToken → registry.createUser (auto)            │
   │    → signAppToken → issueRefreshToken                            │
   │                                                                  │
   │  ── 공용 ──                                                       │
-  │  POST /refresh { refreshToken }                                  │
+  │  POST /auth/refresh { refreshToken }                             │
   │    → registry.getRefreshToken → rotation + replay detection      │
   │    → signToken(role) → issueRefreshToken (new)                   │
   │                                                                  │
   │  ── Enrollment ──                                                 │
-  │  POST /daemon/enroll (daemon JWT)                                │
+  │  POST /auth/daemon/enroll (daemon JWT)                           │
   │    → generateEnrollmentCode → registry.createEnrollmentCode      │
   │                                                                  │
-  │  POST /enroll/confirm (app JWT)                                  │
+  │  POST /auth/enroll/confirm (app JWT)                             │
   │    → registry.claimEnrollmentCode (atomic)                       │
   │    → registry.bindUser → queue.publish(user_bound)               │
+  │                                                                  │
+  │  POST /auth/daemon/unbind (daemon JWT)                           │
+  │    → registry.unbindUser → queue.publish(user_unbound)           │
   │                                                                  │
   │  JwtPayload ── value ── { sub, role: SubjectRole, deviceId? }    │
   │                                                                  │
@@ -152,7 +155,7 @@ Aggregate Root: 함수 집합 (auth.ts — 진입점이 여러 라우트)
 
 - **signDaemonToken / signAppToken** — JWT 생성. role 필드로 daemon/app 구분
 - **verifyToken** — JWT 검증 + JwtPayload 반환. WS 핸드셰이크에서도 사용
-- **verifyGoogleIdToken** — Google 공개키로 ID token 서명 검증 (issuer, expiry, audience)
+- **verifyGoogleIdToken** — Google 공개키로 ID token 서명 검증 (issuer, expiry, sub). audience 검증 없음
 - **hashPassword / verifyPassword** — SHA-256 + salt + timingSafeEqual
 - **issueRefreshToken** — DB에 저장, rotation 시 이전 토큰 revoke, replay 감지
 
@@ -188,15 +191,18 @@ Aggregate Root: `wsRoutes` 함수 내부 상태 (`ws.ts:49-59`)
   │                                                                  │
   │  ── /ws/app 핸들러 ──                                             │
   │  authenticate → control poller + chat backfill (cursor 기반)     │
-  │  → app→daemon: Redis XADD (v0.4.8: 직접 forward 제거)            │
+  │  → app→daemon: Redis XADD + chat만 WS 직접 forward (v0.5.0)      │
   │  → query: WS 직접 전달 (Redis 미경유, daemon offline 시 에러 응답) │
-  │  → subscribe_chat: 새 세션 발견 시 one-shot backfill              │
+  │  → subscribe_chat: backfill 후 continuous polling 시작 (v0.5.0)   │
   │                                                                  │
   │  ── 보조 함수 ──                                                   │
   │  pollControlForDaemon — per-user XREAD 루프 (sender≠daemon skip) │
   │  pollControlForApp — single-user XREAD 루프 (sender≠app skip)    │
   │    v0.4.8: sender=daemon → WS type='event_stream'으로 변환       │
-  │  backfillChatStream — one-shot XRANGE (오프라인 cron 복구)         │
+  │  backfillChatStream — one-shot XRANGE → lastId 반환 (v0.5.0)     │
+  │  pollChatForApp — per-session readRange+sleep(200) 폴링 (v0.5.0) │
+  │    v0.5.0: XREAD BLOCK → non-blocking readRange 전환             │
+  │    (head-of-line blocking 방지 — Redis 연결 공유 문제 해소)        │
   │  pollDaemonEvents — user_bound/unbound 실시간 반영                │
   │  pushToOfflineApps — 앱 오프라인 시 Expo push notification        │
   │                                                                  │
@@ -207,6 +213,7 @@ Aggregate Root: `wsRoutes` 함수 내부 상태 (`ws.ts:49-59`)
 - **userToDaemon** — 라우팅 핵심 맵. app→daemon 메시지 전달 시 이 맵으로 대상 daemon 결정
 - **appBuckets** — 사용자별 앱 소켓 집합. 다중 디바이스 동시 접속 지원
 - **echo 방지** — poller가 sender 필드를 확인해서 자기가 보낸 메시지 skip
+- **backfill→poll 갭 제거 (v0.5.0)** — `subscribe_chat` 시 backfill이 lastId를 반환하고, 이를 `pollChatForApp`의 initialCursor로 넘겨서 갭 없이 전환. 이전에는 backfill('0')과 poll('$')이 독립적이라 그 사이 메시지 누락 가능
 
 ---
 
@@ -262,7 +269,7 @@ Aggregate Root: `RateLimiter` — core (`rate-limit.ts:30`)
 | **Auth → Queue** | enrollment confirm 시 `queue.publish(daemon-events:{daemonId}, user_bound)` |
 | **Socket → Auth** | WS 인증 시 `verifyToken(JWT)`으로 역할+subject 확인 |
 | **Socket → Registry** | daemon 인증 후 `registry.getUsersByDaemon(daemonId)`로 바인딩된 사용자 로드 |
-| **Socket → Queue** | 영속 채널 메시지 중계: `queue.publish` → poller XREAD (v0.4.8: 직접 forward 제거, Redis 단일 경로). query/query_result는 Redis 미경유 WS 직접 전달 |
+| **Socket → Queue** | 영속 채널 메시지 중계: `queue.publish` → poller. daemon→app은 Redis 단일 경로, app→daemon chat만 Redis+WS 직접 forward 병행 (v0.5.0). query/query_result는 Redis 미경유 WS 직접 전달 |
 | **Socket ← Queue** | per-user control poller가 `queue.consume` (XREAD BLOCK)으로 수신 |
 | **RateLimit → (전체)** | `preHandler` 훅으로 모든 HTTP 라우트에 적용 |
 
@@ -319,9 +326,13 @@ Aggregate Root: `RateLimiter` — core (`rate-limit.ts:30`)
 ┃  "App과 Daemon 사이의 메시지를 어떻게 실시간으로 전달하는가?"               ┃
 ┃  관여 도메인: Socket, Queue                                                 ┃
 ┃                                                                            ┃
-┃  영속 채널 (chat, control, event_stream):                                    ┃
-┃    v0.4.8: Redis XADD → Poller XREAD가 유일한 전달 경로                     ┃
-┃           (직접 forward 제거 — 이중 전달 해소)                                ┃
+┃  영속 채널 (chat, control):                                                  ┃
+┃    v0.4.8: daemon→app 방향은 Redis XADD → Poller가 유일한 전달 경로         ┃
+┃    v0.5.0: app→daemon chat만 Redis XADD + WS 직접 forward 병행              ┃
+┃                                                                            ┃
+┃  event_stream (가상 채널):                                                   ┃
+┃    별도 Redis 스트림 없음. control:{userId}의 sender=daemon 메시지를          ┃
+┃    pollControlForApp가 WS type='event_stream'으로 변환하여 app에 전달        ┃
 ┃                                                                            ┃
 ┃  App→Daemon (control):                                                      ┃
 ┃    app WS ──→ Relay ──→ Redis XADD control:{userId} (sender=app)           ┃
@@ -338,9 +349,15 @@ Aggregate Root: `RateLimiter` — core (`rate-limit.ts:30`)
 ┃    daemon WS('query_result') ──→ Relay ──직접 forward──→ app               ┃
 ┃    daemon 오프라인 시 relay가 error 응답 (평문)                               ┃
 ┃                                                                            ┃
+┃  Chat 양방향:                                                                ┃
+┃    app→daemon: Redis XADD + WS 직접 forward (v0.5.0)                       ┃
+┃    daemon→app: Redis XADD → pollChatForApp (v0.5.0)                        ┃
+┃      v0.5.0: XREAD BLOCK → readRange+sleep(200) non-blocking 전환          ┃
+┃      subscribe_chat 시 backfill → poll 갭 없는 전환 (lastId 기반)           ┃
+┃                                                                            ┃
 ┃  스트림 키:                                                                  ┃
 ┃    control:{userId}           — durable (reconnect resume)                 ┃
-┃    chat:{userId}:{sessionId}  — backfill                                   ┃
+┃    chat:{userId}:{sessionId}  — backfill + continuous poll (v0.5.0)         ┃
 ┃    daemon-events:{daemonId}   — bind/unbind 이벤트                         ┃
 ┃                                                                            ┃
 ┣━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┫
@@ -363,11 +380,12 @@ Aggregate Root: `RateLimiter` — core (`rate-limit.ts:30`)
 ┃    authenticate({ lastStreamId, chatCursors: { s1:'5678-0' } })            ┃
 ┃    → control stream: lastStreamId 이후 resume                              ┃
 ┃    → chat streams: chatCursors의 각 sessionId에 대해 backfill              ┃
-┃      backfillChatStream() → XRANGE (one-shot, max 1000건)                  ┃
+┃      backfillChatStream() → XRANGE (one-shot, max 1000건) → lastId 반환    ┃
+┃    → subscribe_chat 시 backfill(lastId) → pollChatForApp(lastId) 갭 없음   ┃
 ┃                                                                            ┃
 ┃  내구성 정책:                                                               ┃
-┃    control = durable (반드시 replay)                                        ┃
-┃    chat = backfill (요청 시에만, 주로 오프라인 cron 복구용)                  ┃
+┃    control = durable (반드시 replay, XREAD BLOCK)                           ┃
+┃    chat = backfill + continuous poll (v0.5.0, readRange+sleep)             ┃
 ┃                                                                            ┃
 ┣━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┫
 ```
@@ -409,16 +427,16 @@ Daemon 부팅
 ### 시나리오 2: App이 채팅 전송 → Daemon 응답
 
 ```
-App이 채팅 전송
+App이 subscribe_chat(sessionId:'s1') 후 채팅 전송
   → [축B] app WS → { type:'chat', sessionId:'s1', payload:{ text:'...' } }
-    → Relay: Redis XADD chat:{userId}:s1
-    → Daemon: pollControlForDaemon XREAD로 수신
+    → Relay: Redis XADD chat:{userId}:s1 + WS 직접 forward to daemon (v0.5.0)
+    → Daemon: WS 직접 수신
 
 Daemon이 응답 (stream delta)
   → [축B] daemon WS → { type:'chat', userId, sessionId:'s1', payload:{ type:'stream', delta:'...' } }
     → Relay: ownership 검증 (daemon_users)
     → Relay: Redis XADD chat:{userId}:s1
-    → App: pollControlForApp XREAD로 수신
+    → App: pollChatForApp readRange+sleep(200)으로 수신 (v0.5.0)
 ```
 
 ### 시나리오 3: App 오프라인 중 Cron 실행 → 재연결 시 복구
@@ -430,9 +448,11 @@ App 오프라인 상태에서 Daemon의 Cron이 실행
 
 App 재연결
   → [축C] WS authenticate({ chatCursors: { 'cron-session': '0' } })
-    → backfillChatStream(userId, 'cron-session', '0', socket)
+    → backfillChatStream(userId, 'cron-session', '0', socket) → lastId 반환
     → XRANGE chat:{userId}:cron-session '0' '+' COUNT 1000
     → 놓친 cron 결과 메시지를 한 번에 수신
+  → subscribe_chat(sessionId:'cron-session') 시
+    → backfill(lastId) → pollChatForApp(lastId) 갭 없이 전환 (v0.5.0)
 ```
 
 ---
@@ -441,3 +461,5 @@ App 재연결
 **갱신일**: 2026-03-22 KST — v0.4.3 반영 (DeviceType/SubjectRole 추출, Record extends CreateParams, ListItem = Pick\<Record\>)
 **갱신일**: 2026-03-22 KST — v0.4.7 반영 (dead export 정리)
 **갱신일**: 2026-03-22 KST — v0.4.8 반영. Socket 도메인: 직접 forward 제거(Redis 단일 경로), pollControlForApp event_stream 변환, query/query_result WS 직접 전달 추가. 축B 메시지 중계 전면 갱신.
+**갱신일**: 2026-03-23 KST — v0.5.0 반영. backfill→poll 갭 제거, pollChatForApp non-blocking 전환, subscribe_chat continuous polling, 시나리오 2,3 갱신
+**갱신일**: 2026-03-23 KST — Codex 검수 기반 수정. (1) 인증 경로 /auth/ prefix 추가, (2) Google audience 검증 없음 수정, (3) chat 직접 forward 자기모순 해소 (app→daemon chat만 직접 forward 유지 명시), (4) event_stream=가상 채널 (control 변환) 명확화, (5) PgRegistryOptions connectionString 수정, (6) /auth/daemon/unbind 경로 추가, (7) Google deviceId 파라미터 추가, (8) consumer-group 기능 추가

@@ -20,6 +20,12 @@
 | 2026-03-22 | daemon-architecture-one-pager.md | v0.4.8 | 제어채널 축 전면 수정(ControlResult→CancelEventPayload), 통신채널 맵 5채널 구조로 갱신, query 채널+QueryFacadePort 추가, 직접 forward 제거, 알려진 문제 3건 해결됨 |
 | 2026-03-22 | relay-domain-aggregate-analysis.md | v0.4.8 | Socket 도메인: 직접 forward 제거+event_stream 변환+query 라우팅. 축B 메시지 중계 전면 갱신. 시나리오2 Redis 단일 경로 반영 |
 | 2026-03-22 | app-architecture-one-pager.md | v0.4.8 | RelayChannel 5종, query()+pendingQueries, event_stream top-level 분리, CancelCompleted/CancelFailed 수신 |
+| 2026-03-23 | daemon-architecture-one-pager.md | v0.5.3, v0.5.4 | AI 클라이언트 재작성 (OpenAI SDK → raw fetch OpenResponses API, 어댑터 패턴 4함수), wallet address 컬럼 제거, config socketPath 환경변수 |
+| 2026-03-23 | relay-domain-aggregate-analysis.md | v0.5.0 | backfill→poll 갭 제거 (lastId 기반 전환), pollChatForApp XREAD BLOCK → readRange+sleep(200), subscribe_chat continuous polling, 시나리오 2,3 갱신 |
+| 2026-03-23 | app-architecture-one-pager.md | v0.5.0 | sendChat(sessionId, text) 시그니처 변경 (RelayChatInput), subscribedSessions Set (중복 subscribe 방지), 축1/시나리오1 갱신 |
+| 2026-03-23 | daemon-architecture-one-pager.md | Codex 검수 | 도구 12→15개, OpenClawClient chat()만 존재, tool-call 루프→OpenClaw 내부 관리+ToolApiServer HTTP 콜백, chat 하위타입 4종, 19개 파일, facade nullable, ai-tool-schema.ts 추가 |
+| 2026-03-23 | relay-domain-aggregate-analysis.md | Codex 검수 | 인증 경로 /auth/ prefix, audience→없음, chat 직접 forward 자기모순 해소, event_stream=가상채널 명확화, PgRegistryOptions, unbind/deviceId/consumer-group 추가 |
+| 2026-03-23 | app-architecture-one-pager.md | Codex 검수 | enum→literal union, SignedApproval flat, count→messageCount, typing/done UI only, event_stream 가상채널, 14→15종, ApprovalRequest 필드, forPolicyReject, targetHash 파생, optimistic update |
 
 ---
 

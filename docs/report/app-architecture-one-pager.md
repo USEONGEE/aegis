@@ -49,11 +49,11 @@ Aggregate Root: `SignedApprovalBuilder` — class (core/approval)
 
 | 타입 | 역할 | 위치 | 설명 |
 |------|------|------|------|
-| `ApprovalType` | enum | `core/approval/types.ts:15` | `'tx' \| 'policy' \| 'policy_reject' \| 'device_revoke' \| 'wallet_create' \| 'wallet_delete'` |
-| `ApprovalRequest` | input | `core/approval/types.ts:59` | daemon이 보내는 승인 요청. requestId, type, chainId, targetHash, accountIndex, expiresAt |
-| `SignedApproval` | output | `core/approval/types.ts:33` | 서명된 승인 봉투. payload 필드 + `sig` (Ed25519 hex) |
+| `ApprovalType` | literal union | `core/approval/types.ts:15` | `'tx' \| 'policy' \| 'policy_reject' \| 'device_revoke' \| 'wallet_create' \| 'wallet_delete'` |
+| `ApprovalRequest` | input | `core/approval/types.ts:59` | daemon이 보내는 승인 요청. requestId, type, chainId, targetHash, accountIndex, expiresAt, content, policyVersion, createdAt. variant별: policies (policy), targetPublicKey (device_revoke) |
+| `SignedApproval` | output | `core/approval/types.ts:33` | 서명된 승인 봉투 (flat envelope). 모든 필드가 최상위 + `sig` (Ed25519 hex). `SignedApprovalPayload`는 서명 입력용 별도 타입 |
 | `SignedApprovalPayload` | value | `core/approval/types.ts:78` | sig 제외 전체 필드. canonical JSON 직렬화 → SHA-256 → Ed25519 서명 |
-| `SignedApprovalBuilder` | core | `core/approval/SignedApprovalBuilder.ts:100` | type별 빌더 메서드 (forTx, forPolicy, forDeviceRevoke, forWallet). nonce 자동 증가 |
+| `SignedApprovalBuilder` | core | `core/approval/SignedApprovalBuilder.ts:100` | type별 빌더 메서드 (forTx, forPolicy, forPolicyReject, forDeviceRevoke, forWallet). nonce 자동 증가. forDeviceRevoke는 targetPublicKey → SHA-256 → targetHash 파생 |
 | `TxApprovalState` | output (DU) | `shared/tx/TxApprovalContext.tsx:19` | 상태 머신 DU. idle→pending→signing→success\|error |
 | `TxApprovalContextValue` | port | `shared/tx/TxApprovalContext.tsx:32` | React Context. `requestApproval(req) → Promise<{txHash}>`, `reject()` |
 
@@ -62,7 +62,7 @@ Aggregate Root: `SignedApprovalBuilder` — class (core/approval)
 > "사용자/cron 메시지를 세션 단위로 관리하고, AI 스트리밍 응답을 실시간 버퍼링한다"
 
 Aggregate Root: `ChatMessage` — type (stores/useChatStore)
-생애주기: user input → queued → active → streaming → done
+생애주기: user input → queued → active → done (streaming 상태 없음, messageState는 idle/queued/active 3종)
 
 ```
   ┌──────────────────────────────────────────────────────────────────┐
@@ -71,7 +71,7 @@ Aggregate Root: `ChatMessage` — type (stores/useChatStore)
   │    (core, DU)     | StatusChatMessage                            │
   │      depth 1          (depth 0)       (depth 0)    (depth 0)     │
   │                                                                  │
-  │   ChatSession ──→ { id, title, lastMessageAt, source, count }    │
+  │   ChatSession ──→ { id, title, lastMessageAt, source, messageCount }│
   │    (value, depth 0)                                              │
   │                                                                  │
   │   messageState: 'idle' | 'queued' | 'active' (transient enum)   │
@@ -137,12 +137,17 @@ Aggregate Root: `RelayClient` — class (core/relay)
   │   pendingQueries: Map<requestId, {resolve,reject}>               │
   │   query<T>(type, params, timeout?) → Promise<T>                  │
   │                                                                  │
+  │   v0.5.0 변경:                                                    │
+  │   sendChat(sessionId, text) — RelayChatInput 프로토콜 타입 사용   │
+  │   subscribedSessions: Set<string> — 중복 subscribe_chat 방지     │
+  │   (sendChat 시 자동으로 subscribe_chat 전송, 이미 구독 중이면 skip)│
+  │                                                                  │
   └──────────────────────────────────────────────────────────────────┘
 ```
 
 | 타입 | 역할 | 위치 | 설명 |
 |------|------|------|------|
-| `RelayClient` | core | `RelayClient.ts:49` | Singleton. WebSocket + exponential backoff + heartbeat. sendChat/sendControl/sendApproval/query(). v0.4.8: pendingQueries(requestId→Promise), query_result 수신 핸들러 |
+| `RelayClient` | core | `RelayClient.ts:49` | Singleton. WebSocket + exponential backoff + heartbeat. sendChat/sendControl/sendApproval/query(). v0.4.8: pendingQueries(requestId→Promise), query_result 수신 핸들러. v0.5.0: sendChat(sessionId, text) — `RelayChatInput` 프로토콜 타입 사용, subscribedSessions Set으로 중복 subscribe_chat 방지 |
 | `ControlEnvelope` | value | `RelayClient.ts:29` | 제어 메시지 래퍼. type으로 메시지 종류 구분 |
 | `EncryptedPayload` | value | `RelayClient.ts:36` | E2E 암호화된 payload. sessionKey 설정 시 자동 적용 |
 | `RelayMessage` | output | `RelayClient.ts:21` | 수신 메시지 정규화. channel + payload + cursor 메타 |
@@ -238,16 +243,20 @@ Aggregate Root: `PolicyGroup` — interface (stores/usePolicyStore)
 ┃  "사용자가 보낸 메시지에 AI가 스트리밍으로 응답하는가?"               ┃
 ┃  관여 도메인: Chat, Relay                                          ┃
 ┃                                                                    ┃
-┃  User Input ──→ RelayClient.sendChat() ──→ daemon/OpenClaw         ┃
-┃      │              (WebSocket)               │                    ┃
+┃  User Input ──→ RelayClient.sendChat(sessionId, text) ──→ daemon   ┃
+┃      │         (auto subscribe_chat + RelayChatInput)  │           ┃
 ┃      │                                        ▼                    ┃
 ┃      │         ChatDetailScreen.handler ←── streaming events       ┃
 ┃      │              │                                              ┃
-┃      │              ├─ typing   → isTyping=true                    ┃
+┃      │              ├─ typing   → isTyping=true (UI only, 메시지 미생성)┃
 ┃      │              ├─ stream   → buffer 누적 → addMessage()       ┃
 ┃      │              ├─ tool_start/done → ToolChatMessage           ┃
 ┃      │              ├─ error    → StatusChatMessage                ┃
-┃      │              └─ done     → 스트림 완료, 상태 초기화           ┃
+┃      │              └─ done     → 완료, 상태 idle (UI only, 메시지 미생성)┃
+┃      │                                                             ┃
+┃  sendMessage():                                                    ┃
+┃    로컬에 사용자 메시지 먼저 추가 (optimistic update)                ┃
+┃    → sendChat() 실패 시 StatusChatMessage 추가                      ┃
 ┃      │                                                             ┃
 ┃  messageState = 'idle' | 'queued' | 'active'                       ┃
 ┃                                                                    ┃
@@ -316,11 +325,12 @@ Aggregate Root: `PolicyGroup` — interface (stores/usePolicyStore)
 ┃  "daemon에서 발생한 이벤트가 앱 화면에 실시간 반영되는가?"            ┃
 ┃  관여 도메인: Relay, Activity, Chat, Policy                        ┃
 ┃                                                                    ┃
-┃  v0.4.8: event_stream은 top-level 채널 (control에서 분리)            ┃
+┃  v0.4.8: event_stream은 가상 채널 — Relay가 control 스트림의         ┃
+┃  sender=daemon 메시지를 WS type='event_stream'으로 변환하여 전달     ┃
 ┃                                                                    ┃
 ┃  daemon ──→ Relay ──→ RelayClient ──→ handler 분기                  ┃
 ┃                    (event_stream ch)    │                           ┃
-┃                                        ├─ WDK 이벤트 (14종)        ┃
+┃                                        ├─ WDK 이벤트 (15종)        ┃
 ┃                                        │    ├─ ActivityStore 적재   ┃
 ┃                                        │    ├─ Dashboard 갱신       ┃
 ┃                                        │    └─ Settings 갱신        ┃
@@ -349,9 +359,9 @@ Aggregate Root: `PolicyGroup` — interface (stores/usePolicyStore)
 | 컴포넌트 | 위치 | 도메인 | 타입역할 | 설명 | 의존 |
 |----------|------|--------|----------|------|------|
 | `RelayClient` | `core/relay/RelayClient.ts:49` | Relay | core | Singleton. WS + backoff reconnect + heartbeat + E2E encrypt. 커서 기반 재연결 복구 | ControlEnvelope, EncryptedPayload |
-| `ActivityEventType` | `useActivityStore.ts:8` | Activity | enum | 15종 WDK 이벤트 리터럴 유니온 | leaf |
+| `ActivityEventType` | `useActivityStore.ts:8` | Activity | literal union | 15종 WDK 이벤트 string literal union | leaf |
 | `ActivityEvent` | `useActivityStore.ts:25` | Activity | core | id, type, chainId, summary, details, timestamp | ActivityEventType |
-| `ActivityFilter` | `useActivityStore.ts:34` | Activity | enum | `ActivityEventType \| 'all'`. 스크린 필터 | ActivityEventType |
+| `ActivityFilter` | `useActivityStore.ts:34` | Activity | literal union | `ActivityEventType \| 'all'`. 스크린 필터 | ActivityEventType |
 | `useActivityStore` | `useActivityStore.ts:53` | Activity | port | zustand. 최대 500개 이벤트. 타입별 필터링 | ActivityEvent |
 | `ActivityScreen` | `domains/activity/screens/ActivityScreen.tsx:37` | Activity | — | 타임라인 UI. 필터 칩 + EventCard. 색상/아이콘 타입별 매핑 | useActivityStore |
 | `DashboardScreen` | `domains/dashboard/screens/DashboardScreen.tsx:40` | Relay | — | 포트폴리오 뷰. event_stream에서 balance/position 갱신 | RelayClient |
@@ -373,7 +383,7 @@ Aggregate Root: `PolicyGroup` — interface (stores/usePolicyStore)
 
 ```
   사용자가 ChatDetailScreen에서 "Swap 100 USDC to ETH"
-    → [AI 대화] sendChat() → Relay → daemon → OpenClaw
+    → [AI 대화] sendChat(sessionId, text) → auto subscribe_chat → Relay → daemon → OpenClaw
       (Chat: idle → queued → active → streaming)
     → AI가 tool_call로 tx intent 생성
     → daemon 정책 평가 → REQUIRE_APPROVAL
@@ -428,3 +438,5 @@ Aggregate Root: `PolicyGroup` — interface (stores/usePolicyStore)
 
 **작성일**: 2026-03-22 KST
 **갱신일**: 2026-03-22 KST — v0.4.8 반영. RelayChannel 5종 확장, query() 메서드 + pendingQueries, event_stream top-level 채널 분리, CancelCompleted/CancelFailed 수신, cancel_queued/cancel_active→event_stream 채널 전환
+**갱신일**: 2026-03-23 KST — v0.5.0 반영. sendChat 시그니처 변경, subscribedSessions Set 추가, 축1/시나리오1 갱신
+**갱신일**: 2026-03-23 KST — Codex 검수 기반 수정. (1) ApprovalType/ActivityEventType/ActivityFilter enum→literal union, (2) SignedApproval flat envelope 명시, (3) ChatSession count→messageCount, (4) typing/done UI only 명시, (5) event_stream=가상 채널 (control 변환) 명확화, (6) WDK 이벤트 14→15종, (7) ApprovalRequest 누락 필드 추가 (content/policyVersion/createdAt/policies/targetPublicKey), (8) forPolicyReject 빌더 추가, (9) forDeviceRevoke targetHash 파생 규칙, (10) sendMessage optimistic update 추가

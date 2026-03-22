@@ -1,15 +1,17 @@
 # daemon 아키텍처 One-Pager
 
-> 사용자 메시지가 들어오면 AI와 tool call을 반복하여 온체인 작업을 실행하고, app의 서명된 승인을 WDK facade로 중계하는 오케스트레이션 호스트
+> 사용자 메시지가 들어오면 OpenClaw에 텍스트를 전달하고, OpenClaw이 tool-call 루프를 내부 실행하며 HTTP 콜백으로 도구를 호출하고, app의 서명된 승인을 WDK facade로 중계하는 오케스트레이션 호스트
 
 ---
 
 ## 개요
 
 daemon은 WDK-APP 모노레포의 오케스트레이션 계층으로, AI(OpenClaw) ↔ WDK(서명 엔진) ↔ Relay(앱 통신) 사이에서 메시지를 중계한다.
-타입 의존성 그래프 기준 41 nodes, 50 edges, 17개 소스 파일로 구성.
+19개 소스 파일로 구성.
 
 v0.4.6에서 store 경계 분리 (WDK facade 경유 + DaemonStore 자체 소유), v0.4.7에서 dead export 정리, v0.4.8에서 WS 채널 재설계 (control 단방향화 + event_stream 승격 + query 채널 추가 + protocol 타입 강제).
+v0.5.3에서 AI 클라이언트 아키텍처 전면 변경 — daemon이 tool-call 루프를 직접 실행하던 구조에서, **OpenClaw이 tool-call 루프를 내부 관리**하고 daemon은 텍스트만 보내고 텍스트만 받는 구조로 전환. 도구 실행은 OpenClaw이 daemon의 `ToolApiServer` HTTP 엔드포인트(`POST /api/tools/:name`)로 콜백.
+v0.5.4에서 wallet address 컬럼 제거 — derivation SSOT 단일화.
 
 ---
 
@@ -17,27 +19,60 @@ v0.4.6에서 store 경계 분리 (WDK facade 경유 + DaemonStore 자체 소유)
 
 ### 1. 도구 (Tool)
 
-> "AI에게 노출되는 12개 function calling 도구와 그 실행 결과"
+> "OpenClaw 플러그인이 HTTP 콜백으로 호출하는 15개 도구와 그 실행 결과"
 
 Aggregate Root: `executeToolCall()` — `tool-surface.ts`
-생애주기: tool_call 수신 → args 파싱 → 실행 → result 반환
+생애주기: OpenClaw HTTP 콜백 수신 → args 파싱 → 실행 → result 반환
 
 ```
-  ToolDefinition[] ──→ AI(OpenClaw) ──→ tool_call
-   (schema)               │
-                           ▼
+  ai-tool-schema.ts ──→ OpenClaw(플러그인 등록)
+   (15개 도구 스키마)        │
+                              ▼ tool 실행 필요 시
+                    ToolApiServer (POST /api/tools/:name)
+                              │
+                              ▼
                     executeToolCall(name, args, ctx)
-                           │
-          ┌────────────────┼────────────────┐
-          ▼                ▼                ▼
-    sendTransaction    policyList      registerCron
-    transfer           policyPending   listCrons
-    getBalance         policyRequest   removeCron
-    signTransaction    listRejections
-                       listPolicyVersions
+                              │
+          ┌───────────────────┼────────────────────┐
+          ▼                   ▼                    ▼
+    sendTransaction       policyList           registerCron
+    transfer              policyPending        listCrons
+    getBalance            policyRequest        removeCron
+    signTransaction       listRejections       kittenFetch
+                          listPolicyVersions   kittenMint
+                                               kittenBurn
 
   AnyToolResult = SendTransactionResult | TransferResult | ... | ToolErrorResult
 ```
+
+**ToolApiServer** (v0.5.3 신규 — `tool-api-server.ts`):
+- HTTP 서버 (`0.0.0.0:{toolApiPort}`, 기본 18790)
+- `POST /api/tools/:name` — OpenClaw 플러그인이 도구 실행 시 콜백
+- Bearer token 인증 (`TOOL_API_TOKEN`)
+- 요청: `{ args: {...} }` → `executeToolCall(name, args, ctx)` → 응답: `{ ok, result }`
+
+**AI 클라이언트 (v0.5.3 전면 변경 — `openclaw-client.ts`):**
+
+```
+  OpenClawClient { chat(userId, sessionId, text) → Promise<string | null> }
+                          │
+                          ▼
+                    fetch('/v1/responses')
+                    body: { model: 'openclaw:daemon', input: text, user: userId:sessionId }
+                          │
+                          ▼
+                    ResponsesResult → output_text 추출 → string | null 반환
+```
+
+핵심 아키텍처 변경: **daemon은 tool-call 루프를 실행하지 않는다.** OpenClaw이 내부에서 tool-call 루프를 관리하고, 도구 실행이 필요하면 daemon의 `ToolApiServer`를 HTTP로 콜백한다. daemon은 텍스트를 보내고 텍스트만 받는다.
+
+| 구성요소 | 이전 (v0.4.x) | 현재 (v0.5.3+) |
+|---------|-------------|---------------|
+| AI 클라이언트 | OpenAI SDK, ChatMessage[], ToolDefinition[] | raw fetch, 텍스트 in/out |
+| tool-call 루프 | daemon 내부 (`tool-call-loop.ts`) | **OpenClaw 내부** (daemon에 없음) |
+| 도구 실행 | daemon이 직접 호출 | OpenClaw → `ToolApiServer` HTTP 콜백 |
+| streaming | SSE delta → relay 전달 | 없음 (최종 텍스트만 반환) |
+| 도구 스키마 | daemon이 AI에 전달 | `ai-tool-schema.ts`에 정의, OpenClaw 플러그인에 등록 |
 
 **v0.4.6 변경 — store 접근 패턴:**
 
@@ -49,21 +84,22 @@ Aggregate Root: `executeToolCall()` — `tool-surface.ts`
 | registerCron, listCrons, removeCron | daemon 자체 | store 직접 | **DaemonStore** 직접 |
 | getBalance | WDK | GuardedAccount | 동일 |
 
-**ToolExecutionContext (v0.4.6):**
+**ToolExecutionContext (v0.4.6, v0.5.3 수정):**
 ```ts
 {
-  facade: WDKInstance & ToolFacadePort  // WDK facade 경유
-  daemonStore: DaemonStore             // cron만 직접 접근
+  facade: (WDKInstance & ToolFacadePort) | null  // nullable — seed 미설정 시 null, fail-fast
+  daemonStore: DaemonStore                      // cron만 직접 접근
   logger: Logger
 }
 ```
+`facade`가 null이면 facade 필요 도구(tx/정책 계열)는 즉시 에러 반환. cron/kitten 계열은 facade 불필요.
 
 ### 2. 메시지 (Message)
 
 > "세션별 FIFO 큐로 사용자/cron 메시지를 순차 처리하는 구조"
 
 Aggregate Root: `MessageQueueManager` — `message-queue.ts`
-생애주기: queued → processing → done | cancelled | aborted
+생애주기: queued → active → done | cancelled (큐/active 여부로 관리, 명시적 상태 머신 없음)
 
 ```
   handleChatMessage() ──→ [MessageQueueManager]
@@ -130,7 +166,8 @@ daemon은 journal에 직접 접근하지 않음. WDK middleware가 내부에서 
 ```
 
 - **Relay → Message**: app 메시지 수신 → 큐에 enqueue
-- **Message → Tool**: 큐에서 dequeue → AI tool-call 루프 → executeToolCall()
+- **Message → OpenClaw**: 큐에서 dequeue → `openclawClient.chat(text)` → OpenClaw이 tool-call 루프 관리
+- **OpenClaw → Tool**: OpenClaw 플러그인이 `ToolApiServer POST /api/tools/:name`으로 콜백 → `executeToolCall()`
 - **Tool → WDK facade**: tx 실행, 정책 조회, 승인 요청 (store 직접 접근 없음)
 - **Tool → DaemonStore**: cron CRUD만 직접 접근
 - **Cron → DaemonStore**: 영속 + tick 관리
@@ -142,11 +179,11 @@ daemon은 journal에 직접 접근하지 않음. WDK middleware가 내부에서 
 
 ```
   ┌──────────────────┐  ┌──────────────────┐  ┌──────────────────┐
-  │ 1. AI 대화 루프   │  │ 2. 제어 채널      │  │ 3. 자동화 인프라  │
-  │"메시지→AI→도구    │  │"서명된 승인을     │  │"cron 실행 +      │
-  │ 반복→최종 답변"   │  │ facade로 위임"    │  │ admin 상태 노출"  │
-  │[Tool+Message     │  │[Relay+WDK facade]│  │[Cron+DaemonStore]│
-  │    +Relay]        │  │                  │  │                  │
+  │ 1. AI 대화        │  │ 2. 제어 채널      │  │ 3. 자동화 인프라  │
+  │"텍스트→OpenClaw   │  │"서명된 승인을     │  │"cron 실행 +      │
+  │ →최종 답변"       │  │ facade로 위임"    │  │ admin 상태 노출"  │
+  │[Message+Relay    │  │[Relay+WDK facade]│  │[Cron+DaemonStore]│
+  │ +OpenClaw+Tool]  │  │                  │  │                  │
   └────────┬─────────┘  └────────┬─────────┘  └────────┬─────────┘
            │                     │                      │
            ▼                     ▼                      ▼
@@ -241,15 +278,16 @@ App ←──WS('query_result')── Relay ←──직접 forward── Daemon
 | `query` | app → daemon 단방향 | WS 직접 전달 | (없음) | 데이터 조회 요청 (4종) |
 | `query_result` | daemon → app 단방향 | WS 직접 전달 | (없음) | 조회 응답 (ok\|error) |
 
-#### chat 하위 타입 상세
+#### chat 하위 타입 상세 (v0.5.3 — streaming 제거)
 
 | chat 하위 타입 | 내용 | 주요 데이터 |
 |---|---|---|
-| `typing` | 처리 시작 표시 | userId, sessionId |
-| `stream` | AI 응답 실시간 delta | delta(토큰), source(user/cron) |
-| `tool_start` | tool 실행 시작 | toolName, toolCallId |
-| `tool_done` | tool 실행 완료 | toolName, toolCallId, status |
-| `done` | 최종 완료 | content, toolResults[], iterations |
+| `typing` | 처리 시작 표시 (cron은 skip) | userId, sessionId |
+| `done` | 최종 완료 | content, toolResults: [], iterations: 1, source |
+| `error` | 처리 실패 | error(메시지), source |
+| `cancelled` | 취소됨 | source |
+
+v0.5.3 이전에 있던 `stream`, `tool_start`, `tool_done`은 **삭제됨**. OpenClaw이 tool-call 루프를 내부 관리하므로 daemon은 중간 이벤트를 발생시키지 않는다.
 
 #### event_stream 이벤트 (v0.4.8: AnyStreamEvent)
 
@@ -275,7 +313,7 @@ App ←──WS('query_result')── Relay ←──직접 forward── Daemon
 | policyList | StoredPolicy[] | loadPolicy() |
 | pendingApprovals | PendingApprovalRequest[] | getPendingApprovals() |
 | signerList | StoredSigner[] | listSigners() |
-| walletList | StoredWallet[] | listWallets() |
+| walletList | StoredWallet[] (v0.5.4: address 필드 제거, derivation SSOT) | listWallets() |
 
 #### v0.4.8에서 해결된 이슈
 
@@ -290,11 +328,14 @@ App ←──WS('query_result')── Relay ←──직접 forward── Daemon
 **시나리오 1: 사용자가 tx 실행 요청 (happy path)**
 
 app이 채팅 메시지 전송
-  → [AI 대화 루프] Relay 수신 → MessageQueue enqueue → dequeue
-  → OpenClaw에 메시지 전달 → AI가 `sendTransaction` tool_call 반환
-  → [Tool] GuardedAccount.sendTransaction() → WDK 내부에서 journal dedup + 정책 ALLOW → tx broadcast
-  → OpenClaw에 tool result 전달 → AI가 최종 답변 생성
-  → Relay로 "done" + tool results 전송
+  → [AI 대화] Relay 수신 → MessageQueue enqueue → dequeue
+  → `openclawClient.chat(userId, sessionId, text)` → OpenClaw `/v1/responses`에 텍스트 전달
+  → OpenClaw 내부에서 tool-call 루프 실행:
+    → OpenClaw이 `sendTransaction` tool 필요 판단 → daemon `ToolApiServer POST /api/tools/sendTransaction` 콜백
+    → [Tool] executeToolCall() → GuardedAccount.sendTransaction() → WDK 내부에서 journal dedup + 정책 ALLOW → tx broadcast
+    → tool result를 OpenClaw에 반환 → AI가 최종 답변 생성
+  → daemon은 최종 텍스트만 수신
+  → Relay로 "done" 전송 (toolResults: [], iterations: 1)
 
 **시나리오 2: AI가 새 정책을 요청하고 사용자가 승인**
 
@@ -311,9 +352,9 @@ AI가 `policyRequest` tool_call → facade.createApprovalRequest('policy')
 CronScheduler.tick() (DaemonStore에서 cron 로드)
   → "check my AAVE positions" cron이 due
   → CronDispatch callback → _processChatDirect()
-  → [AI 대화 루프] OpenClaw에 프롬프트 전달 → AI가 getBalance tool_call
-  → GuardedAccount로 잔액 조회 → AI가 분석 결과 생성
-  → Relay로 결과 전송 (source: 'cron')
+  → [AI 대화] `openclawClient.chat()` → OpenClaw 내부에서 getBalance tool 콜백 → 잔액 조회 → 분석 결과 생성
+  → daemon은 최종 텍스트만 수신
+  → Relay로 "done" 전송 (source: 'cron')
 
 ---
 
@@ -345,3 +386,5 @@ facade 전체를 넘기지 않고 port로 좁힘 → 의존 범위 명확.
 **작성일**: 2026-03-22 KST
 **갱신일**: 2026-03-22 KST — v0.4.6 store 경계 분리 + v0.4.7 dead export 정리 반영
 **갱신일**: 2026-03-22 KST — v0.4.8 WS 채널 재설계 반영. control 단방향화, ControlResult/ControlEvent 삭제, event_stream top-level 승격, query 채널 4종 추가, QueryFacadePort 추가, 직접 forward 제거(Redis 단일 경로), 통신 채널 맵 전면 갱신, 알려진 문제 3건 "해결됨"
+**갱신일**: 2026-03-23 KST — v0.5.3 AI 클라이언트 재작성 반영 (OpenAI SDK Chat Completions → raw fetch OpenResponses API). v0.5.4 wallet address 컬럼 제거 반영. config socketPath 환경변수 지원
+**갱신일**: 2026-03-23 KST — Codex 검수 기반 전면 수정. (1) 도구 12→15개 (kittenFetch/Mint/Burn), (2) OpenClawClient chat()만 존재 (chatStream/어댑터 함수 삭제), (3) tool-call 루프가 OpenClaw 내부 관리로 이전 — ToolApiServer HTTP 콜백 구조 문서화, (4) chat 하위 타입 4종 (stream/tool_start/tool_done 삭제), (5) 19개 소스 파일, (6) facade nullable, (7) ai-tool-schema.ts/ToolApiServer/admin enroll 명령 추가

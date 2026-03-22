@@ -1,5 +1,24 @@
 # Changelog
 
+## v0.5.6 - Portfolio Enso Pricing (2026-03-23)
+
+- **Token Registry**: HypurrQuant_FE에서 999체인(Hyperliquid EVM) 토큰 70+개 레지스트리 포팅 (`daemon/src/token/`)
+- **Price Service**: Enso Finance API provider 포팅 — pair-cache(5분 TTL), stablecoin fallback, kHYPE→WHYPE alias, in-flight dedupe (`daemon/src/price/`)
+- **Portfolio Tool**: `getPortfolio` query 추가 — RPC로 ERC-20 잔액 조회 + Enso USD 가격 합산. `Promise.allSettled`로 부분 실패 격리
+- **DashboardScreen 연결**: AI 채팅 기반 새로고침 → query 채널 직접 조회로 전환. mount 시 자동 로드 + pull-to-refresh
+- **Protocol 확장**: `QueryType`에 `getPortfolio` 추가, `QueryMessage` DU에 `{ accountIndex }` 파라미터 variant 추가
+
+### 수치
+- daemon tsc 0 errors, 58 tests pass, manifest 20 tests pass
+- 8 new files + 3 modified files
+
+## v0.5.5 - OpenClaw Plugin Integration (2026-03-23)
+
+- **Daemon HTTP Tool API**: OpenClaw plugin이 WDK 도구를 호출할 수 있는 HTTP 서버 (`/api/tools/:name`). Bearer token 인증
+- **OpenClaw Plugin**: `definePluginEntry` + `api.registerTool()` 패턴으로 15종 WDK 도구를 OpenClaw에 등록
+- **Chat Handler 단순화**: Anthropic SDK 직접 호출 → OpenClaw `/v1/responses` API 전환. 세션 히스토리/모델 라우팅을 OpenClaw에 위임
+- **Docker 구성**: OpenClaw + Daemon 컨테이너 구성 (Dockerfile, entrypoint, docker-compose)
+
 ## v0.5.4 - Wallet Address SSOT (2026-03-23)
 
 - **wallets.address 컬럼 제거**: 항상 빈 문자열로 저장되던 dead column 삭제. 주소는 `wdk.getAccount(chain, index).getAddress()` derivation이 유일한 SSOT
