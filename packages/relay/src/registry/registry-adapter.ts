@@ -1,41 +1,9 @@
+import type { DeviceType, SubjectRole } from './actor-types.js'
+export type { DeviceType, SubjectRole } from './actor-types.js'
+
 // ---------------------------------------------------------------------------
-// Types
+// Create Params (Input DTOs — depth 0 leaf)
 // ---------------------------------------------------------------------------
-
-export interface UserRecord {
-  id: string
-  passwordHash: string | null
-  createdAt: Date
-}
-
-export interface DeviceRecord {
-  id: string
-  userId: string
-  type: 'daemon' | 'app'
-  pushToken: string | null
-  lastSeenAt: Date | null
-  createdAt: Date
-}
-
-export interface DeviceListItem {
-  id: string
-  type: string
-  pushToken: string | null
-  lastSeenAt: Date | null
-}
-
-export interface SessionRecord {
-  id: string
-  userId: string
-  metadata: Record<string, unknown> | null
-  createdAt: Date
-}
-
-export interface SessionListItem {
-  id: string
-  metadata: Record<string, unknown> | null
-  createdAt: Date
-}
 
 export interface CreateUserParams {
   id: string
@@ -45,7 +13,7 @@ export interface CreateUserParams {
 export interface CreateDeviceParams {
   id: string
   userId: string
-  type: 'daemon' | 'app'
+  type: DeviceType
   pushToken: string | null
 }
 
@@ -55,44 +23,22 @@ export interface CreateSessionParams {
   metadata: Record<string, unknown> | null
 }
 
-export interface DaemonRecord {
-  id: string
-  secretHash: string
-  createdAt: Date
-}
-
 export interface CreateDaemonParams {
   id: string
   secretHash: string
 }
 
-export interface DaemonUserRecord {
+export interface CreateDaemonUserParams {
   daemonId: string
   userId: string
-  boundAt: Date
-}
-
-export interface RefreshTokenRecord {
-  id: string
-  subjectId: string
-  role: 'daemon' | 'app'
-  deviceId: string | null
-  expiresAt: Date
-  createdAt: Date
-  revokedAt: Date | null
 }
 
 export interface CreateRefreshTokenParams {
   id: string
   subjectId: string
-  role: 'daemon' | 'app'
+  role: SubjectRole
   deviceId: string | null
   expiresAt: Date
-}
-
-export interface CreateDaemonUserParams {
-  daemonId: string
-  userId: string
 }
 
 export interface CreateEnrollmentCodeParams {
@@ -101,12 +47,51 @@ export interface CreateEnrollmentCodeParams {
   expiresAt: Date
 }
 
-export interface EnrollmentCodeRecord {
-  code: string
-  daemonId: string
-  expiresAt: Date
+// ---------------------------------------------------------------------------
+// Records (Stored types — depth 1, extends CreateParams)
+// ---------------------------------------------------------------------------
+
+export interface UserRecord extends CreateUserParams {
+  createdAt: Date
+}
+
+export interface DeviceRecord extends CreateDeviceParams {
+  lastSeenAt: Date | null
+  createdAt: Date
+}
+
+export interface SessionRecord extends CreateSessionParams {
+  createdAt: Date
+}
+
+export interface DaemonRecord extends CreateDaemonParams {
+  createdAt: Date
+}
+
+export interface DaemonUserRecord extends CreateDaemonUserParams {
+  boundAt: Date
+}
+
+export interface RefreshTokenRecord extends CreateRefreshTokenParams {
+  createdAt: Date
+  revokedAt: Date | null
+}
+
+export interface EnrollmentCodeRecord extends CreateEnrollmentCodeParams {
   usedAt: Date | null
 }
+
+// ---------------------------------------------------------------------------
+// List Items (read projections — depth 1, Pick from Record)
+// ---------------------------------------------------------------------------
+
+export type DeviceListItem = Pick<DeviceRecord, 'id' | 'type' | 'pushToken' | 'lastSeenAt'>
+
+export type SessionListItem = Pick<SessionRecord, 'id' | 'metadata' | 'createdAt'>
+
+// ---------------------------------------------------------------------------
+// Abstract RegistryAdapter
+// ---------------------------------------------------------------------------
 
 /**
  * Abstract RegistryAdapter interface.
@@ -122,7 +107,7 @@ export abstract class RegistryAdapter {
 
   abstract createUser (params: CreateUserParams): Promise<UserRecord>
 
-  abstract getUser (id: string): Promise<(UserRecord & { passwordHash: string }) | null>
+  abstract getUser (id: string): Promise<UserRecord | null>
 
   /* ------------------------------------------------------------------
    * Devices
@@ -154,7 +139,7 @@ export abstract class RegistryAdapter {
 
   abstract createDaemon (params: CreateDaemonParams): Promise<DaemonRecord>
 
-  abstract getDaemon (id: string): Promise<(DaemonRecord & { secretHash: string }) | null>
+  abstract getDaemon (id: string): Promise<DaemonRecord | null>
 
   /* ------------------------------------------------------------------
    * Daemon-User Binding
@@ -178,7 +163,7 @@ export abstract class RegistryAdapter {
 
   abstract revokeRefreshToken (id: string): Promise<void>
 
-  abstract revokeAllRefreshTokens (subjectId: string, role: 'daemon' | 'app'): Promise<void>
+  abstract revokeAllRefreshTokens (subjectId: string, role: SubjectRole): Promise<void>
 
   /* ------------------------------------------------------------------
    * Enrollment Codes

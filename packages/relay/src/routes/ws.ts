@@ -12,8 +12,6 @@ import type { RelayEnvelope } from '@wdk-app/protocol'
 // Types
 // ---------------------------------------------------------------------------
 
-type Role = 'daemon' | 'app'
-
 interface DaemonSocket {
   socket: WebSocket
   daemonId: string

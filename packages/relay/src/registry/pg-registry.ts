@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import { RegistryAdapter } from './registry-adapter.js'
 import type {
+  SubjectRole,
   UserRecord,
   DeviceRecord,
   DeviceListItem,
@@ -65,7 +66,7 @@ export class PgRegistry extends RegistryAdapter {
     return rows[0]
   }
 
-  async getUser (id: string): Promise<(UserRecord & { passwordHash: string }) | null> {
+  async getUser (id: string): Promise<UserRecord | null> {
     const { rows } = await this.pool.query(
       `SELECT id, password_hash AS "passwordHash", created_at AS "createdAt"
        FROM users WHERE id = $1`,
@@ -173,7 +174,7 @@ export class PgRegistry extends RegistryAdapter {
     return rows[0]
   }
 
-  async getDaemon (id: string): Promise<(DaemonRecord & { secretHash: string }) | null> {
+  async getDaemon (id: string): Promise<DaemonRecord | null> {
     const { rows } = await this.pool.query(
       `SELECT id, secret_hash AS "secretHash", created_at AS "createdAt"
        FROM daemons WHERE id = $1`,
@@ -254,7 +255,7 @@ export class PgRegistry extends RegistryAdapter {
     )
   }
 
-  async revokeAllRefreshTokens (subjectId: string, role: 'daemon' | 'app'): Promise<void> {
+  async revokeAllRefreshTokens (subjectId: string, role: SubjectRole): Promise<void> {
     await this.pool.query(
       `UPDATE refresh_tokens SET revoked_at = NOW()
        WHERE subject_id = $1 AND role = $2 AND revoked_at IS NULL`,

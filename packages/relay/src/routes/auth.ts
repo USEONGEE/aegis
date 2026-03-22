@@ -3,7 +3,7 @@ import jwt from 'jsonwebtoken'
 import type { StringValue } from 'ms'
 import config from '../config.js'
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify'
-import type { RegistryAdapter } from '../registry/registry-adapter.js'
+import type { RegistryAdapter, DeviceType, SubjectRole } from '../registry/registry-adapter.js'
 import type { QueueAdapter } from '../queue/queue-adapter.js'
 
 // ---------------------------------------------------------------------------
@@ -86,7 +86,7 @@ interface LoginBody {
 
 interface PairBody {
   deviceId: string
-  type: 'daemon' | 'app'
+  type: DeviceType
   pushToken: string | null
 }
 
@@ -114,7 +114,7 @@ interface UnbindBody {
 
 export interface JwtPayload {
   sub: string
-  role: 'daemon' | 'app'
+  role: SubjectRole
   deviceId: string | null
 }
 
@@ -192,7 +192,7 @@ function generateEnrollmentCode (): string {
 async function issueRefreshToken (
   registry: RegistryAdapter,
   subjectId: string,
-  role: 'daemon' | 'app',
+  role: SubjectRole,
   deviceId: string | null = null
 ): Promise<string> {
   const id = generateRefreshToken()
