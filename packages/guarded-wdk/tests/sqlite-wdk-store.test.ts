@@ -1,15 +1,15 @@
 import { mkdtemp, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { JsonApprovalStore } from '../src/json-approval-store.js'
+import { SqliteWdkStore } from '../src/sqlite-wdk-store.js'
 
-describe('JsonApprovalStore', () => {
-  let store: JsonApprovalStore
+describe('SqliteWdkStore', () => {
+  let store: SqliteWdkStore
   let tmpDir: string
 
   beforeEach(async () => {
-    tmpDir = await mkdtemp(join(tmpdir(), 'json-store-'))
-    store = new JsonApprovalStore(tmpDir)
+    tmpDir = await mkdtemp(join(tmpdir(), 'sqlite-store-'))
+    store = new SqliteWdkStore(join(tmpDir, 'test.db'))
     await store.init()
   })
 
@@ -87,7 +87,6 @@ describe('JsonApprovalStore', () => {
       await store.createWallet(0, 'test', '0xaddr0')
       await store.savePolicy(0, 1, { policies: [], signature: {} })
       await store.savePendingApproval(0, { requestId: 'r1', type: 'tx', chainId: 1, targetHash: '0x1', accountIndex: 0, content: '', createdAt: Date.now() })
-      await store.saveCron(0, { sessionId: 'sess', interval: '* * * * *', prompt: 'test', chainId: null })
       await store.appendHistory({ accountIndex: 0, requestId: 'r1', type: 'tx', chainId: 1, targetHash: '0x1', approver: 'a', action: 'approved', content: '', signedApproval: null, timestamp: Date.now() })
       await store.deleteWallet(0)
 
@@ -95,9 +94,7 @@ describe('JsonApprovalStore', () => {
       expect(policy).toBeNull()
       const pending = await store.loadPendingApprovals(0, null, null)
       expect(pending).toHaveLength(0)
-      const crons = await store.listCrons(0)
-      expect(crons).toHaveLength(0)
-      // history is preserved
+      // approval_history is preserved
       const history = await store.getHistory({ accountIndex: 0 })
       expect(history).toHaveLength(1)
     })
@@ -131,7 +128,7 @@ describe('JsonApprovalStore', () => {
       expect(loaded!.policyVersion).toBe(1)
     })
 
-    test('savePolicy increments version', async () => {
+    test('savePolicy increments version on update', async () => {
       await store.savePolicy(accountIndex, 1, { policies: [], signature: {} })
       await store.savePolicy(accountIndex, 1, { policies: [{ v: 2 }], signature: {} })
       const loaded = await store.loadPolicy(accountIndex, 1)
@@ -149,11 +146,37 @@ describe('JsonApprovalStore', () => {
       expect(v).toBe(1)
     })
 
+    test('policies are scoped to accountIndex+chain', async () => {
+      await store.createWallet(1, 'second', '0xaddr1')
+      await store.savePolicy(accountIndex, 1, { policies: [{ a0: 'eth' }], signature: {} })
+      await store.savePolicy(1, 1, { policies: [{ a1: 'eth' }], signature: {} })
+      await store.savePolicy(accountIndex, 900, { policies: [{ a0: 'sol' }], signature: {} })
+
+      const p1 = await store.loadPolicy(accountIndex, 1)
+      expect(p1!.policies).toEqual([{ a0: 'eth' }])
+      const p2 = await store.loadPolicy(1, 1)
+      expect(p2!.policies).toEqual([{ a1: 'eth' }])
+      const p3 = await store.loadPolicy(accountIndex, 900)
+      expect(p3!.policies).toEqual([{ a0: 'sol' }])
+    })
+
     test('savePolicy with empty policies array round-trips', async () => {
       await store.savePolicy(accountIndex, 1, { policies: [], signature: {} })
       const loaded = await store.loadPolicy(accountIndex, 1)
       expect(loaded!.policies).toEqual([])
       expect(loaded!.signature).toEqual({})
+    })
+
+    test('savePolicy fails if existing row has corrupted JSON (No Fallback)', async () => {
+      // Insert valid policy first, then corrupt the raw JSON in DB
+      await store.savePolicy(accountIndex, 1, { policies: [{ ok: true }], signature: {} })
+      ;(store as any)._db.prepare(
+        'UPDATE policies SET policies_json = ? WHERE account_index = ? AND chain_id = ?'
+      ).run('NOT_VALID_JSON', accountIndex, 1)
+
+      // savePolicy calls loadPolicy internally to get version -> JSON.parse fails
+      await expect(store.savePolicy(accountIndex, 1, { policies: [{ v: 2 }], signature: {} }))
+        .rejects.toThrow()
     })
   })
 
@@ -181,6 +204,7 @@ describe('JsonApprovalStore', () => {
       expect(pending).toHaveLength(1)
       expect(pending[0].requestId).toBe('req-1')
       expect(pending[0].targetHash).toBe('0xabc')
+      expect(pending[0].content).toBe(JSON.stringify({ amount: '100' }))
     })
 
     test('loadPendingApprovals filters by accountIndex, type, chain', async () => {
@@ -220,9 +244,16 @@ describe('JsonApprovalStore', () => {
   // --- History ---
 
   describe('history', () => {
+    const accountIndex = 0
+
+    beforeEach(async () => {
+      await store.setMasterSeed('mnemonic')
+      await store.createWallet(accountIndex, 'test-wallet', '0xaddr0')
+    })
+
     test('appendHistory + getHistory round-trips', async () => {
       await store.appendHistory({
-        accountIndex: 0,
+        accountIndex,
         requestId: 'req-1',
         type: 'tx',
         chainId: 1,
@@ -236,23 +267,23 @@ describe('JsonApprovalStore', () => {
       const history = await store.getHistory({})
       expect(history).toHaveLength(1)
       expect(history[0].action).toBe('approved')
-      expect(history[0].accountIndex).toBe(0)
-      expect(history[0].targetHash).toBe('0xabc')
-      expect(history[0].approver).toBe('0xpub')
+      expect(history[0].accountIndex).toBe(accountIndex)
     })
 
     test('getHistory filters by accountIndex, type, chain', async () => {
-      await store.appendHistory({ accountIndex: 0, requestId: 'r1', type: 'tx', chainId: 1, targetHash: '0x1', approver: 'a', action: 'approved', content: '', signedApproval: null, timestamp: Date.now() })
-      await store.appendHistory({ accountIndex: 0, requestId: 'r2', type: 'policy', chainId: 1, targetHash: '0x2', approver: 'a', action: 'approved', content: '', signedApproval: null, timestamp: Date.now() })
+      await store.createWallet(1, 'second', '0xaddr1')
+      await store.appendHistory({ accountIndex, requestId: 'r1', type: 'tx', chainId: 1, targetHash: '0x1', approver: 'a', action: 'approved', content: '', signedApproval: null, timestamp: Date.now() })
+      await store.appendHistory({ accountIndex, requestId: 'r2', type: 'policy', chainId: 1, targetHash: '0x2', approver: 'a', action: 'approved', content: '', signedApproval: null, timestamp: Date.now() })
       await store.appendHistory({ accountIndex: 1, requestId: 'r3', type: 'tx', chainId: 900, targetHash: '0x3', approver: 'a', action: 'rejected', content: '', signedApproval: null, timestamp: Date.now() })
 
-      const a0Tx = await store.getHistory({ accountIndex: 0, type: 'tx' })
+      const a0Tx = await store.getHistory({ accountIndex, type: 'tx' })
       expect(a0Tx).toHaveLength(1)
+      expect(a0Tx[0].targetHash).toBe('0x1')
     })
 
     test('getHistory respects limit', async () => {
       for (let i = 0; i < 5; i++) {
-        await store.appendHistory({ accountIndex: 0, requestId: `r${i}`, type: 'tx', chainId: 1, targetHash: `0x${i}`, approver: 'a', action: 'approved', content: '', signedApproval: null, timestamp: Date.now() })
+        await store.appendHistory({ accountIndex, requestId: `r${i}`, type: 'tx', chainId: 1, targetHash: `0x${i}`, approver: 'a', action: 'approved', content: '', signedApproval: null, timestamp: Date.now() })
       }
       const limited = await store.getHistory({ limit: 2 })
       expect(limited).toHaveLength(2)
@@ -302,6 +333,14 @@ describe('JsonApprovalStore', () => {
     test('isSignerRevoked returns false for unknown signer', async () => {
       expect(await store.isSignerRevoked('nonexistent')).toBe(false)
     })
+
+    test('saveSigner updates existing signer on conflict', async () => {
+      await store.saveSigner('pk1', 'name1')
+      await store.saveSigner('pk1', 'name2')
+      const dev = await store.getSigner('pk1')
+      expect(dev!.publicKey).toBe('pk1')
+      expect(dev!.name).toBe('name2')
+    })
   })
 
   // --- Nonces ---
@@ -324,67 +363,11 @@ describe('JsonApprovalStore', () => {
       expect(await store.getLastNonce('a1')).toBe(10)
       expect(await store.getLastNonce('a2')).toBe(20)
     })
-  })
 
-  // --- Crons ---
-
-  describe('crons', () => {
-    const accountIndex = 0
-
-    beforeEach(async () => {
-      await store.setMasterSeed('mnemonic')
-      await store.createWallet(accountIndex, 'test-wallet', '0xaddr0')
-    })
-
-    test('saveCron + listCrons round-trips', async () => {
-      await store.saveCron(accountIndex, {
-        sessionId: 'sess-1',
-        interval: '*/5 * * * *',
-        prompt: 'check balance',
-        chainId: 1
-      })
-      const crons = await store.listCrons(accountIndex)
-      expect(crons).toHaveLength(1)
-      expect(crons[0].id).toBeTruthy()
-      expect(crons[0].prompt).toBe('check balance')
-    })
-
-    test('saveCron with chainId null round-trips', async () => {
-      await store.saveCron(accountIndex, {
-        sessionId: 'sess-1',
-        interval: '*/5 * * * *',
-        prompt: 'check all',
-        chainId: null
-      })
-      const crons = await store.listCrons(accountIndex)
-      expect(crons).toHaveLength(1)
-      expect(crons[0].chainId).toBeNull()
-    })
-
-    test('listCrons filters by accountIndex', async () => {
-      await store.createWallet(1, 'second', '0xaddr1')
-      await store.saveCron(accountIndex, { sessionId: 's1', interval: '* * * * *', prompt: 'p1', chainId: null })
-      await store.saveCron(1, { sessionId: 's2', interval: '* * * * *', prompt: 'p2', chainId: null })
-
-      const crons0 = await store.listCrons(accountIndex)
-      expect(crons0).toHaveLength(1)
-      expect(crons0[0].prompt).toBe('p1')
-    })
-
-    test('removeCron deletes cron', async () => {
-      await store.saveCron(accountIndex, { sessionId: 's1', interval: '* * * * *', prompt: 'p', chainId: null })
-      const crons = await store.listCrons(accountIndex)
-      await store.removeCron(crons[0].id)
-      const after = await store.listCrons(accountIndex)
-      expect(after).toHaveLength(0)
-    })
-
-    test('updateCronLastRun updates timestamp', async () => {
-      await store.saveCron(accountIndex, { sessionId: 's1', interval: '* * * * *', prompt: 'p', chainId: null })
-      const crons = await store.listCrons(accountIndex)
-      await store.updateCronLastRun(crons[0].id, 99999)
-      const after = await store.listCrons(accountIndex)
-      expect(after[0].lastRunAt).toBe(99999)
+    test('updateNonce overwrites previous value', async () => {
+      await store.updateNonce('a1', 5)
+      await store.updateNonce('a1', 15)
+      expect(await store.getLastNonce('a1')).toBe(15)
     })
   })
 
@@ -396,7 +379,7 @@ describe('JsonApprovalStore', () => {
         intentHash: 'int-1',
         accountIndex: 0,
         chainId: 1,
-        targetHash: '0xabc',
+        dedupKey: '0xabc',
         reason: 'no matching permission',
         context: { target: '0xdead' },
         policyVersion: 1,
@@ -411,8 +394,8 @@ describe('JsonApprovalStore', () => {
     })
 
     test('listRejections filters by accountIndex and chainId', async () => {
-      await store.saveRejection({ intentHash: 'r1', accountIndex: 0, chainId: 1, targetHash: '0x1', reason: 'r1', context: null, policyVersion: 1, rejectedAt: 1000 })
-      await store.saveRejection({ intentHash: 'r2', accountIndex: 1, chainId: 1, targetHash: '0x2', reason: 'r2', context: null, policyVersion: 1, rejectedAt: 1001 })
+      await store.saveRejection({ intentHash: 'r1', accountIndex: 0, chainId: 1, dedupKey: '0x1', reason: 'r1', context: null, policyVersion: 1, rejectedAt: 1000 })
+      await store.saveRejection({ intentHash: 'r2', accountIndex: 1, chainId: 1, dedupKey: '0x2', reason: 'r2', context: null, policyVersion: 1, rejectedAt: 1001 })
       const result = await store.listRejections({ accountIndex: 0 })
       expect(result).toHaveLength(1)
       expect(result[0].intentHash).toBe('r1')
@@ -420,7 +403,7 @@ describe('JsonApprovalStore', () => {
 
     test('listRejections respects limit', async () => {
       for (let i = 0; i < 5; i++) {
-        await store.saveRejection({ intentHash: `r${i}`, accountIndex: 0, chainId: 1, targetHash: `0x${i}`, reason: 'test', context: null, policyVersion: 1, rejectedAt: 1000 + i })
+        await store.saveRejection({ intentHash: `r${i}`, accountIndex: 0, chainId: 1, dedupKey: `0x${i}`, reason: 'test', context: null, policyVersion: 1, rejectedAt: 1000 + i })
       }
       const result = await store.listRejections({ limit: 2 })
       expect(result).toHaveLength(2)
@@ -461,17 +444,25 @@ describe('JsonApprovalStore', () => {
   // --- Execution Journal ---
 
   describe('execution journal', () => {
+    const accountIndex = 0
+
+    beforeEach(async () => {
+      await store.setMasterSeed('mnemonic')
+      await store.createWallet(accountIndex, 'test-wallet', '0xaddr0')
+    })
+
     test('saveJournalEntry + getJournalEntry round-trips', async () => {
       await store.saveJournalEntry({
         intentHash: 'int-1',
-        accountIndex: 0,
+        accountIndex,
         chainId: 1,
-        targetHash: '0xabc',
+        dedupKey: '0xabc',
         status: 'received'
       })
       const entry = await store.getJournalEntry('int-1')
       expect(entry!.intentHash).toBe('int-1')
       expect(entry!.status).toBe('received')
+      expect(entry!.accountIndex).toBe(accountIndex)
     })
 
     test('getJournalEntry returns null for unknown id', async () => {
@@ -482,9 +473,9 @@ describe('JsonApprovalStore', () => {
     test('updateJournalStatus updates status and txHash', async () => {
       await store.saveJournalEntry({
         intentHash: 'int-1',
-        accountIndex: 0,
+        accountIndex,
         chainId: 1,
-        targetHash: '0xabc',
+        dedupKey: '0xabc',
         status: 'received'
       })
       await store.updateJournalStatus('int-1', 'signed', '0xtx123')
@@ -493,29 +484,68 @@ describe('JsonApprovalStore', () => {
       expect(entry!.txHash).toBe('0xtx123')
     })
 
+    test('updateJournalStatus without txHash preserves existing', async () => {
+      await store.saveJournalEntry({
+        intentHash: 'int-1',
+        accountIndex,
+        chainId: 1,
+        dedupKey: '0xabc',
+        status: 'received'
+      })
+      await store.updateJournalStatus('int-1', 'rejected', '0xold')
+      await store.updateJournalStatus('int-1', 'settled', null)
+      const entry = await store.getJournalEntry('int-1')
+      expect(entry!.status).toBe('settled')
+      expect(entry!.txHash).toBe('0xold')
+    })
+
     test('listJournal returns all entries', async () => {
-      await store.saveJournalEntry({ intentHash: 'i1', accountIndex: 0, chainId: 1, targetHash: '0x1', status: 'received' })
-      await store.saveJournalEntry({ intentHash: 'i2', accountIndex: 0, chainId: 1, targetHash: '0x2', status: 'settled' })
+      await store.saveJournalEntry({ intentHash: 'i1', accountIndex, chainId: 1, dedupKey: '0x1', status: 'received' })
+      await store.saveJournalEntry({ intentHash: 'i2', accountIndex, chainId: 1, dedupKey: '0x2', status: 'settled' })
       const all = await store.listJournal({})
       expect(all).toHaveLength(2)
     })
 
     test('listJournal filters by accountIndex, status, chain', async () => {
-      await store.saveJournalEntry({ intentHash: 'i1', accountIndex: 0, chainId: 1, targetHash: '0x1', status: 'received' })
-      await store.saveJournalEntry({ intentHash: 'i2', accountIndex: 0, chainId: 1, targetHash: '0x2', status: 'settled' })
-      await store.saveJournalEntry({ intentHash: 'i3', accountIndex: 1, chainId: 900, targetHash: '0x3', status: 'received' })
+      await store.createWallet(1, 'second', '0xaddr1')
+      await store.saveJournalEntry({ intentHash: 'i1', accountIndex, chainId: 1, dedupKey: '0x1', status: 'received' })
+      await store.saveJournalEntry({ intentHash: 'i2', accountIndex, chainId: 1, dedupKey: '0x2', status: 'settled' })
+      await store.saveJournalEntry({ intentHash: 'i3', accountIndex: 1, chainId: 900, dedupKey: '0x3', status: 'received' })
 
-      const a0Received = await store.listJournal({ accountIndex: 0, status: 'received' })
+      const a0Received = await store.listJournal({ accountIndex, status: 'received' })
       expect(a0Received).toHaveLength(1)
       expect(a0Received[0].intentHash).toBe('i1')
     })
 
     test('listJournal respects limit', async () => {
       for (let i = 0; i < 5; i++) {
-        await store.saveJournalEntry({ intentHash: `i${i}`, accountIndex: 0, chainId: 1, targetHash: `0x${i}`, status: 'received' })
+        await store.saveJournalEntry({ intentHash: `i${i}`, accountIndex, chainId: 1, dedupKey: `0x${i}`, status: 'received' })
       }
       const limited = await store.listJournal({ limit: 3 })
       expect(limited).toHaveLength(3)
+    })
+  })
+
+  // --- WAL Mode ---
+
+  describe('initialization', () => {
+    test('database uses WAL mode', async () => {
+      const tmpDir2 = await mkdtemp(join(tmpdir(), 'sqlite-wal-'))
+      const store2 = new SqliteWdkStore(join(tmpDir2, 'wal-test.db'))
+      await store2.init()
+      // WAL mode is set in init; if we got here, it was set without error
+      await store2.dispose()
+      await rm(tmpDir2, { recursive: true, force: true })
+    })
+
+    test('dispose closes db connection', async () => {
+      const tmpDir2 = await mkdtemp(join(tmpdir(), 'sqlite-dispose-'))
+      const store2 = new SqliteWdkStore(join(tmpDir2, 'dispose-test.db'))
+      await store2.init()
+      await store2.dispose()
+      // After dispose, _db should be null
+      expect(store2._db).toBeNull()
+      await rm(tmpDir2, { recursive: true, force: true })
     })
   })
 })

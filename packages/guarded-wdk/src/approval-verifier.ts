@@ -8,7 +8,7 @@ import {
   ApprovalExpiredError,
   ReplayError
 } from './errors.js'
-import type { SignedApproval, ApprovalStore } from './approval-store.js'
+import type { SignedApproval, WdkStore } from './wdk-store.js'
 
 export interface VerificationContext {
   currentPolicyVersion: number | null
@@ -32,7 +32,7 @@ function computeApprovalHash (approval: SignedApproval): Buffer {
 export async function verifyApproval (
   signedApproval: SignedApproval,
   trustedApprovers: string[],
-  store: ApprovalStore,
+  store: WdkStore,
   context: VerificationContext = { currentPolicyVersion: null, expectedTargetHash: null }
 ): Promise<void> {
   const { type, targetHash, approver, policyVersion, expiresAt, nonce, sig } = signedApproval

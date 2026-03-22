@@ -2,7 +2,7 @@
  * @internal — snake_case row types used by store implementations.
  * NOT part of the public API. Do not import from outside this package.
  */
-import type { ApprovalType, HistoryAction, JournalStatus } from './approval-store.js'
+import type { ApprovalType, HistoryAction, JournalStatus } from './wdk-store.js'
 
 /** @internal snake_case representation for store implementations. */
 export interface PendingApprovalRow {
@@ -49,7 +49,7 @@ export interface StoredJournalEntry {
   intent_hash: string
   account_index: number
   chain_id: number
-  target_hash: string
+  dedup_key: string
   status: JournalStatus
   tx_hash: string | null
   created_at: number
@@ -95,7 +95,7 @@ export interface RejectionRow {
   intent_hash: string
   account_index: number
   chain_id: number
-  target_hash: string
+  dedup_key: string
   reason: string
   context_json: string | null
   policy_version: number

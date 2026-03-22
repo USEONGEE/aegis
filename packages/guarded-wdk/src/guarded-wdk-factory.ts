@@ -6,7 +6,23 @@ import { SwapProtocol, BridgeProtocol, LendingProtocol, FiatProtocol } from '@te
 import { createGuardedMiddleware, validatePolicies } from './guarded-middleware.js'
 import type { Policy } from './guarded-middleware.js'
 import { SignedApprovalBroker } from './signed-approval-broker.js'
-import type { ApprovalStore } from './approval-store.js'
+import type { ApprovalSubmitContext } from './signed-approval-broker.js'
+import { ExecutionJournal } from './execution-journal.js'
+import type {
+  WdkStore,
+  SignedApproval,
+  StoredPolicy,
+  PendingApprovalRequest,
+  RejectionEntry,
+  RejectionQueryOpts,
+  PolicyVersionEntry,
+  StoredSigner,
+  StoredWallet,
+  StoredJournal,
+  JournalQueryOpts,
+  ApprovalType,
+  ApprovalRequest
+} from './wdk-store.js'
 
 type ProtocolClass = typeof SwapProtocol | typeof BridgeProtocol | typeof LendingProtocol | typeof FiatProtocol
 
@@ -26,16 +42,40 @@ interface GuardedWDKConfig {
   wallets: Record<string, WalletEntry>
   protocols: Record<string, ProtocolEntry[]>
   approvalBroker?: SignedApprovalBroker | null
-  approvalStore: ApprovalStore
+  approvalStore: WdkStore
   trustedApprovers: string[]
+}
+
+interface CreateRequestOptions {
+  requestId: string
+  chainId: number
+  targetHash: string
+  accountIndex: number
+  content: string
+  walletName: string | null
 }
 
 interface GuardedWDKFacade {
   getAccount (chain: string, index: number): Promise<IWalletAccountWithProtocols>
   getAccountByPath (chain: string, path: string): Promise<IWalletAccountWithProtocols>
   getFeeRates (chain: string): Promise<FeeRates>
-  getApprovalBroker (): SignedApprovalBroker
-  getApprovalStore (): ApprovalStore
+
+  // --- Store read methods ---
+  loadPolicy (accountIndex: number, chainId: number): Promise<StoredPolicy | null>
+  getPendingApprovals (accountIndex: number | null, type: string | null, chainId: number | null): Promise<PendingApprovalRequest[]>
+  listRejections (opts: RejectionQueryOpts): Promise<RejectionEntry[]>
+  listPolicyVersions (accountIndex: number, chainId: number): Promise<PolicyVersionEntry[]>
+  listSigners (): Promise<StoredSigner[]>
+  listWallets (): Promise<StoredWallet[]>
+  listJournal (opts: JournalQueryOpts): Promise<StoredJournal[]>
+  getPolicyVersion (accountIndex: number, chainId: number): Promise<number>
+  saveRejection (entry: RejectionEntry): Promise<void>
+
+  // --- Broker methods ---
+  submitApproval (signedApproval: SignedApproval, context: ApprovalSubmitContext): Promise<void>
+  createApprovalRequest (type: ApprovalType, opts: CreateRequestOptions): Promise<ApprovalRequest>
+  setTrustedApprovers (approvers: string[]): void
+
   on (type: string, handler: (...args: unknown[]) => void): void
   off (type: string, handler: (...args: unknown[]) => void): void
   dispose (): void
@@ -69,6 +109,9 @@ export async function createGuardedWDK (config: GuardedWDKConfig): Promise<Guard
     approvalBroker = new SignedApprovalBroker(trustedApprovers || [], approvalStore, emitter)
   }
 
+  const executionJournal = new ExecutionJournal(approvalStore)
+  await executionJournal.recover()
+
   let currentAccountIndex = 0
 
   for (const [chainKey, wallet] of Object.entries(wallets)) {
@@ -91,7 +134,10 @@ export async function createGuardedWDK (config: GuardedWDKConfig): Promise<Guard
       },
       emitter,
       chainId: Number(chainKey),
-      getAccountIndex: () => currentAccountIndex
+      getAccountIndex: () => currentAccountIndex,
+      onRejection: async (entry) => { await approvalStore.saveRejection(entry) },
+      getPolicyVersion: async (acctIdx, cId) => approvalStore.getPolicyVersion(acctIdx, cId),
+      journal: executionJournal
     }))
   }
 
@@ -119,12 +165,56 @@ export async function createGuardedWDK (config: GuardedWDKConfig): Promise<Guard
       return wdk.getFeeRates(chain)
     },
 
-    getApprovalBroker () {
-      return approvalBroker
+    // --- Store read methods ---
+
+    loadPolicy (accountIndex: number, chainId: number) {
+      return approvalStore.loadPolicy(accountIndex, chainId)
     },
 
-    getApprovalStore () {
-      return approvalStore
+    getPendingApprovals (accountIndex: number | null, type: string | null, chainId: number | null) {
+      return approvalStore.loadPendingApprovals(accountIndex, type, chainId)
+    },
+
+    listRejections (opts: RejectionQueryOpts) {
+      return approvalStore.listRejections(opts)
+    },
+
+    listPolicyVersions (accountIndex: number, chainId: number) {
+      return approvalStore.listPolicyVersions(accountIndex, chainId)
+    },
+
+    listSigners () {
+      return approvalStore.listSigners()
+    },
+
+    listWallets () {
+      return approvalStore.listWallets()
+    },
+
+    listJournal (opts: JournalQueryOpts) {
+      return approvalStore.listJournal(opts)
+    },
+
+    getPolicyVersion (accountIndex: number, chainId: number) {
+      return approvalStore.getPolicyVersion(accountIndex, chainId)
+    },
+
+    saveRejection (entry: RejectionEntry) {
+      return approvalStore.saveRejection(entry)
+    },
+
+    // --- Broker methods ---
+
+    submitApproval (signedApproval: SignedApproval, context: ApprovalSubmitContext) {
+      return approvalBroker.submitApproval(signedApproval, context)
+    },
+
+    createApprovalRequest (type: ApprovalType, opts: CreateRequestOptions) {
+      return approvalBroker.createRequest(type, opts)
+    },
+
+    setTrustedApprovers (approvers: string[]) {
+      approvalBroker.setTrustedApprovers(approvers)
     },
 
     on (type: string, handler: (...args: unknown[]) => void) {

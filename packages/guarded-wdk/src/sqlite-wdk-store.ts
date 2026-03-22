@@ -3,7 +3,7 @@ import { chmodSync } from 'node:fs'
 import Database from 'better-sqlite3'
 import type BetterSqlite3 from 'better-sqlite3'
 import {
-  ApprovalStore,
+  WdkStore,
   type PolicyInput,
   type StoredPolicy,
   type ApprovalType,
@@ -13,8 +13,6 @@ import {
   type StoredSigner,
   type JournalStatus,
   type JournalInput,
-  type CronInput,
-  type StoredCron,
   type MasterSeed,
   type StoredWallet,
   type StoredJournal,
@@ -25,16 +23,16 @@ import {
   type RejectionQueryOpts,
   type PolicyVersionEntry,
   type PolicyDiff
-} from './approval-store.js'
+} from './wdk-store.js'
 import type { Policy, EvaluationContext } from './guarded-middleware.js'
-import type { PendingApprovalRow, StoredHistoryEntry, CronRow, StoredJournalEntry, SignerRow, MasterSeedRow, WalletRow, PolicyRow, RejectionRow, PolicyVersionRow } from './store-types.js'
+import type { PendingApprovalRow, StoredHistoryEntry, StoredJournalEntry, SignerRow, MasterSeedRow, WalletRow, PolicyRow, RejectionRow, PolicyVersionRow } from './store-types.js'
 
 /**
- * SQLite-backed implementation of ApprovalStore.
+ * SQLite-backed implementation of WdkStore.
  * Uses better-sqlite3 with WAL mode for performance.
  * Tables follow the schema defined in the design doc.
  */
-export class SqliteApprovalStore extends ApprovalStore {
+export class SqliteWdkStore extends WdkStore {
   private _dbPath: string
   _db: BetterSqlite3.Database | null
 
@@ -123,23 +121,11 @@ export class SqliteApprovalStore extends ApprovalStore {
         last_nonce INTEGER NOT NULL DEFAULT 0
       );
 
-      CREATE TABLE IF NOT EXISTS crons (
-        id TEXT PRIMARY KEY,
-        account_index INTEGER NOT NULL REFERENCES wallets(account_index),
-        session_id TEXT NOT NULL,
-        interval TEXT NOT NULL,
-        prompt TEXT NOT NULL,
-        chain_id INTEGER,
-        created_at INTEGER NOT NULL,
-        last_run_at INTEGER,
-        is_active INTEGER NOT NULL DEFAULT 1
-      );
-
       CREATE TABLE IF NOT EXISTS execution_journal (
         intent_hash TEXT PRIMARY KEY,
         account_index INTEGER NOT NULL,
         chain_id INTEGER NOT NULL,
-        target_hash TEXT NOT NULL,
+        dedup_key TEXT NOT NULL,
         status TEXT NOT NULL,
         tx_hash TEXT,
         created_at INTEGER NOT NULL,
@@ -151,7 +137,7 @@ export class SqliteApprovalStore extends ApprovalStore {
         intent_hash TEXT NOT NULL,
         account_index INTEGER NOT NULL,
         chain_id INTEGER NOT NULL,
-        target_hash TEXT NOT NULL,
+        dedup_key TEXT NOT NULL,
         reason TEXT NOT NULL,
         context_json TEXT,
         policy_version INTEGER NOT NULL,
@@ -224,7 +210,6 @@ export class SqliteApprovalStore extends ApprovalStore {
     const deleteTx = this._db!.transaction(() => {
       this._db!.prepare('DELETE FROM policies WHERE account_index = ?').run(accountIndex)
       this._db!.prepare('DELETE FROM pending_requests WHERE account_index = ?').run(accountIndex)
-      this._db!.prepare('DELETE FROM crons WHERE account_index = ?').run(accountIndex)
       this._db!.prepare('DELETE FROM execution_journal WHERE account_index = ?').run(accountIndex)
       // approval_history is preserved
       this._db!.prepare('DELETE FROM wallets WHERE account_index = ?').run(accountIndex)
@@ -463,50 +448,6 @@ export class SqliteApprovalStore extends ApprovalStore {
     `).run(approver, nonce)
   }
 
-  // --- Cron ---
-
-  override async listCrons (accountIndex?: number): Promise<StoredCron[]> {
-    const rows = accountIndex !== undefined
-      ? this._db!.prepare('SELECT * FROM crons WHERE account_index = ?').all(accountIndex) as CronRow[]
-      : this._db!.prepare('SELECT * FROM crons').all() as CronRow[]
-    return rows.map(c => ({
-      id: c.id,
-      accountIndex: c.account_index,
-      sessionId: c.session_id,
-      interval: c.interval,
-      prompt: c.prompt,
-      chainId: c.chain_id,
-      createdAt: c.created_at,
-      lastRunAt: c.last_run_at,
-      isActive: c.is_active === 1
-    }))
-  }
-
-  override async saveCron (accountIndex: number, cron: CronInput): Promise<string> {
-    const id = randomUUID()
-    this._db!.prepare(`
-      INSERT INTO crons (id, account_index, session_id, interval, prompt, chain_id, created_at, is_active)
-      VALUES (?, ?, ?, ?, ?, ?, ?, 1)
-    `).run(
-      id,
-      accountIndex,
-      cron.sessionId,
-      cron.interval,
-      cron.prompt,
-      cron.chainId,
-      Date.now()
-    )
-    return id
-  }
-
-  override async removeCron (cronId: string): Promise<void> {
-    this._db!.prepare('DELETE FROM crons WHERE id = ?').run(cronId)
-  }
-
-  override async updateCronLastRun (cronId: string, timestamp: number): Promise<void> {
-    this._db!.prepare('UPDATE crons SET last_run_at = ? WHERE id = ?').run(timestamp, cronId)
-  }
-
   // --- Execution Journal ---
 
   override async getJournalEntry (intentHash: string): Promise<StoredJournal | null> {
@@ -516,7 +457,7 @@ export class SqliteApprovalStore extends ApprovalStore {
       intentHash: row.intent_hash,
       accountIndex: row.account_index,
       chainId: row.chain_id,
-      targetHash: row.target_hash,
+      dedupKey: row.dedup_key,
       status: row.status,
       txHash: row.tx_hash,
       createdAt: row.created_at,
@@ -527,13 +468,13 @@ export class SqliteApprovalStore extends ApprovalStore {
   override async saveJournalEntry (entry: JournalInput): Promise<void> {
     const now = Date.now()
     this._db!.prepare(`
-      INSERT INTO execution_journal (intent_hash, account_index, chain_id, target_hash, status, tx_hash, created_at, updated_at)
+      INSERT INTO execution_journal (intent_hash, account_index, chain_id, dedup_key, status, tx_hash, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       entry.intentHash,
       entry.accountIndex,
       entry.chainId,
-      entry.targetHash,
+      entry.dedupKey,
       entry.status,
       null,
       now,
@@ -561,7 +502,7 @@ export class SqliteApprovalStore extends ApprovalStore {
       intentHash: j.intent_hash,
       accountIndex: j.account_index,
       chainId: j.chain_id,
-      targetHash: j.target_hash,
+      dedupKey: j.dedup_key,
       status: j.status,
       txHash: j.tx_hash,
       createdAt: j.created_at,
@@ -573,13 +514,13 @@ export class SqliteApprovalStore extends ApprovalStore {
 
   override async saveRejection (entry: RejectionEntry): Promise<void> {
     this._db!.prepare(`
-      INSERT INTO rejection_history (intent_hash, account_index, chain_id, target_hash, reason, context_json, policy_version, rejected_at)
+      INSERT INTO rejection_history (intent_hash, account_index, chain_id, dedup_key, reason, context_json, policy_version, rejected_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       entry.intentHash,
       entry.accountIndex,
       entry.chainId,
-      entry.targetHash,
+      entry.dedupKey,
       entry.reason,
       entry.context !== null && entry.context !== undefined ? JSON.stringify(entry.context) : null,
       entry.policyVersion,
@@ -599,7 +540,7 @@ export class SqliteApprovalStore extends ApprovalStore {
       intentHash: r.intent_hash,
       accountIndex: r.account_index,
       chainId: r.chain_id,
-      targetHash: r.target_hash,
+      dedupKey: r.dedup_key,
       reason: r.reason,
       context: r.context_json ? JSON.parse(r.context_json) as EvaluationContext : null,
       policyVersion: r.policy_version,

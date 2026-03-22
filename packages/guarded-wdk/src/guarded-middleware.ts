@@ -1,8 +1,9 @@
 import { randomUUID, createHash } from 'node:crypto'
-import { intentHash } from '@wdk-app/canonical'
+import { intentHash, dedupKey } from '@wdk-app/canonical'
 import type { IWalletAccount } from '@tetherto/wdk'
-import { ForbiddenError, PolicyRejectionError } from './errors.js'
-import type { RejectionEntry } from './approval-store.js'
+import { ForbiddenError, PolicyRejectionError, DuplicateIntentError } from './errors.js'
+import type { RejectionEntry } from './wdk-store.js'
+import type { ExecutionJournal } from './execution-journal.js'
 import type { EventEmitter } from 'node:events'
 
 // --- Policy types ---
@@ -27,12 +28,12 @@ export interface PermissionDict {
   }
 }
 
-export interface CallPolicy {
+interface CallPolicy {
   type: 'call'
   permissions: PermissionDict
 }
 
-export interface TimestampPolicy {
+interface TimestampPolicy {
   type: 'timestamp'
   validAfter?: number
   validUntil?: number
@@ -57,7 +58,7 @@ interface TransactionResult {
   fee: bigint
 }
 
-export interface SignTransactionResult {
+interface SignTransactionResult {
   signedTx: string
   intentHash: string
   requestId: string
@@ -67,7 +68,7 @@ interface TransactionReceipt {
   status: number
 }
 
-export interface GuardedAccount {
+interface GuardedAccount {
   sendTransaction: (tx: Transaction) => Promise<TransactionResult>
   signTransaction?: (tx: Transaction) => Promise<SignTransactionResult>
   transfer: (options: TransferOptions) => Promise<TransactionResult>
@@ -79,14 +80,14 @@ export interface GuardedAccount {
   getTransactionReceipt: (hash: string) => Promise<TransactionReceipt | null>
 }
 
-export interface FailedArg {
+interface FailedArg {
   argIndex: string
   condition: string
   expected: string | string[]
   actual: string
 }
 
-export interface RuleFailure {
+interface RuleFailure {
   rule: Rule
   failedArgs: FailedArg[]
 }
@@ -98,7 +99,7 @@ export interface EvaluationContext {
   ruleFailures: RuleFailure[]
 }
 
-export interface EvaluationResult {
+interface EvaluationResult {
   decision: Decision
   matchedPermission: Rule | null
   reason: string
@@ -110,6 +111,9 @@ interface MiddlewareConfig {
   emitter: EventEmitter
   chainId: number
   getAccountIndex: () => number
+  onRejection: (entry: RejectionEntry) => Promise<void>
+  getPolicyVersion: (accountIndex: number, chainId: number) => Promise<number>
+  journal: ExecutionJournal | null
 }
 
 function validatePolicy (policy: Policy): void {
@@ -162,7 +166,7 @@ export function validatePolicies (policies: Policy[]): void {
   }
 }
 
-export function permissionsToDict (permissions: Array<{ target?: string; selector?: string; args?: Record<string, ArgCondition>; valueLimit?: string | number; decision: Decision }>): PermissionDict {
+function permissionsToDict (permissions: Array<{ target?: string; selector?: string; args?: Record<string, ArgCondition>; valueLimit?: string | number; decision: Decision }>): PermissionDict {
   const dict: PermissionDict = {}
   permissions.forEach((perm, i) => {
     const target = perm.target?.toLowerCase() ?? '*'
@@ -218,7 +222,7 @@ function matchArgs (data: string, argConditions: Record<string, ArgCondition>): 
   return failures
 }
 
-export function evaluatePolicy (policies: Policy[], chainId: number, tx: Transaction): EvaluationResult {
+function evaluatePolicy (policies: Policy[], chainId: number, tx: Transaction): EvaluationResult {
   if (!policies || policies.length === 0) {
     return { decision: 'REJECT', matchedPermission: null, reason: 'no policies for chain', context: null }
   }
@@ -324,7 +328,7 @@ async function pollReceipt (account: GuardedAccount, hash: string, emitter: Even
   }
 }
 
-export function createGuardedMiddleware ({ policyResolver, emitter, chainId, getAccountIndex }: MiddlewareConfig): (account: IWalletAccount) => Promise<void> {
+export function createGuardedMiddleware ({ policyResolver, emitter, chainId, getAccountIndex, onRejection, getPolicyVersion, journal }: MiddlewareConfig): (account: IWalletAccount) => Promise<void> {
   return async (acct: IWalletAccount) => {
     const account = acct as GuardedAccount
     const rawSendTransaction = account.sendTransaction.bind(account)
@@ -345,6 +349,17 @@ export function createGuardedMiddleware ({ policyResolver, emitter, chainId, get
     account.sendTransaction = async (tx: Transaction): Promise<TransactionResult> => {
       const policyArr = await policyResolver(chainId)
       const requestId = randomUUID()
+      const acctIdx = getAccountIndex()
+      const dkey = dedupKey({ chainId, to: tx.to!, data: tx.data!, value: String(tx.value || '0') })
+      const iHash = intentHash({ chainId, to: tx.to!, data: tx.data!, value: String(tx.value || '0'), timestamp: Date.now() })
+
+      // Journal: dedup check
+      if (journal && journal.isDuplicate(dkey)) {
+        throw new DuplicateIntentError(dkey, iHash)
+      }
+
+      // Journal: track
+      if (journal) await journal.track(iHash, { accountIndex: acctIdx, chainId, dedupKey: dkey })
 
       emitter.emit('IntentProposed', {
         type: 'IntentProposed',
@@ -367,14 +382,20 @@ export function createGuardedMiddleware ({ policyResolver, emitter, chainId, get
       })
 
       if (decision === 'REJECT') {
-
-        throw new PolicyRejectionError(reason, context)
+        if (journal) await journal.updateStatus(iHash, 'rejected')
+        const pv = await getPolicyVersion(acctIdx, chainId)
+        await onRejection({
+          intentHash: iHash, accountIndex: acctIdx, chainId, dedupKey: dkey,
+          reason, context, policyVersion: pv, rejectedAt: Date.now()
+        }).catch(() => {})
+        throw new PolicyRejectionError(reason, context, iHash)
       }
 
       let result: TransactionResult
       try {
         result = await rawSendTransaction(tx)
       } catch (err: unknown) {
+        if (journal) await journal.updateStatus(iHash, 'failed')
         emitter.emit('ExecutionFailed', {
           type: 'ExecutionFailed',
           requestId,
@@ -383,6 +404,8 @@ export function createGuardedMiddleware ({ policyResolver, emitter, chainId, get
         })
         throw err
       }
+
+      if (journal) await journal.updateStatus(iHash, 'settled', result.hash)
 
       emitter.emit('ExecutionBroadcasted', {
         type: 'ExecutionBroadcasted',
@@ -413,6 +436,14 @@ export function createGuardedMiddleware ({ policyResolver, emitter, chainId, get
 
       const policyArr = await policyResolver(chainId)
       const requestId = randomUUID()
+      const acctIdx = getAccountIndex()
+      const dkey = dedupKey({ chainId, to: mockTx.to!, data: mockTx.data!, value: String(mockTx.value || '0') })
+      const iHash = intentHash({ chainId, to: mockTx.to!, data: mockTx.data!, value: String(mockTx.value || '0'), timestamp: Date.now() })
+
+      if (journal && journal.isDuplicate(dkey)) {
+        throw new DuplicateIntentError(dkey, iHash)
+      }
+      if (journal) await journal.track(iHash, { accountIndex: acctIdx, chainId, dedupKey: dkey })
 
       emitter.emit('IntentProposed', {
         type: 'IntentProposed',
@@ -435,14 +466,20 @@ export function createGuardedMiddleware ({ policyResolver, emitter, chainId, get
       })
 
       if (decision === 'REJECT') {
-
-        throw new PolicyRejectionError(reason, context)
+        if (journal) await journal.updateStatus(iHash, 'rejected')
+        const pv = await getPolicyVersion(acctIdx, chainId)
+        await onRejection({
+          intentHash: iHash, accountIndex: acctIdx, chainId, dedupKey: dkey,
+          reason, context, policyVersion: pv, rejectedAt: Date.now()
+        }).catch(() => {})
+        throw new PolicyRejectionError(reason, context, iHash)
       }
 
       let result: TransactionResult
       try {
         result = await rawTransfer(options)
       } catch (err: unknown) {
+        if (journal) await journal.updateStatus(iHash, 'failed')
         emitter.emit('ExecutionFailed', {
           type: 'ExecutionFailed',
           requestId,
@@ -451,6 +488,8 @@ export function createGuardedMiddleware ({ policyResolver, emitter, chainId, get
         })
         throw err
       }
+
+      if (journal) await journal.updateStatus(iHash, 'settled', result.hash)
 
       emitter.emit('ExecutionBroadcasted', {
         type: 'ExecutionBroadcasted',
@@ -468,6 +507,14 @@ export function createGuardedMiddleware ({ policyResolver, emitter, chainId, get
     account.signTransaction = async (tx: Transaction): Promise<SignTransactionResult> => {
       const policyArr = await policyResolver(chainId)
       const requestId = randomUUID()
+      const acctIdx = getAccountIndex()
+      const dkey = dedupKey({ chainId, to: tx.to!, data: tx.data!, value: String(tx.value || '0') })
+      const iHash = intentHash({ chainId, to: tx.to!, data: tx.data!, value: String(tx.value || '0'), timestamp: Date.now() })
+
+      if (journal && journal.isDuplicate(dkey)) {
+        throw new DuplicateIntentError(dkey, iHash)
+      }
+      if (journal) await journal.track(iHash, { accountIndex: acctIdx, chainId, dedupKey: dkey })
 
       emitter.emit('IntentProposed', {
         type: 'IntentProposed',
@@ -490,9 +537,16 @@ export function createGuardedMiddleware ({ policyResolver, emitter, chainId, get
       })
 
       if (decision === 'REJECT') {
-
-        throw new PolicyRejectionError(reason, context)
+        if (journal) await journal.updateStatus(iHash, 'rejected')
+        const pv = await getPolicyVersion(acctIdx, chainId)
+        await onRejection({
+          intentHash: iHash, accountIndex: acctIdx, chainId, dedupKey: dkey,
+          reason, context, policyVersion: pv, rejectedAt: Date.now()
+        }).catch(() => {})
+        throw new PolicyRejectionError(reason, context, iHash)
       }
+
+      if (journal) await journal.updateStatus(iHash, 'signed')
 
       const targetHash = intentHash({
         chainId,

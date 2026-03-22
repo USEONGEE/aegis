@@ -9,10 +9,23 @@ export class ForbiddenError extends Error {
 
 export class PolicyRejectionError extends Error {
   context: EvaluationContext | null
-  constructor (reason: string, context: EvaluationContext | null) {
+  intentHash: string
+  constructor (reason: string, context: EvaluationContext | null, intentHash: string) {
     super(reason || 'Policy rejected the transaction.')
     this.name = 'PolicyRejectionError'
     this.context = context
+    this.intentHash = intentHash
+  }
+}
+
+export class DuplicateIntentError extends Error {
+  dedupKey: string
+  intentHash: string
+  constructor (dedupKey: string, intentHash: string) {
+    super(`Duplicate intent: ${dedupKey}`)
+    this.name = 'DuplicateIntentError'
+    this.dedupKey = dedupKey
+    this.intentHash = intentHash
   }
 }
 
@@ -58,14 +71,14 @@ export class ReplayError extends Error {
   }
 }
 
-export class WalletNotFoundError extends Error {
+class WalletNotFoundError extends Error {
   constructor (accountIndex: number) {
     super(`Wallet not found: accountIndex ${accountIndex}`)
     this.name = 'WalletNotFoundError'
   }
 }
 
-export class NoMasterSeedError extends Error {
+class NoMasterSeedError extends Error {
   constructor () {
     super('No master seed configured. Run initial setup first.')
     this.name = 'NoMasterSeedError'

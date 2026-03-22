@@ -2,8 +2,8 @@ import { jest } from '@jest/globals'
 import { EventEmitter } from 'node:events'
 import { createGuardedMiddleware, evaluatePolicy, validatePolicies, permissionsToDict } from '../src/guarded-middleware.js'
 import { SignedApprovalBroker } from '../src/signed-approval-broker.js'
-import { ApprovalStore } from '../src/approval-store.js'
-import type { HistoryEntry, HistoryQueryOpts, ApprovalRequest, PolicyInput, PendingApprovalRequest } from '../src/approval-store.js'
+import { WdkStore } from '../src/wdk-store.js'
+import type { HistoryEntry, HistoryQueryOpts, ApprovalRequest, PolicyInput, PendingApprovalRequest } from '../src/wdk-store.js'
 import { ForbiddenError, PolicyRejectionError } from '../src/errors.js'
 import { generateKeyPair, sign } from '../src/crypto-utils.js'
 import type { KeyPair } from '../src/crypto-utils.js'
@@ -15,7 +15,7 @@ const usdcAddr = '0xabcdefabcdefabcdefabcdefabcdefabcdefabcd'
 const repaySelector = '0x573ade81'
 const approveSelector = '0x095ea7b3'
 
-class MockApprovalStore extends ApprovalStore {
+class MockWdkStore extends WdkStore {
   _policies: Record<string, unknown> = {}
   _pending: Array<ApprovalRequest & Record<string, unknown>> = []
   _history: HistoryEntry[] = []
@@ -40,6 +40,24 @@ class MockApprovalStore extends ApprovalStore {
   override async revokeSigner (publicKey: string) { this._signers[publicKey] = { revoked: true } }
   override async getLastNonce (approver: string) { return this._nonces[approver] || 0 }
   override async updateNonce (approver: string, nonce: number) { this._nonces[approver] = nonce }
+  override async saveRejection () {}
+  override async listRejections () { return [] }
+  override async listPolicyVersions () { return [] }
+  override async getMasterSeed () { return null }
+  override async setMasterSeed () {}
+  override async listWallets () { return [] }
+  override async getWallet () { return null }
+  override async createWallet () { return { accountIndex: 0, name: '', address: '', createdAt: 0 } }
+  override async deleteWallet () {}
+  override async listPolicyChains () { return [] }
+  override async loadPendingByRequestId () { return null }
+  override async saveSigner () {}
+  override async getSigner () { return null }
+  override async listSigners () { return [] }
+  override async getJournalEntry () { return null }
+  override async saveJournalEntry () {}
+  override async updateJournalStatus () {}
+  override async listJournal () { return [] }
 }
 
 interface MockAccount {
@@ -128,12 +146,12 @@ describe('Integration: Guarded Middleware', () => {
   let account: MockAccount
   let emitter: EventEmitter
   let policyArr: any
-  let store: MockApprovalStore
+  let store: MockWdkStore
 
   beforeEach(() => {
     account = createMockAccount()
     emitter = new EventEmitter()
-    store = new MockApprovalStore()
+    store = new MockWdkStore()
     policyArr = makePolicyArr()
   })
 
@@ -142,7 +160,10 @@ describe('Integration: Guarded Middleware', () => {
       policyResolver: async () => policyArr,
       emitter,
       chainId: 1,
-      getAccountIndex: () => 0
+      getAccountIndex: () => 0,
+      onRejection: async (entry) => { await store.saveRejection(entry) },
+      getPolicyVersion: async (acctIdx, cId) => store.getPolicyVersion(acctIdx, cId),
+      journal: null
     })
     await middleware(account as never)
   }
@@ -304,7 +325,10 @@ describe('Integration: Guarded Middleware', () => {
       },
       emitter,
       chainId: 1,
-      getAccountIndex: () => activeAccountIndex
+      getAccountIndex: () => activeAccountIndex,
+      onRejection: async () => {},
+      getPolicyVersion: async () => 0,
+      journal: null
     })
     await middleware(account as never)
 

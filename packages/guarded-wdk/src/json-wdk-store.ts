@@ -1,10 +1,9 @@
-import { randomUUID } from 'node:crypto'
 import { readFile, writeFile, rename, mkdir } from 'node:fs/promises'
 import { chmodSync } from 'node:fs'
 import { join } from 'node:path'
 import { homedir } from 'node:os'
 import {
-  ApprovalStore,
+  WdkStore,
   type PolicyInput,
   type StoredPolicy,
   type ApprovalType,
@@ -14,8 +13,6 @@ import {
   type StoredSigner,
   type JournalStatus,
   type JournalInput,
-  type CronInput,
-  type StoredCron,
   type MasterSeed,
   type StoredWallet,
   type StoredJournal,
@@ -26,16 +23,16 @@ import {
   type RejectionQueryOpts,
   type PolicyVersionEntry,
   type PolicyDiff
-} from './approval-store.js'
+} from './wdk-store.js'
 import type { Policy, EvaluationContext } from './guarded-middleware.js'
-import type { PendingApprovalRow, StoredHistoryEntry, CronRow, StoredJournalEntry, SignerRow, MasterSeedRow, WalletRow, PolicyRow, RejectionRow, PolicyVersionRow } from './store-types.js'
+import type { PendingApprovalRow, StoredHistoryEntry, StoredJournalEntry, SignerRow, MasterSeedRow, WalletRow, PolicyRow, RejectionRow, PolicyVersionRow } from './store-types.js'
 
 /**
- * JSON file-backed implementation of ApprovalStore.
+ * JSON file-backed implementation of WdkStore.
  * Each data domain is stored in a separate JSON file.
  * Atomic writes: write to .tmp then rename.
  */
-export class JsonApprovalStore extends ApprovalStore {
+export class JsonWdkStore extends WdkStore {
   private _dir: string
 
   constructor (dir?: string) {
@@ -78,7 +75,6 @@ export class JsonApprovalStore extends ApprovalStore {
       'history.json': [],
       'signers.json': {},
       'nonces.json': {},
-      'crons.json': [],
       'master-seed.json': null,
       'wallets.json': [],
       'journal.json': [],
@@ -179,11 +175,6 @@ export class JsonApprovalStore extends ApprovalStore {
     const pending = await this._read<PendingApprovalRow[]>('pending.json') || []
     const filteredPending = pending.filter(p => p.account_index !== accountIndex)
     await this._write('pending.json', filteredPending)
-
-    // Remove related crons
-    const crons = await this._read<CronRow[]>('crons.json') || []
-    const filteredCrons = crons.filter(c => c.account_index !== accountIndex)
-    await this._write('crons.json', filteredCrons)
 
     // Remove related journal entries (history is preserved)
     const journal = await this._read<StoredJournalEntry[]>('journal.json') || []
@@ -422,57 +413,6 @@ export class JsonApprovalStore extends ApprovalStore {
     await this._write('nonces.json', nonces)
   }
 
-  // --- Cron ---
-
-  override async listCrons (accountIndex?: number): Promise<StoredCron[]> {
-    const crons = await this._read<CronRow[]>('crons.json') || []
-    const filtered = accountIndex !== undefined ? crons.filter(c => c.account_index === accountIndex) : crons
-    return filtered.map(c => ({
-      id: c.id,
-      accountIndex: c.account_index,
-      sessionId: c.session_id,
-      interval: c.interval,
-      prompt: c.prompt,
-      chainId: c.chain_id,
-      createdAt: c.created_at,
-      lastRunAt: c.last_run_at,
-      isActive: c.is_active === 1
-    }))
-  }
-
-  override async saveCron (accountIndex: number, cron: CronInput): Promise<string> {
-    const crons = await this._read<CronRow[]>('crons.json') || []
-    const id = randomUUID()
-    crons.push({
-      id,
-      account_index: accountIndex,
-      session_id: cron.sessionId,
-      interval: cron.interval,
-      prompt: cron.prompt,
-      chain_id: cron.chainId,
-      created_at: Date.now(),
-      last_run_at: null,
-      is_active: 1
-    })
-    await this._write('crons.json', crons)
-    return id
-  }
-
-  override async removeCron (cronId: string): Promise<void> {
-    const crons = await this._read<CronRow[]>('crons.json') || []
-    const filtered = crons.filter(c => c.id !== cronId)
-    await this._write('crons.json', filtered)
-  }
-
-  override async updateCronLastRun (cronId: string, timestamp: number): Promise<void> {
-    const crons = await this._read<CronRow[]>('crons.json') || []
-    const cron = crons.find(c => c.id === cronId)
-    if (cron) {
-      cron.last_run_at = timestamp
-      await this._write('crons.json', crons)
-    }
-  }
-
   // --- Execution Journal ---
 
   override async getJournalEntry (intentHash: string): Promise<StoredJournal | null> {
@@ -483,7 +423,7 @@ export class JsonApprovalStore extends ApprovalStore {
       intentHash: found.intent_hash,
       accountIndex: found.account_index,
       chainId: found.chain_id,
-      targetHash: found.target_hash,
+      dedupKey: found.dedup_key,
       status: found.status,
       txHash: found.tx_hash,
       createdAt: found.created_at,
@@ -498,7 +438,7 @@ export class JsonApprovalStore extends ApprovalStore {
       intent_hash: entry.intentHash,
       account_index: entry.accountIndex,
       chain_id: entry.chainId,
-      target_hash: entry.targetHash,
+      dedup_key: entry.dedupKey,
       status: entry.status,
       tx_hash: null,
       created_at: now,
@@ -537,7 +477,7 @@ export class JsonApprovalStore extends ApprovalStore {
       intentHash: j.intent_hash,
       accountIndex: j.account_index,
       chainId: j.chain_id,
-      targetHash: j.target_hash,
+      dedupKey: j.dedup_key,
       status: j.status,
       txHash: j.tx_hash,
       createdAt: j.created_at,
@@ -553,7 +493,7 @@ export class JsonApprovalStore extends ApprovalStore {
       intent_hash: entry.intentHash,
       account_index: entry.accountIndex,
       chain_id: entry.chainId,
-      target_hash: entry.targetHash,
+      dedup_key: entry.dedupKey,
       reason: entry.reason,
       context_json: entry.context !== null && entry.context !== undefined ? JSON.stringify(entry.context) : null,
       policy_version: entry.policyVersion,
@@ -578,7 +518,7 @@ export class JsonApprovalStore extends ApprovalStore {
       intentHash: r.intent_hash,
       accountIndex: r.account_index,
       chainId: r.chain_id,
-      targetHash: r.target_hash,
+      dedupKey: r.dedup_key,
       reason: r.reason,
       context: r.context_json ? JSON.parse(r.context_json) as EvaluationContext : null,
       policyVersion: r.policy_version,

@@ -1,22 +1,22 @@
 export { createGuardedWDK } from './guarded-wdk-factory.js'
 export { SignedApprovalBroker } from './signed-approval-broker.js'
 export type { ApprovalSubmitContext } from './signed-approval-broker.js'
-export { ApprovalStore } from './approval-store.js'
-export { JsonApprovalStore } from './json-approval-store.js'
-export { SqliteApprovalStore } from './sqlite-approval-store.js'
+export { WdkStore } from './wdk-store.js'
+export { SqliteWdkStore } from './sqlite-wdk-store.js'
+export { JsonWdkStore } from './json-wdk-store.js'
+export { ExecutionJournal } from './execution-journal.js'
 export { verifyApproval } from './approval-verifier.js'
-export { verify, sign, generateKeyPair } from './crypto-utils.js'
+export { verify } from './crypto-utils.js'
 export {
   ForbiddenError,
   PolicyRejectionError,
+  DuplicateIntentError,
   ApprovalTimeoutError,
   SignatureError,
   UntrustedApproverError,
   SignerRevokedError,
   ApprovalExpiredError,
-  ReplayError,
-  WalletNotFoundError,
-  NoMasterSeedError
+  ReplayError
 } from './errors.js'
 
 // Re-export types
@@ -43,8 +43,7 @@ export type {
   PolicyVersionEntry,
   RejectionQueryOpts,
   PolicyDiff
-} from './approval-store.js'
+} from './wdk-store.js'
 export type { VerificationContext } from './approval-verifier.js'
-export type { KeyPair } from './crypto-utils.js'
-export type { EvaluationResult, EvaluationContext, FailedArg, RuleFailure, Rule, PermissionDict, SignTransactionResult, ArgCondition, Decision, Policy, CallPolicy, TimestampPolicy } from './guarded-middleware.js'
-export { permissionsToDict, validatePolicies } from './guarded-middleware.js'
+export type { EvaluationContext, Rule, PermissionDict, ArgCondition, Decision, Policy } from './guarded-middleware.js'
+export { validatePolicies } from './guarded-middleware.js'

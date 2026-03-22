@@ -1,8 +1,7 @@
 import { createGuardedWDK } from '../src/guarded-wdk-factory.js'
-import { SignedApprovalBroker } from '../src/signed-approval-broker.js'
 import { permissionsToDict } from '../src/guarded-middleware.js'
-import { ApprovalStore } from '../src/approval-store.js'
-import type { HistoryEntry, HistoryQueryOpts, ApprovalRequest, PolicyInput, PendingApprovalRequest } from '../src/approval-store.js'
+import { WdkStore } from '../src/wdk-store.js'
+import type { HistoryEntry, HistoryQueryOpts, ApprovalRequest, PolicyInput, PendingApprovalRequest } from '../src/wdk-store.js'
 
 // Mock WDK and WalletManager
 class MockWalletManager {
@@ -43,7 +42,7 @@ class MockWalletManager {
   dispose () {}
 }
 
-class MockApprovalStore extends ApprovalStore {
+class MockWdkStore extends WdkStore {
   _policies: Record<string, unknown> = {}
   _pending: Array<ApprovalRequest & Record<string, unknown>> = []
   _history: HistoryEntry[] = []
@@ -71,6 +70,21 @@ class MockApprovalStore extends ApprovalStore {
   override async revokeSigner (publicKey: string) { this._signers[publicKey] = { revoked: true } }
   override async getLastNonce (approver: string) { return this._nonces[approver] || 0 }
   override async updateNonce (approver: string, nonce: number) { this._nonces[approver] = nonce }
+  override async listPolicyVersions () { return [] }
+  override async getMasterSeed () { return null }
+  override async setMasterSeed () {}
+  override async getWallet () { return null }
+  override async createWallet () { return { accountIndex: 0, name: '', address: '', createdAt: 0 } }
+  override async deleteWallet () {}
+  override async listPolicyChains () { return [] }
+  override async loadPendingByRequestId () { return null }
+  override async saveSigner () {}
+  override async getSigner () { return null }
+  override async listSigners () { return [] }
+  override async getJournalEntry () { return null }
+  override async saveJournalEntry () {}
+  override async updateJournalStatus () {}
+  override async listJournal () { return [] }
 }
 
 function makeConfig (overrides: Record<string, unknown> = {}) {
@@ -79,7 +93,7 @@ function makeConfig (overrides: Record<string, unknown> = {}) {
     wallets: { 1: { Manager: MockWalletManager, config: {} } },
     protocols: {},
     approvalBroker: null,
-    approvalStore: new MockApprovalStore(),
+    approvalStore: new MockWdkStore(),
     trustedApprovers: ['0x' + 'ab'.repeat(32)],
     ...overrides
   }
@@ -92,8 +106,9 @@ describe('createGuardedWDK', () => {
     expect(typeof facade.getAccount).toBe('function')
     expect(typeof facade.getAccountByPath).toBe('function')
     expect(typeof facade.getFeeRates).toBe('function')
-    expect(typeof facade.getApprovalBroker).toBe('function')
-    expect(typeof facade.getApprovalStore).toBe('function')
+    expect(typeof facade.loadPolicy).toBe('function')
+    expect(typeof facade.submitApproval).toBe('function')
+    expect(typeof facade.listSigners).toBe('function')
     expect(typeof facade.on).toBe('function')
     expect(typeof facade.off).toBe('function')
     expect(typeof facade.dispose).toBe('function')
@@ -115,28 +130,32 @@ describe('createGuardedWDK', () => {
     expect(Object.isFrozen(account)).toBe(true)
   })
 
-  test('getApprovalBroker returns SignedApprovalBroker instance', async () => {
-    const facade = await createGuardedWDK(makeConfig())
-    const broker = facade.getApprovalBroker()
-    expect(broker).toBeInstanceOf(SignedApprovalBroker)
-  })
-
-  test('getApprovalStore returns store', async () => {
-    const store = new MockApprovalStore()
+  test('facade exposes store methods', async () => {
+    const store = new MockWdkStore()
     const facade = await createGuardedWDK(makeConfig({ approvalStore: store }))
-    expect(facade.getApprovalStore()).toBe(store)
+
+    expect(typeof facade.loadPolicy).toBe('function')
+    expect(typeof facade.getPendingApprovals).toBe('function')
+    expect(typeof facade.listRejections).toBe('function')
+    expect(typeof facade.listPolicyVersions).toBe('function')
+    expect(typeof facade.listSigners).toBe('function')
+    expect(typeof facade.listWallets).toBe('function')
+    expect(typeof facade.saveRejection).toBe('function')
   })
 
-  test('accepts external approvalBroker', async () => {
-    const store = new MockApprovalStore()
-    const { EventEmitter } = await import('node:events')
-    const externalBroker = new SignedApprovalBroker(['0x' + 'ab'.repeat(32)], store, new EventEmitter())
-    const facade = await createGuardedWDK(makeConfig({
-      approvalBroker: externalBroker,
-      trustedApprovers: []
-    }))
-    expect(facade.getApprovalBroker()).toBe(externalBroker)
-    expect(facade.getApprovalStore()).toBeInstanceOf(MockApprovalStore)
+  test('facade exposes broker methods', async () => {
+    const facade = await createGuardedWDK(makeConfig())
+
+    expect(typeof facade.submitApproval).toBe('function')
+    expect(typeof facade.createApprovalRequest).toBe('function')
+    expect(typeof facade.setTrustedApprovers).toBe('function')
+  })
+
+  test('facade does not expose getApprovalBroker or getWdkStore', async () => {
+    const facade = await createGuardedWDK(makeConfig())
+
+    expect((facade as unknown as Record<string, unknown>).getApprovalBroker).toBeUndefined()
+    expect((facade as unknown as Record<string, unknown>).getWdkStore).toBeUndefined()
   })
 
   test('throws if approvalStore not provided', async () => {
@@ -152,7 +171,7 @@ describe('createGuardedWDK', () => {
   })
 
   test('policyResolver reads from store at runtime', async () => {
-    const store = new MockApprovalStore()
+    const store = new MockWdkStore()
     await store.savePolicy(0, 1, {
       policies: [{ type: 'call', permissions: permissionsToDict([{ decision: 'ALLOW' as const }]) }],
       signature: {}
@@ -168,7 +187,7 @@ describe('createGuardedWDK', () => {
   })
 
   test('getAccount switches currentAccountIndex: sendTransaction uses correct wallet policy (F15/E4)', async () => {
-    const store = new MockApprovalStore()
+    const store = new MockWdkStore()
     // Account 0: AUTO for all calls
     await store.savePolicy(0, 1, {
       policies: [{ type: 'call', permissions: permissionsToDict([{ decision: 'ALLOW' as const }]) }],
@@ -208,7 +227,7 @@ describe('createGuardedWDK', () => {
   })
 
   test('getAccountByPath parses accountIndex from BIP-44 path and uses it for policy', async () => {
-    const store = new MockApprovalStore()
+    const store = new MockWdkStore()
     // Account 2: AUTO policy
     await store.savePolicy(2, 1, {
       policies: [{ type: 'call', permissions: permissionsToDict([{ decision: 'ALLOW' as const }]) }],

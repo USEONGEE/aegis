@@ -1,13 +1,13 @@
 import { SignedApprovalBroker } from '../src/signed-approval-broker.js'
-import { ApprovalStore } from '../src/approval-store.js'
-import type { HistoryEntry, HistoryQueryOpts, ApprovalRequest } from '../src/approval-store.js'
+import { WdkStore } from '../src/wdk-store.js'
+import type { HistoryEntry, HistoryQueryOpts, ApprovalRequest } from '../src/wdk-store.js'
 import { generateKeyPair, sign } from '../src/crypto-utils.js'
 import type { KeyPair } from '../src/crypto-utils.js'
 import { canonicalJSON } from '@wdk-app/canonical'
 import { createHash } from 'node:crypto'
 import { EventEmitter } from 'node:events'
 
-class MockApprovalStore extends ApprovalStore {
+class MockWdkStore extends WdkStore {
   _policies: Record<string, unknown> = {}
   _pending: Array<ApprovalRequest & Record<string, unknown>> = []
   _history: HistoryEntry[] = []
@@ -34,6 +34,22 @@ class MockApprovalStore extends ApprovalStore {
   override async revokeSigner (publicKey: string) { if (this._signers[publicKey]) { this._signers[publicKey].revoked = true } }
   override async getLastNonce (approver: string) { return this._nonces[approver] || 0 }
   override async updateNonce (approver: string, nonce: number) { this._nonces[approver] = nonce }
+  override async saveRejection () {}
+  override async listRejections () { return [] }
+  override async listPolicyVersions () { return [] }
+  override async getMasterSeed () { return null }
+  override async setMasterSeed () {}
+  override async listWallets () { return [] }
+  override async getWallet () { return null }
+  override async createWallet () { return { accountIndex: 0, name: '', address: '', createdAt: 0 } }
+  override async deleteWallet () {}
+  override async listPolicyChains () { return [] }
+  override async loadPendingByRequestId () { return null }
+  override async getSigner () { return null }
+  override async getJournalEntry () { return null }
+  override async saveJournalEntry () {}
+  override async updateJournalStatus () {}
+  override async listJournal () { return [] }
 }
 
 function makeSignedApproval (keyPair: KeyPair, overrides: Record<string, unknown> = {}) {
@@ -59,12 +75,12 @@ function makeSignedApproval (keyPair: KeyPair, overrides: Record<string, unknown
 
 describe('SignedApprovalBroker', () => {
   let broker: SignedApprovalBroker
-  let store: MockApprovalStore
+  let store: MockWdkStore
   let keyPair: KeyPair
   let emitter: EventEmitter
 
   beforeEach(() => {
-    store = new MockApprovalStore()
+    store = new MockWdkStore()
     keyPair = generateKeyPair()
     emitter = new EventEmitter()
     broker = new SignedApprovalBroker([keyPair.publicKey], store, emitter)

@@ -2,7 +2,7 @@ import { randomUUID, createHash } from 'node:crypto'
 import { verifyApproval } from './approval-verifier.js'
 import type { VerificationContext } from './approval-verifier.js'
 import { ApprovalTimeoutError } from './errors.js'
-import type { SignedApproval, ApprovalStore, ApprovalType, ApprovalRequest, PendingApprovalRequest, PolicyInput } from './approval-store.js'
+import type { SignedApproval, WdkStore, ApprovalType, ApprovalRequest, PendingApprovalRequest, PolicyInput } from './wdk-store.js'
 import type { Policy } from './guarded-middleware.js'
 import type { EventEmitter } from 'node:events'
 
@@ -40,11 +40,11 @@ export type ApprovalSubmitContext =
  */
 export class SignedApprovalBroker {
   private _trustedApprovers: string[]
-  private _store: ApprovalStore
+  private _store: WdkStore
   private _emitter: EventEmitter
   private _waiters: Map<string, Waiter>
 
-  constructor (trustedApprovers: string[], store: ApprovalStore, emitter: EventEmitter) {
+  constructor (trustedApprovers: string[], store: WdkStore, emitter: EventEmitter) {
     this._trustedApprovers = trustedApprovers
     this._store = store
     this._emitter = emitter
