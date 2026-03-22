@@ -1,5 +1,32 @@
 # Changelog
 
+## v0.4.4 - App WDK 이벤트 마이그레이션 (2026-03-22)
+
+- **sendApproval() WDK 이벤트 전환**: ControlResult 대기 → event_stream 기반. 6종 승인 타입별 성공 이벤트 매핑 (tx→ExecutionBroadcasted, policy→PolicyApplied, revoke→SignerRevoked, wallet→WalletCreated/Deleted). ApprovalFailed로 실패 처리.
+- **eventName → event.type 마이그레이션**: DashboardScreen, SettingsScreen에서 v0.4.2 호환성 복원
+- **Activity Store 이벤트 적재**: RootNavigator syncHandler에서 event_stream → useActivityStore.addEvent(). ActivityEventType에 ApprovalFailed + 4종 추가
+- **Identity 이벤트에 requestId 추가**: SignerRevoked, WalletCreated, WalletDeleted에 requestId 필드 추가 (protocol + broker)
+- 📝 [Phase 문서](../archive/v0.4.4-app-wdk-event-migration/README.md)
+
+### 수치
+- tsc: protocol + guarded-wdk + daemon + app 모두 통과
+- 5 files changed (app) + 2 files changed (protocol/guarded-wdk requestId 보완)
+
+## v0.4.2 - WDK 이벤트 단일화 + 타입 규격화 (2026-03-22)
+
+- **Dual Emitter 버그 수정**: daemon이 자체 emitter/broker 생성하던 것을 제거. factory 단독 소유로 통일. broker 이벤트가 wdk.on()에 정상 도달.
+- **14종 WDK 이벤트 타입 시스템**: protocol/src/events.ts에 WDKEventBase + 14종 개별 타입 + AnyWDKEvent union 정의
+- **원자적 이벤트 발행**: submitApproval() 리팩토링 — 도메인 처리 완료 후 best-effort emit. 실패 시 ApprovalFailed만 발행.
+- **Broker에 후처리 내재화**: savePolicy, setTrustedApprovers를 broker 내부로 이동. ApprovalSubmitContext discriminated union 도입.
+- **Control-Handler 단순화**: store 직접 접근 제거. 승인 6종 null 반환 (WDK 이벤트 대체). cancel 2종 ControlResult 유지.
+- **EventStreamEvent 정리**: eventName 제거, event.type이 source of truth. AnyWDKEvent 타입 적용.
+- 📝 [Phase 문서](../archive/v0.4.2-wdk-event-unification/README.md)
+
+### 수치
+- daemon jest: 65/65 passed
+- tsc: protocol + guarded-wdk + daemon 모두 통과
+- 10 files changed, ~900 lines modified
+
 ## v0.4.1 - Strict CI Checks (2026-03-22)
 
 - **no-empty-catch 체크 신규**: CatchClause AST → Block.getStatements().length === 0 판별. 주석만 있는 catch도 위반 (11→0)

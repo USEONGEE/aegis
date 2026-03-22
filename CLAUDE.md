@@ -55,7 +55,7 @@ AI DeFi Agent 서명 엔진 + 제어 인프라.
 | v0.4.0 | No Optional 원칙 전면 적용 |
 | v0.4.1 | Strict CI Checks (no-empty-catch, no-console, no-explicit-any) |
 | v0.4.2 | WDK 이벤트 단일화 + 타입 규격화 |
-| v0.4.3 | (후속) App ControlResult→WDK 이벤트 전환 — app의 sendApproval()이 ApprovalVerified/ApprovalFailed를 수신하도록 변경 |
+| v0.4.4 | App WDK 이벤트 마이그레이션 — sendApproval() 전환 + eventName→event.type + 이벤트 자동 소비 |
 
 ## 프로젝트 구조
 
