@@ -71,6 +71,21 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
   {
     type: 'function',
     function: {
+      name: 'getWalletAddress',
+      description: 'Get the wallet address for the specified chain and account index.',
+      parameters: {
+        type: 'object',
+        properties: {
+          chain: { type: 'string', description: 'Target chain identifier' },
+          accountIndex: { type: 'number', description: 'BIP-44 account index' }
+        },
+        required: ['chain', 'accountIndex']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
       name: 'policyList',
       description: 'List active policies for the specified chain.',
       parameters: {

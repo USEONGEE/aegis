@@ -62,8 +62,10 @@ export async function initWDK (config: DaemonConfig, logger: Logger): Promise<WD
     .filter(d => d.status.kind === 'active')
     .map(d => d.publicKey)
 
-  // EVM wallet manager 등록: policy 평가 미들웨어가 chain '1'에 대해 동작하도록.
-  const EVM_CHAIN_KEY = '1'
+  // EVM wallet manager 등록: HyperEVM (chain 999) 데모 환경.
+  // IMPORTANT: 이 값은 AI tool 호출의 chain 파라미터와 일치해야 한다.
+  // TOOLS.md에서 AI에게 chain: "999"를 사용하도록 지시하고 있다.
+  const EVM_CHAIN_KEY = '999'
 
   // Factory가 emitter + broker를 소유. daemon은 facade 메서드만 사용.
   const facade = await createGuardedWDK({

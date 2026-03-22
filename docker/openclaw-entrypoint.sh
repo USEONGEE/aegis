@@ -28,7 +28,7 @@ if (daemon) {
     deny: ["group:openclaw"],
     allow: [
       "session_status",
-      "sendTransaction", "transfer", "getBalance", "signTransaction",
+      "sendTransaction", "transfer", "getBalance", "getWalletAddress", "signTransaction",
       "policyList", "policyPending", "policyRequest", "listRejections", "listPolicyVersions",
       "registerCron", "listCrons", "removeCron",
       "kittenFetch", "kittenMint", "kittenBurn",

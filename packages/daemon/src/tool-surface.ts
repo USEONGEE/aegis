@@ -116,6 +116,14 @@ interface GetBalanceSuccess {
 
 export type GetBalanceResult = GetBalanceSuccess | ToolErrorResult
 
+// 3b. getWalletAddress
+interface GetWalletAddressSuccess {
+  status: 'ok'
+  address: string
+}
+
+export type GetWalletAddressResult = GetWalletAddressSuccess | ToolErrorResult
+
 // 4. policyList
 interface PolicyListSuccess {
   policies: Policy[]
@@ -232,6 +240,7 @@ export type AnyToolResult =
   | SendTransactionResult
   | TransferResult
   | GetBalanceResult
+  | GetWalletAddressResult
   | PolicyListResult
   | PolicyPendingResult
   | PolicyRequestResult
@@ -342,7 +351,7 @@ export async function executeToolCall (name: string, args: ToolArgs, ctx: ToolEx
   const accountIndex = (args as Record<string, unknown>).accountIndex as number | undefined
 
   // Tools that require facade (WDK) — fail fast if not initialized
-  const FACADE_REQUIRED = ['sendTransaction', 'transfer', 'getBalance', 'policyList', 'policyPending', 'policyRequest', 'signTransaction', 'listRejections', 'listPolicyVersions']
+  const FACADE_REQUIRED = ['sendTransaction', 'transfer', 'getBalance', 'getWalletAddress', 'policyList', 'policyPending', 'policyRequest', 'signTransaction', 'listRejections', 'listPolicyVersions']
   if (FACADE_REQUIRED.includes(name) && !facadeOrNull) {
     return { status: 'error', error: 'WDK not initialized (no master seed)' }
   }
@@ -419,6 +428,21 @@ export async function executeToolCall (name: string, args: ToolArgs, ctx: ToolEx
         return { balances: Array.isArray(balance) ? balance : [balance] }
       } catch (err: unknown) {
         logger.error({ err, name: 'getBalance' }, 'Tool execution error')
+        return { status: 'error', error: errMsg(err) }
+      }
+    }
+
+    // -----------------------------------------------------------------------
+    // 3b. getWalletAddress
+    // -----------------------------------------------------------------------
+    case 'getWalletAddress': {
+      const { chain, accountIndex } = args as ChainArgs
+      try {
+        const account = await facade.getAccount(chain, accountIndex) as unknown as ToolAccount
+        const address = await (account as unknown as { getAddress: () => Promise<string> }).getAddress()
+        return { status: 'ok', address }
+      } catch (err: unknown) {
+        logger.error({ err, name: 'getWalletAddress' }, 'Tool execution error')
         return { status: 'error', error: errMsg(err) }
       }
     }

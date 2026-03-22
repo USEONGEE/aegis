@@ -71,6 +71,13 @@ export default function register (api: { registerTool: (tool: unknown) => void }
       accountIndex: Type.Number({ description: 'BIP-44 account index' })
     })))
 
+  api.registerTool(tool('getWalletAddress',
+    'Get the wallet address for the specified chain and account index.',
+    Type.Object({
+      chain: Type.String({ description: 'Target chain identifier' }),
+      accountIndex: Type.Number({ description: 'BIP-44 account index' })
+    })))
+
   api.registerTool(tool('signTransaction',
     'Sign a transaction without broadcasting. Returns signed tx data for later submission.',
     Type.Object({

@@ -95,8 +95,9 @@ services:
       # Tool API (called by OpenClaw plugin)
       TOOL_API_PORT: 18790
       TOOL_API_TOKEN: ${TOOL_API_TOKEN:-wdk-tool-token}
-      # Master seed (BIP-39 mnemonic)
+      # Master seed (BIP-39 mnemonic) + derived wallet address
       MASTER_SEED: ${MASTER_SEED:-}
+      WALLET_ADDRESS: ${WALLET_ADDRESS:-}
     depends_on:
       relay:
         condition: service_started

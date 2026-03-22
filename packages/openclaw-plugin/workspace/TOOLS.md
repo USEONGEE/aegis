@@ -19,6 +19,7 @@ All tools that take a `chain` parameter must receive the **number** `999`, not a
 | Tool | Purpose | Key Params |
 |------|---------|------------|
 | `getBalance` | Check wallet balances | chain, accountIndex |
+| `getWalletAddress` | Get wallet address | chain, accountIndex |
 | `policyList` | List active policies | chain, accountIndex |
 | `policyPending` | List pending approval requests | chain, accountIndex |
 | `listRejections` | Transaction rejection history | chain, accountIndex |
