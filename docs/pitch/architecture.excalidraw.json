@@ -1,0 +1,101 @@
+{
+  "type": "excalidraw",
+  "version": 2,
+  "source": "claude-code",
+  "elements": [
+    {"type":"text","id":"title","x":230,"y":0,"text":"Aegis Architecture","fontSize":28,"fontFamily":1,"textAlign":"left","verticalAlign":"top","strokeColor":"#1e1e1e","baseline":25},
+    {"type":"text","id":"subtitle","x":210,"y":38,"text":"Policy-enforced AI Execution Engine","fontSize":16,"fontFamily":1,"textAlign":"left","verticalAlign":"top","strokeColor":"#757575","baseline":14},
+
+    {"type":"rectangle","id":"zone_defi","x":0,"y":80,"width":750,"height":90,"backgroundColor":"#ffd8a8","fillStyle":"solid","roundness":{"type":3},"strokeColor":"#f59e0b","strokeWidth":1,"opacity":30,"boundElements":[]},
+    {"type":"text","id":"zone_defi_label","x":20,"y":88,"text":"DeFi Protocols","fontSize":16,"fontFamily":1,"textAlign":"left","verticalAlign":"top","strokeColor":"#b45309","baseline":14},
+
+    {"type":"rectangle","id":"uniswap","x":30,"y":110,"width":130,"height":45,"backgroundColor":"#ffd8a8","fillStyle":"solid","roundness":{"type":3},"strokeColor":"#f59e0b","boundElements":[{"type":"text","id":"uniswap_t"}]},
+    {"type":"text","id":"uniswap_t","x":35,"y":120,"text":"Uniswap","fontSize":16,"fontFamily":1,"textAlign":"center","verticalAlign":"middle","strokeColor":"#1e1e1e","containerId":"uniswap","width":120,"height":20},
+
+    {"type":"rectangle","id":"aave","x":180,"y":110,"width":130,"height":45,"backgroundColor":"#ffd8a8","fillStyle":"solid","roundness":{"type":3},"strokeColor":"#f59e0b","boundElements":[{"type":"text","id":"aave_t"}]},
+    {"type":"text","id":"aave_t","x":185,"y":120,"text":"Aave","fontSize":16,"fontFamily":1,"textAlign":"center","verticalAlign":"middle","strokeColor":"#1e1e1e","containerId":"aave","width":120,"height":20},
+
+    {"type":"rectangle","id":"compound","x":330,"y":110,"width":130,"height":45,"backgroundColor":"#ffd8a8","fillStyle":"solid","roundness":{"type":3},"strokeColor":"#f59e0b","boundElements":[{"type":"text","id":"compound_t"}]},
+    {"type":"text","id":"compound_t","x":335,"y":120,"text":"Compound","fontSize":16,"fontFamily":1,"textAlign":"center","verticalAlign":"middle","strokeColor":"#1e1e1e","containerId":"compound","width":120,"height":20},
+
+    {"type":"rectangle","id":"etc_proto","x":480,"y":110,"width":130,"height":45,"backgroundColor":"#ffd8a8","fillStyle":"solid","roundness":{"type":3},"strokeColor":"#f59e0b","boundElements":[{"type":"text","id":"etc_proto_t"}]},
+    {"type":"text","id":"etc_proto_t","x":485,"y":120,"text":"Any Protocol","fontSize":16,"fontFamily":1,"textAlign":"center","verticalAlign":"middle","strokeColor":"#1e1e1e","containerId":"etc_proto","width":120,"height":20},
+
+    {"type":"rectangle","id":"manifest_box","x":250,"y":195,"width":250,"height":50,"backgroundColor":"#fff3bf","fillStyle":"solid","roundness":{"type":3},"strokeColor":"#f59e0b","strokeWidth":2,"boundElements":[{"type":"text","id":"manifest_box_t"}]},
+    {"type":"text","id":"manifest_box_t","x":255,"y":205,"text":"Manifest (JSON)","fontSize":18,"fontFamily":1,"textAlign":"center","verticalAlign":"middle","strokeColor":"#1e1e1e","containerId":"manifest_box","width":240,"height":23},
+
+    {"type":"arrow","id":"a_proto_manifest","x":375,"y":155,"width":0,"height":40,"points":[[0,0],[0,40]],"strokeColor":"#f59e0b","strokeWidth":2,"endArrowhead":"arrow"},
+
+    {"type":"rectangle","id":"zone_daemon","x":0,"y":270,"width":750,"height":280,"backgroundColor":"#e5dbff","fillStyle":"solid","roundness":{"type":3},"strokeColor":"#8b5cf6","strokeWidth":1,"opacity":30,"boundElements":[]},
+    {"type":"text","id":"zone_daemon_label","x":20,"y":278,"text":"Daemon (Orchestration Host)","fontSize":16,"fontFamily":1,"textAlign":"left","verticalAlign":"top","strokeColor":"#6d28d9","baseline":14},
+
+    {"type":"rectangle","id":"ai_agent","x":30,"y":310,"width":180,"height":90,"backgroundColor":"#d0bfff","fillStyle":"solid","roundness":{"type":3},"strokeColor":"#8b5cf6","strokeWidth":2,"boundElements":[{"type":"text","id":"ai_agent_t"}]},
+    {"type":"text","id":"ai_agent_t","x":35,"y":335,"text":"AI Agent\n(OpenClaw)","fontSize":18,"fontFamily":1,"textAlign":"center","verticalAlign":"middle","strokeColor":"#1e1e1e","containerId":"ai_agent","width":170,"height":46},
+
+    {"type":"text","id":"ai_note","x":45,"y":405,"text":"12 tools only","fontSize":14,"fontFamily":1,"textAlign":"left","verticalAlign":"top","strokeColor":"#6d28d9","baseline":12},
+
+    {"type":"arrow","id":"a_ai_wdk","x":210,"y":355,"width":100,"height":0,"points":[[0,0],[100,0]],"strokeColor":"#1e1e1e","strokeWidth":2,"endArrowhead":"arrow","boundElements":[{"type":"text","id":"a_ai_wdk_t"}]},
+    {"type":"text","id":"a_ai_wdk_t","x":235,"y":335,"text":"tool call","fontSize":14,"fontFamily":1,"textAlign":"center","verticalAlign":"middle","strokeColor":"#1e1e1e","containerId":"a_ai_wdk","width":50,"height":18},
+
+    {"type":"rectangle","id":"zone_wdk","x":310,"y":295,"width":420,"height":240,"backgroundColor":"#dbe4ff","fillStyle":"solid","roundness":{"type":3},"strokeColor":"#4a9eed","strokeWidth":1,"opacity":40,"boundElements":[]},
+    {"type":"text","id":"zone_wdk_label","x":330,"y":300,"text":"GuardedWDK (Signing Engine)","fontSize":16,"fontFamily":1,"textAlign":"left","verticalAlign":"top","strokeColor":"#2563eb","baseline":14},
+
+    {"type":"rectangle","id":"policy_engine","x":340,"y":330,"width":180,"height":70,"backgroundColor":"#a5d8ff","fillStyle":"solid","roundness":{"type":3},"strokeColor":"#4a9eed","strokeWidth":2,"boundElements":[{"type":"text","id":"policy_engine_t"}]},
+    {"type":"text","id":"policy_engine_t","x":345,"y":350,"text":"Policy Engine","fontSize":18,"fontFamily":1,"textAlign":"center","verticalAlign":"middle","strokeColor":"#1e1e1e","containerId":"policy_engine","width":170,"height":23},
+
+    {"type":"arrow","id":"a_manifest_policy","x":375,"y":245,"width":55,"height":85,"points":[[0,0],[55,85]],"strokeColor":"#f59e0b","strokeWidth":2,"endArrowhead":"arrow","boundElements":[{"type":"text","id":"a_manifest_policy_t"}]},
+    {"type":"text","id":"a_manifest_policy_t","x":375,"y":275,"text":"auto-gen","fontSize":14,"fontFamily":1,"textAlign":"center","verticalAlign":"middle","strokeColor":"#1e1e1e","containerId":"a_manifest_policy","width":55,"height":18},
+
+    {"type":"diamond","id":"decision","x":570,"y":325,"width":130,"height":80,"backgroundColor":"#fff3bf","fillStyle":"solid","strokeColor":"#f59e0b","strokeWidth":2,"boundElements":[{"type":"text","id":"decision_t"}]},
+    {"type":"text","id":"decision_t","x":595,"y":352,"text":"Decision","fontSize":16,"fontFamily":1,"textAlign":"center","verticalAlign":"middle","strokeColor":"#1e1e1e","containerId":"decision","width":80,"height":20},
+
+    {"type":"arrow","id":"a_policy_decision","x":520,"y":365,"width":50,"height":0,"points":[[0,0],[50,0]],"strokeColor":"#1e1e1e","strokeWidth":2,"endArrowhead":"arrow"},
+
+    {"type":"rectangle","id":"allow_box","x":560,"y":430,"width":120,"height":50,"backgroundColor":"#b2f2bb","fillStyle":"solid","roundness":{"type":3},"strokeColor":"#22c55e","strokeWidth":2,"boundElements":[{"type":"text","id":"allow_box_t"}]},
+    {"type":"text","id":"allow_box_t","x":565,"y":442,"text":"ALLOW","fontSize":18,"fontFamily":1,"textAlign":"center","verticalAlign":"middle","strokeColor":"#1e1e1e","containerId":"allow_box","width":110,"height":23},
+    {"type":"arrow","id":"a_dec_allow","x":620,"y":405,"width":0,"height":25,"points":[[0,0],[0,25]],"strokeColor":"#22c55e","strokeWidth":2,"endArrowhead":"arrow"},
+    {"type":"text","id":"allow_desc","x":555,"y":485,"text":"Sign + Execute\nNo human needed","fontSize":14,"fontFamily":1,"textAlign":"center","verticalAlign":"top","strokeColor":"#15803d","baseline":12},
+
+    {"type":"rectangle","id":"reject_box","x":340,"y":430,"width":120,"height":50,"backgroundColor":"#ffc9c9","fillStyle":"solid","roundness":{"type":3},"strokeColor":"#ef4444","strokeWidth":2,"boundElements":[{"type":"text","id":"reject_box_t"}]},
+    {"type":"text","id":"reject_box_t","x":345,"y":442,"text":"REJECT","fontSize":18,"fontFamily":1,"textAlign":"center","verticalAlign":"middle","strokeColor":"#1e1e1e","containerId":"reject_box","width":110,"height":23},
+    {"type":"arrow","id":"a_dec_reject","x":600,"y":375,"width":-140,"height":55,"points":[[0,0],[-140,55]],"strokeColor":"#ef4444","strokeWidth":2,"endArrowhead":"arrow"},
+    {"type":"text","id":"reject_desc","x":330,"y":485,"text":"Ask Owner\nfor approval","fontSize":14,"fontFamily":1,"textAlign":"center","verticalAlign":"top","strokeColor":"#dc2626","baseline":12},
+
+    {"type":"rectangle","id":"journal","x":340,"y":500,"width":130,"height":35,"backgroundColor":"#c3fae8","fillStyle":"solid","roundness":{"type":3},"strokeColor":"#06b6d4","boundElements":[{"type":"text","id":"journal_t"}]},
+    {"type":"text","id":"journal_t","x":345,"y":507,"text":"Exec Journal","fontSize":14,"fontFamily":1,"textAlign":"center","verticalAlign":"middle","strokeColor":"#1e1e1e","containerId":"journal","width":120,"height":18},
+
+    {"type":"rectangle","id":"zone_relay","x":0,"y":575,"width":750,"height":80,"backgroundColor":"#d3f9d8","fillStyle":"solid","roundness":{"type":3},"strokeColor":"#22c55e","strokeWidth":1,"opacity":30,"boundElements":[]},
+    {"type":"text","id":"zone_relay_label","x":20,"y":583,"text":"Relay (Blind Message Bus)","fontSize":16,"fontFamily":1,"textAlign":"left","verticalAlign":"top","strokeColor":"#15803d","baseline":14},
+
+    {"type":"rectangle","id":"relay_core","x":250,"y":590,"width":250,"height":50,"backgroundColor":"#c3fae8","fillStyle":"solid","roundness":{"type":3},"strokeColor":"#06b6d4","strokeWidth":2,"boundElements":[{"type":"text","id":"relay_core_t"}]},
+    {"type":"text","id":"relay_core_t","x":255,"y":603,"text":"E2E Encrypted\nRedis Streams","fontSize":14,"fontFamily":1,"textAlign":"center","verticalAlign":"middle","strokeColor":"#1e1e1e","containerId":"relay_core","width":240,"height":36},
+
+    {"type":"arrow","id":"a_daemon_relay","x":375,"y":550,"width":0,"height":40,"points":[[0,0],[0,40]],"strokeColor":"#1e1e1e","strokeWidth":2,"endArrowhead":"arrow","boundElements":[{"type":"text","id":"a_daemon_relay_t"}]},
+    {"type":"text","id":"a_daemon_relay_t","x":385,"y":560,"text":"WebSocket","fontSize":14,"fontFamily":1,"textAlign":"center","verticalAlign":"middle","strokeColor":"#1e1e1e","containerId":"a_daemon_relay","width":70,"height":18},
+
+    {"type":"rectangle","id":"zone_app","x":0,"y":680,"width":750,"height":120,"backgroundColor":"#dbe4ff","fillStyle":"solid","roundness":{"type":3},"strokeColor":"#4a9eed","strokeWidth":1,"opacity":30,"boundElements":[]},
+    {"type":"text","id":"zone_app_label","x":20,"y":688,"text":"Mobile App (Owner Control)","fontSize":16,"fontFamily":1,"textAlign":"left","verticalAlign":"top","strokeColor":"#2563eb","baseline":14},
+
+    {"type":"arrow","id":"a_relay_app","x":375,"y":640,"width":0,"height":40,"points":[[0,0],[0,40]],"strokeColor":"#1e1e1e","strokeWidth":2,"endArrowhead":"arrow","boundElements":[{"type":"text","id":"a_relay_app_t"}]},
+    {"type":"text","id":"a_relay_app_t","x":385,"y":650,"text":"WebSocket","fontSize":14,"fontFamily":1,"textAlign":"center","verticalAlign":"middle","strokeColor":"#1e1e1e","containerId":"a_relay_app","width":70,"height":18},
+
+    {"type":"rectangle","id":"app_chat","x":30,"y":710,"width":130,"height":50,"backgroundColor":"#a5d8ff","fillStyle":"solid","roundness":{"type":3},"strokeColor":"#4a9eed","boundElements":[{"type":"text","id":"app_chat_t"}]},
+    {"type":"text","id":"app_chat_t","x":35,"y":722,"text":"Chat","fontSize":16,"fontFamily":1,"textAlign":"center","verticalAlign":"middle","strokeColor":"#1e1e1e","containerId":"app_chat","width":120,"height":20},
+
+    {"type":"rectangle","id":"app_approval","x":180,"y":710,"width":130,"height":50,"backgroundColor":"#a5d8ff","fillStyle":"solid","roundness":{"type":3},"strokeColor":"#4a9eed","boundElements":[{"type":"text","id":"app_approval_t"}]},
+    {"type":"text","id":"app_approval_t","x":185,"y":722,"text":"Approval","fontSize":16,"fontFamily":1,"textAlign":"center","verticalAlign":"middle","strokeColor":"#1e1e1e","containerId":"app_approval","width":120,"height":20},
+
+    {"type":"rectangle","id":"app_policy","x":330,"y":710,"width":130,"height":50,"backgroundColor":"#a5d8ff","fillStyle":"solid","roundness":{"type":3},"strokeColor":"#4a9eed","boundElements":[{"type":"text","id":"app_policy_t"}]},
+    {"type":"text","id":"app_policy_t","x":335,"y":722,"text":"Policy Mgmt","fontSize":16,"fontFamily":1,"textAlign":"center","verticalAlign":"middle","strokeColor":"#1e1e1e","containerId":"app_policy","width":120,"height":20},
+
+    {"type":"rectangle","id":"app_activity","x":480,"y":710,"width":130,"height":50,"backgroundColor":"#a5d8ff","fillStyle":"solid","roundness":{"type":3},"strokeColor":"#4a9eed","boundElements":[{"type":"text","id":"app_activity_t"}]},
+    {"type":"text","id":"app_activity_t","x":485,"y":722,"text":"Activity","fontSize":16,"fontFamily":1,"textAlign":"center","verticalAlign":"middle","strokeColor":"#1e1e1e","containerId":"app_activity","width":120,"height":20},
+
+    {"type":"rectangle","id":"key_box","x":250,"y":775,"width":250,"height":35,"backgroundColor":"#ffc9c9","fillStyle":"solid","roundness":{"type":3},"strokeColor":"#ef4444","strokeWidth":2,"boundElements":[{"type":"text","id":"key_box_t"}]},
+    {"type":"text","id":"key_box_t","x":255,"y":782,"text":"Ed25519 Key (never leaves device)","fontSize":14,"fontFamily":1,"textAlign":"center","verticalAlign":"middle","strokeColor":"#1e1e1e","containerId":"key_box","width":240,"height":18}
+  ],
+  "appState": {
+    "viewBackgroundColor": "#ffffff"
+  },
+  "files": {}
+}
