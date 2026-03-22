@@ -317,11 +317,13 @@ export default async function wsRoutes (fastify: FastifyInstance): Promise<void>
         return send(socket, { type: 'error', message: 'Not authenticated' })
       }
 
-      /* ---- subscribe_chat: one-shot backfill for newly discovered sessions ---- */
+      /* ---- subscribe_chat: backfill + continuous polling ---- */
       if (msg.type === 'subscribe_chat') {
         const sessionId = (msg.payload as Record<string, unknown> | undefined)?.sessionId as string | undefined
+        const cursor = (msg.payload as Record<string, unknown> | undefined)?.cursor as string | undefined
         if (sessionId && userId) {
-          backfillChatStream(userId, sessionId, '0', socket)
+          backfillChatStream(userId, sessionId, cursor || '0', socket)
+          pollChatForApp(userId, sessionId, cursor || '$', socket, ac.signal)
         }
         return
       }
@@ -367,7 +369,17 @@ export default async function wsRoutes (fastify: FastifyInstance): Promise<void>
         if (msg.encrypted) entry.encrypted = '1'
         await queue.publish(stream, entry)
 
-        // v0.4.8: 직접 forward 제거. Redis → poller가 유일한 전달 경로.
+        // v0.5.0: Chat은 daemon에 직접 forward (sessionId 기반이라 polling 불가)
+        if (msg.type === 'chat') {
+          const daemonId = userToDaemon.get(userId)
+          if (daemonId) {
+            const ds = daemonSockets.get(daemonId)
+            if (ds) {
+              send(ds.socket, { type: 'chat', userId, sessionId: msg.sessionId, payload: msg.payload })
+            }
+          }
+        }
+        // control은 pollControlForDaemon()이 전달
         return
       }
 
@@ -471,6 +483,36 @@ export default async function wsRoutes (fastify: FastifyInstance): Promise<void>
       fastify.log.info({ userId, sessionId, startId, count: entries.length }, 'Chat backfill completed')
     } catch (err: unknown) {
       fastify.log.error({ err: err instanceof Error ? err.message : String(err), userId, sessionId }, 'Chat backfill error')
+    }
+  }
+
+  // -----------------------------------------------------------------------
+  // Chat polling — App (continuous, per session)
+  // -----------------------------------------------------------------------
+
+  async function pollChatForApp (
+    userId: string, sessionId: string, initialCursor: string, socket: WebSocket, signal: AbortSignal
+  ): Promise<void> {
+    const stream = `chat:${userId}:${sessionId}`
+    let cursor = initialCursor
+    while (!signal.aborted) {
+      try {
+        const entries = await queue.consume(stream, cursor, 20)
+        for (const entry of entries) {
+          cursor = entry.id
+          if (entry.data.sender === 'app') continue // echo 방지
+          const payload = tryParseJSON(entry.data.payload)
+          const encrypted = entry.data.encrypted === '1'
+          const out: OutgoingMessage = { type: 'chat', id: entry.id, sessionId, payload }
+          if (encrypted) out.encrypted = true
+          send(socket, out)
+        }
+      } catch (err: unknown) {
+        if (!signal.aborted) {
+          fastify.log.error({ err: err instanceof Error ? err.message : String(err), userId, sessionId }, 'App chat poll error')
+          await sleep(1000)
+        }
+      }
     }
   }
 
