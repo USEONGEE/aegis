@@ -1,167 +1,252 @@
-import React, { useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import {
   View,
   Text,
-  FlatList,
-  Pressable,
   ScrollView,
+  Pressable,
+  ActivityIndicator,
   StyleSheet,
 } from 'react-native';
-import {
-  useActivityStore,
-  type ActivityEvent,
-  type ActivityFilter,
-  type ActivityEventType,
-} from '../../../stores/useActivityStore';
+import { RelayClient } from '../../../core/relay/RelayClient';
+import { useWalletStore } from '../../../stores/useWalletStore';
 
-/**
- * ActivityScreen — Event timeline with type filters.
- *
- * Events come from daemon's Guarded WDK via Relay in real-time:
- * - IntentProposed, PolicyEvaluated, ApprovalRequested, ...
- * - ExecutionBroadcasted, ExecutionSettled, ExecutionFailed, ...
- * - PendingPolicyRequested, PolicyApplied, SignerRevoked
- */
+// --- Types ---
 
-const FILTER_OPTIONS: { label: string; value: ActivityFilter }[] = [
-  { label: 'All', value: 'all' },
-  { label: 'Intent', value: 'IntentProposed' },
-  { label: 'Policy', value: 'PolicyEvaluated' },
-  { label: 'Approval', value: 'ApprovalVerified' },
-  { label: 'Executed', value: 'ExecutionBroadcasted' },
-  { label: 'Settled', value: 'ExecutionSettled' },
-  { label: 'Failed', value: 'ExecutionFailed' },
-  { label: 'Signer', value: 'SignerRevoked' },
-];
+const DEMO_CHAIN_ID = 999;
 
-export function ActivityScreen() {
-  const { filter, setFilter, getFilteredEvents } = useActivityStore();
-  const events = getFilteredEvents();
-
-  return (
-    <View style={styles.container}>
-      {/* Filter bar */}
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        style={styles.filterBar}
-        contentContainerStyle={styles.filterBarContent}
-      >
-        {FILTER_OPTIONS.map((opt) => (
-          <Pressable
-            key={opt.value}
-            style={[styles.filterChip, filter === opt.value && styles.filterChipActive]}
-            onPress={() => setFilter(opt.value)}
-          >
-            <Text
-              style={[styles.filterChipText, filter === opt.value && styles.filterChipTextActive]}
-            >
-              {opt.label}
-            </Text>
-          </Pressable>
-        ))}
-      </ScrollView>
-
-      {/* Event list */}
-      {events.length === 0 ? (
-        <View style={styles.emptyState}>
-          <Text style={styles.emptyTitle}>No Activity</Text>
-          <Text style={styles.emptySubtitle}>
-            Events from the WDK daemon will appear here in real-time as
-            transactions are proposed, evaluated, and executed.
-          </Text>
-        </View>
-      ) : (
-        <FlatList
-          data={events}
-          keyExtractor={(item) => item.id}
-          renderItem={({ item }) => <EventCard event={item} />}
-          contentContainerStyle={styles.listContent}
-        />
-      )}
-    </View>
-  );
+interface DisplayPolicy {
+  target: string;
+  selector: string;
+  decision: string;
 }
 
-// --- Event Card ---
-
-function EventCard({ event }: { event: ActivityEvent }) {
-  const icon = getEventIcon(event.type);
-  const color = getEventColor(event.type);
-
-  return (
-    <View style={styles.eventCard}>
-      {/* Timeline dot */}
-      <View style={styles.timeline}>
-        <View style={[styles.timelineDot, { backgroundColor: color }]} />
-        <View style={styles.timelineLine} />
-      </View>
-
-      {/* Content */}
-      <View style={styles.eventContent}>
-        <View style={styles.eventHeader}>
-          <Text style={[styles.eventType, { color }]}>{icon} {event.type}</Text>
-          {event.chainId && (
-            <Text style={styles.eventChain}>{event.chainId}</Text>
-          )}
-        </View>
-        <Text style={styles.eventSummary}>{event.summary}</Text>
-        <Text style={styles.eventTime}>
-          {new Date(event.timestamp).toLocaleString()}
-        </Text>
-
-        {/* Details */}
-        {event.details && Object.keys(event.details).length > 0 && (
-          <View style={styles.detailsContainer}>
-            {Object.entries(event.details).map(([key, value]) => (
-              <View key={key} style={styles.detailRow}>
-                <Text style={styles.detailKey}>{key}</Text>
-                <Text style={styles.detailValue} numberOfLines={1}>
-                  {typeof value === 'string' ? value : JSON.stringify(value)}
-                </Text>
-              </View>
-            ))}
-          </View>
-        )}
-      </View>
-    </View>
-  );
+interface PendingItem {
+  requestId: string;
+  chainId: number;
+  reason: string;
+  policies: DisplayPolicy[];
+  createdAt: number;
 }
+
+type FetchStatus = 'idle' | 'loading' | 'error' | 'loaded';
 
 // --- Helpers ---
 
-function getEventIcon(type: ActivityEventType): string {
-  switch (type) {
-    case 'IntentProposed': return '>';
-    case 'PolicyEvaluated': return '#';
-    case 'ApprovalRequested': return '?';
-    case 'ApprovalVerified': return '+';
-    case 'ApprovalRejected': return '-';
-    case 'ExecutionBroadcasted': return '~';
-    case 'ExecutionSettled': return '*';
-    case 'ExecutionFailed': return '!';
-    case 'PendingPolicyRequested': return '@';
-    case 'PolicyApplied': return '=';
-    case 'SignerRevoked': return 'x';
-    default: return '.';
-  }
+interface DaemonCallPolicy {
+  type: 'call';
+  permissions: Record<string, Record<string, Array<{ decision: string }>>>;
 }
 
-function getEventColor(type: ActivityEventType): string {
-  switch (type) {
-    case 'IntentProposed': return '#3b82f6';
-    case 'PolicyEvaluated': return '#8b5cf6';
-    case 'ApprovalRequested': return '#f59e0b';
-    case 'ApprovalVerified': return '#22c55e';
-    case 'ApprovalRejected': return '#ef4444';
-    case 'ExecutionBroadcasted': return '#06b6d4';
-    case 'ExecutionSettled': return '#22c55e';
-    case 'ExecutionFailed': return '#ef4444';
-    case 'PendingPolicyRequested': return '#f59e0b';
-    case 'PolicyApplied': return '#22c55e';
-    case 'SignerRevoked': return '#ef4444';
-    default: return '#6b7280';
+function flattenCallPolicies(rawPolicies: unknown[]): DisplayPolicy[] {
+  const result: DisplayPolicy[] = [];
+  for (const raw of rawPolicies) {
+    const p = raw as DaemonCallPolicy;
+    if (p.type !== 'call' || !p.permissions) continue;
+    for (const [target, selectors] of Object.entries(p.permissions)) {
+      for (const [selector, rules] of Object.entries(selectors)) {
+        result.push({
+          target,
+          selector,
+          decision: rules[0]?.decision ?? 'ALLOW',
+        });
+      }
+    }
   }
+  return result;
+}
+
+function shortenAddress(addr: string): string {
+  if (addr.length <= 12) return addr;
+  return `${addr.slice(0, 6)}...${addr.slice(-4)}`;
+}
+
+/**
+ * ActivityScreen — Policy view for current wallet.
+ *
+ * Shows active policies + pending policy requests for the selected accountIndex.
+ * Queries daemon via relay.query() (non-persistent WS channel).
+ * Refetches on: mount, accountIndex change, relay reconnect.
+ */
+export function ActivityScreen() {
+  const relay = RelayClient.getInstance();
+  const selectedAccountIndex = useWalletStore((s) => s.selectedAccountIndex);
+  const addresses = useWalletStore((s) => s.addresses);
+  const setAddress = useWalletStore((s) => s.setAddress);
+
+  const [activePolicies, setActivePolicies] = useState<DisplayPolicy[]>([]);
+  const [pendingItems, setPendingItems] = useState<PendingItem[]>([]);
+  const [status, setStatus] = useState<FetchStatus>('idle');
+  const [walletAddress, setWalletAddress] = useState<string | null>(null);
+
+  // Resolve wallet address (from store or query fallback)
+  const fetchWalletAddress = useCallback(async () => {
+    const cached = addresses[selectedAccountIndex];
+    if (cached) {
+      setWalletAddress(cached);
+      return;
+    }
+    if (!relay.isConnected()) return;
+    try {
+      const result = await relay.query<{ address: string }>('getWalletAddress', {
+        chain: '999',
+        accountIndex: selectedAccountIndex,
+      });
+      setWalletAddress(result.address);
+      setAddress(selectedAccountIndex, result.address);
+    } catch {
+      setWalletAddress(null);
+    }
+  }, [selectedAccountIndex, addresses, relay, setAddress]);
+
+  // Sync address from store (clear immediately on account switch)
+  useEffect(() => {
+    setWalletAddress(addresses[selectedAccountIndex] ?? null);
+  }, [selectedAccountIndex, addresses]);
+
+  const fetchPolicies = useCallback(async () => {
+    setStatus('loading');
+    try {
+      const [policyData, approvalData] = await Promise.all([
+        relay.query<unknown[]>('policyList', {
+          accountIndex: selectedAccountIndex,
+          chainId: DEMO_CHAIN_ID,
+        }),
+        relay.query<Array<{
+          requestId: string;
+          type: string;
+          chainId: number;
+          accountIndex: number;
+          content: string;
+          createdAt: number;
+          policies: unknown[];
+        }>>('pendingApprovals', { accountIndex: selectedAccountIndex }),
+      ]);
+
+      // Active policies: flatten call policies
+      setActivePolicies(flattenCallPolicies(policyData));
+
+      // Pending: filter policy type only
+      const policyApprovals = approvalData.filter(a => a.type === 'policy');
+      setPendingItems(policyApprovals.map(a => ({
+        requestId: a.requestId,
+        chainId: a.chainId,
+        reason: a.content,
+        policies: flattenCallPolicies(a.policies),
+        createdAt: a.createdAt,
+      })));
+
+      setStatus('loaded');
+    } catch {
+      setStatus('error');
+    }
+  }, [relay, selectedAccountIndex]);
+
+  const fetchAll = useCallback(() => {
+    fetchPolicies();
+    fetchWalletAddress();
+  }, [fetchPolicies, fetchWalletAddress]);
+
+  // Refetch on mount + relay reconnect
+  useEffect(() => {
+    const connHandler = (isConnected: boolean) => {
+      if (isConnected) fetchAll();
+    };
+    relay.addConnectionHandler(connHandler);
+    if (relay.isConnected()) fetchAll();
+    return () => relay.removeConnectionHandler(connHandler);
+  }, [relay, fetchAll]);
+
+  // Refetch on accountIndex change
+  useEffect(() => {
+    if (relay.isConnected()) fetchAll();
+  }, [selectedAccountIndex, fetchAll]);
+
+  // --- Render ---
+
+  return (
+    <View style={styles.container}>
+      {/* Header: wallet address */}
+      <View style={styles.header}>
+        <Text style={styles.headerLabel}>Wallet #{selectedAccountIndex}</Text>
+        <Text style={styles.headerAddress}>
+          {walletAddress ? shortenAddress(walletAddress) : 'Loading...'}
+        </Text>
+        <Text style={styles.headerChain}>Chain {DEMO_CHAIN_ID}</Text>
+      </View>
+
+      {/* Content */}
+      {(status === 'idle' || status === 'loading') && (
+        <View style={styles.centerState}>
+          <ActivityIndicator size="large" color="#3b82f6" />
+          <Text style={styles.stateText}>Loading policies...</Text>
+        </View>
+      )}
+
+      {status === 'error' && (
+        <View style={styles.centerState}>
+          <Text style={styles.errorText}>Failed to load policies</Text>
+          <Text style={styles.stateSubtext}>Connection may be unavailable</Text>
+          <Pressable style={styles.retryButton} onPress={fetchAll}>
+            <Text style={styles.retryText}>Retry</Text>
+          </Pressable>
+        </View>
+      )}
+
+      {status === 'loaded' && (
+        <ScrollView style={styles.scrollContent} contentContainerStyle={styles.scrollContentContainer}>
+          {/* Active Policies */}
+          <Text style={styles.sectionTitle}>
+            Active Policies ({activePolicies.length})
+          </Text>
+          {activePolicies.length === 0 ? (
+            <View style={styles.emptySection}>
+              <Text style={styles.emptyText}>No active policies</Text>
+            </View>
+          ) : (
+            activePolicies.map((p, i) => (
+              <View key={`active_${i}`} style={styles.policyCard}>
+                <View style={styles.policyHeader}>
+                  <View style={[styles.badge, p.decision === 'ALLOW' ? styles.badgeAllow : styles.badgeReject]}>
+                    <Text style={styles.badgeText}>{p.decision}</Text>
+                  </View>
+                </View>
+                <Text style={styles.policyTarget} numberOfLines={1}>
+                  {shortenAddress(p.target)}
+                </Text>
+                <Text style={styles.policySelector}>{p.selector}</Text>
+              </View>
+            ))
+          )}
+
+          {/* Pending Policies */}
+          <Text style={[styles.sectionTitle, { marginTop: 24 }]}>
+            Pending Requests ({pendingItems.length})
+          </Text>
+          {pendingItems.length === 0 ? (
+            <View style={styles.emptySection}>
+              <Text style={styles.emptyText}>No pending requests</Text>
+            </View>
+          ) : (
+            pendingItems.map((item) => (
+              <View key={item.requestId} style={styles.pendingCard}>
+                <Text style={styles.pendingReason}>{item.reason}</Text>
+                <Text style={styles.pendingMeta}>
+                  Chain {item.chainId} | {new Date(item.createdAt).toLocaleString()}
+                </Text>
+                {item.policies.map((p, i) => (
+                  <View key={`pending_${item.requestId}_${i}`} style={styles.pendingPolicy}>
+                    <Text style={styles.pendingPolicyText}>
+                      {shortenAddress(p.target)} :: {p.selector} [{p.decision}]
+                    </Text>
+                  </View>
+                ))}
+              </View>
+            ))
+          )}
+        </ScrollView>
+      )}
+    </View>
+  );
 }
 
 const styles = StyleSheet.create({
@@ -169,129 +254,148 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#0a0a0a',
   },
-  filterBar: {
-    maxHeight: 48,
+  header: {
+    paddingHorizontal: 16,
+    paddingVertical: 12,
     borderBottomWidth: 1,
     borderBottomColor: '#1a1a1a',
   },
-  filterBarContent: {
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    gap: 8,
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  filterChip: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 16,
-    backgroundColor: '#1a1a1a',
-  },
-  filterChipActive: {
-    backgroundColor: '#1e3a5f',
-  },
-  filterChipText: {
+  headerLabel: {
     fontSize: 12,
     color: '#6b7280',
+    marginBottom: 2,
   },
-  filterChipTextActive: {
-    color: '#3b82f6',
+  headerAddress: {
+    fontSize: 16,
     fontWeight: '600',
+    color: '#ffffff',
+    fontFamily: 'Menlo',
+    marginBottom: 2,
   },
-  emptyState: {
+  headerChain: {
+    fontSize: 11,
+    color: '#4b5563',
+  },
+  centerState: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 40,
   },
-  emptyTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#ffffff',
-    marginBottom: 8,
-  },
-  emptySubtitle: {
+  stateText: {
     fontSize: 14,
     color: '#6b7280',
-    textAlign: 'center',
-    lineHeight: 20,
+    marginTop: 12,
   },
-  listContent: {
-    paddingVertical: 12,
-  },
-  eventCard: {
-    flexDirection: 'row',
-    paddingHorizontal: 16,
-  },
-  timeline: {
-    alignItems: 'center',
-    width: 24,
-  },
-  timelineDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
+  stateSubtext: {
+    fontSize: 12,
+    color: '#4b5563',
     marginTop: 4,
   },
-  timelineLine: {
-    flex: 1,
-    width: 1,
-    backgroundColor: '#1a1a1a',
-    marginVertical: 2,
+  errorText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#ef4444',
   },
-  eventContent: {
-    flex: 1,
-    paddingLeft: 12,
-    paddingBottom: 16,
+  retryButton: {
+    marginTop: 16,
+    paddingHorizontal: 20,
+    paddingVertical: 8,
+    borderRadius: 8,
+    backgroundColor: '#1e3a5f',
   },
-  eventHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginBottom: 4,
-  },
-  eventType: {
-    fontSize: 12,
+  retryText: {
+    fontSize: 14,
+    color: '#3b82f6',
     fontWeight: '600',
   },
-  eventChain: {
-    fontSize: 10,
-    color: '#4b5563',
-    backgroundColor: '#1a1a1a',
-    paddingHorizontal: 6,
-    paddingVertical: 1,
-    borderRadius: 4,
-    overflow: 'hidden',
+  scrollContent: {
+    flex: 1,
   },
-  eventSummary: {
+  scrollContentContainer: {
+    padding: 16,
+    paddingBottom: 40,
+  },
+  sectionTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#9ca3af',
+    marginBottom: 8,
+  },
+  emptySection: {
+    padding: 16,
+    backgroundColor: '#111111',
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  emptyText: {
+    fontSize: 13,
+    color: '#4b5563',
+  },
+  policyCard: {
+    backgroundColor: '#111111',
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 8,
+  },
+  policyHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 6,
+  },
+  badge: {
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  badgeAllow: {
+    backgroundColor: '#052e16',
+  },
+  badgeReject: {
+    backgroundColor: '#450a0a',
+  },
+  badgeText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#ffffff',
+  },
+  policyTarget: {
+    fontSize: 12,
+    color: '#ffffff',
+    fontFamily: 'Menlo',
+    marginBottom: 2,
+  },
+  policySelector: {
+    fontSize: 11,
+    color: '#6b7280',
+    fontFamily: 'Menlo',
+  },
+  pendingCard: {
+    backgroundColor: '#1a1200',
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 8,
+    borderLeftWidth: 3,
+    borderLeftColor: '#f59e0b',
+  },
+  pendingReason: {
     fontSize: 13,
     color: '#ffffff',
     marginBottom: 4,
   },
-  eventTime: {
-    fontSize: 11,
-    color: '#4b5563',
-  },
-  detailsContainer: {
-    marginTop: 8,
-    backgroundColor: '#111111',
-    borderRadius: 8,
-    padding: 8,
-  },
-  detailRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    paddingVertical: 2,
-  },
-  detailKey: {
+  pendingMeta: {
     fontSize: 11,
     color: '#6b7280',
+    marginBottom: 8,
   },
-  detailValue: {
+  pendingPolicy: {
+    paddingVertical: 4,
+    borderTopWidth: 1,
+    borderTopColor: '#2a2200',
+  },
+  pendingPolicyText: {
     fontSize: 11,
-    color: '#9ca3af',
+    color: '#d4d4d8',
     fontFamily: 'Menlo',
-    maxWidth: '60%',
-    textAlign: 'right',
   },
 });
