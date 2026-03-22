@@ -90,6 +90,7 @@ AI DeFi Agent 서명 엔진 + 제어 인프라.
 | v0.5.4 | Wallet Address SSOT |
 | v0.5.5 | OpenClaw Plugin Integration |
 | v0.5.6 | Portfolio Enso Pricing |
+| v0.5.7 | Manifest DeFi Tools |
 
 ## 프로젝트 구조
 
