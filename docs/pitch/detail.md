@@ -272,6 +272,16 @@ AI(OpenClaw)는 GuardedWDK의 12개 도구만 사용 가능. seed 접근, 정책
 
 ---
 
+## Design Trade-offs
+
+Aegis는 기능보다 인프라를 우선한다 (infrastructure-first, not feature-first).
+
+이 데모에서는 의도적으로 단일 체인, 최소한의 DeFi 인터랙션으로 범위를 한정했다. 많은 프로토콜을 보여주는 것이 아니라, **AI의 행위가 서명 레이어에서 안전하게 제약될 수 있다는 것을 증명**하는 데 집중했다.
+
+멀티체인 추상화와 더 넓은 프로토콜 지원은 다음 phase에 해당하며, 현재 아키텍처(Manifest + Policy + GuardedWDK)는 실행 레이어의 변경 없이 체인과 프로토콜을 확장할 수 있도록 설계되어 있다.
+
+---
+
 ## 실행 방법
 
 ```bash

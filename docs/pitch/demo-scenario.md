@@ -1,6 +1,6 @@
 # Demo Scenario — Aegis Policy Flow
 
-> 정책 없는 상태에서 시작 → 승인 요청 → 정책 생성 → 자율 실행까지의 흐름
+> 정책 승인 → 범위 내 자율 실행 → 범위 밖 거부까지의 흐름
 
 ---
 
@@ -8,98 +8,63 @@
 
 - Daemon 실행 중 (테스트넷 연결)
 - Mobile App에서 로그인 완료
-- Policy 없는 상태 (초기 상태)
-- 테스트넷에 ERC-20 토큰 잔고 있음
+- USDT 잔고 있음
+- 0x11f1... 주소에 대한 USDT transfer 정책이 승인 전 상태
 
 ---
 
 ## 시나리오
 
-### Step 1 — 인사
+### Step 1 — 빌린 돈 갚기 (정책 승인 필요)
 
 **User**:
 ```
-Hey! How's it going?
+Hey, send 0.1 USDT to 0x11f13aDDA33AC58E45cbfC35bE2E65BdA004dF92 — I owe them money.
 ```
 
-AI가 친근하게 응답.
+→ AI가 transfer 시도 → Policy Engine: 매칭 정책 없음 → **REJECT**
+→ ApprovalRequest가 모바일로 전송
+→ Owner가 모바일에서 확인 + Ed25519 서명 → **Approve**
+→ 정책 생성 + 트랜잭션 실행 ✅
 
 ---
 
-### Step 2 — 주소 확인
+### Step 2 — 이자 추가 송금 (자율 실행)
 
 **User**:
 ```
-What's my wallet address for account 0?
+Actually send 0.01 USDT more to the same address as interest.
 ```
 
-AI가 `getAccounts` 도구를 호출하여 account 0의 주소를 반환.
+→ AI가 transfer 시도 → Policy Engine: 정책 범위 내 → **ALLOW**
+→ WDK 즉시 서명 → 온체인 전송 ✅
+→ **모바일 승인 없이 즉시 실행됨**
 
 ---
 
-### Step 3 — 송금 의사 표현
+### Step 3 — 왜 승인 없이 됐는지 물어보기
 
 **User**:
 ```
-I want to send some tokens to a friend. Can you do an ERC-20 transfer for me?
+Wait, I didn't approve that one. How did it go through without my approval?
 ```
 
-AI가 응답 — 어디로, 얼마를 보낼지 물어봄.
+→ AI가 설명: Step 1에서 승인한 정책이 이 주소 + 금액 범위를 이미 허용하고 있었기 때문에 자동 실행되었다고 답변.
+
+**핵심 포인트**: 사용자가 정책 메커니즘을 자연스럽게 이해하게 되는 순간.
 
 ---
 
-### Step 4 — 주소와 금액 제공 → 정책에 의해 거부 → 승인 요청
+### Step 4 — 다른 주소로 송금 (거부)
 
 **User**:
 ```
-Send 50 USDC to 0x1234...abcd
+Now send 0.1 USDT to 0x3E189BB1492A4F39C2f7c4d5e9533577f06c6C0a
 ```
 
-AI가 `transfer` 도구를 호출 → Policy Engine이 평가 → **매칭되는 정책 없음 → REJECT** → ApprovalRequest가 모바일로 전송됨.
-
-AI 응답 (예상):
-```
-I tried to send 50 USDC but there's no policy allowing this transfer.
-An approval request has been sent to your mobile app.
-Please approve it to proceed.
-```
-
----
-
-### Step 5 — 모바일에서 승인 → 실행
-
-Owner가 모바일 앱에서:
-1. Approval 탭에서 요청 확인
-2. 내용 검토 (받는 주소, 금액, 컨트랙트)
-3. Ed25519 서명으로 Approve
-
-→ Daemon이 6단계 검증 통과 → WDK 서명 → 온체인 전송 완료
-
-AI 응답 (예상):
-```
-Done! 50 USDC has been sent to 0x1234...abcd.
-Transaction hash: 0xabcdef...
-```
-
----
-
-### Step 6 — 같은 요청 다시 → 자율 실행 (정책 범위 내)
-
-**User**:
-```
-Send another 50 USDC to the same address.
-```
-
-AI가 `transfer` 도구를 호출 → Policy Engine이 평가 → **정책 범위 내 → ALLOW** → WDK 즉시 서명 → 온체인 전송.
-
-**이번에는 모바일 승인 없이 즉시 실행된다.**
-
-AI 응답 (예상):
-```
-Sent! 50 USDC transferred to 0x1234...abcd.
-Transaction hash: 0x567890...
-No approval needed — within your policy limits.
-```
+→ AI가 transfer 시도 → Policy Engine: 이 주소는 정책에 없음 → **REJECT**
+→ ApprovalRequest가 모바일로 전송
+→ **정책 범위 밖이면 여전히 승인이 필요함을 증명**
 
 ---
 
@@ -107,9 +72,9 @@ No approval needed — within your policy limits.
 
 | Step | 보여주는 것 |
 |------|-----------|
-| 1-2 | AI가 자연어로 대화하며 도구를 사용 |
-| 3-4 | **정책 없으면 AI가 아무것도 자율로 못 함** — REJECT |
-| 5 | **인간이 모바일에서 직접 서명**하여 승인 |
-| 6 | **정책 범위 내면 승인 없이 즉시 실행** — ALLOW |
+| 1 | 정책 없으면 AI가 자율로 못 함 → 인간 승인 필요 |
+| 2 | 정책 범위 내면 승인 없이 즉시 실행 |
+| 3 | 사용자가 "왜?"를 물으면서 정책 메커니즘을 자연스럽게 이해 |
+| 4 | 정책 밖 주소면 다시 거부 → 정책이 주소 단위로 작동함을 증명 |
 
-핵심 메시지: **"처음엔 아무것도 못 하다가, 인간이 허락한 범위 내에서만 자율적으로 움직인다."**
+핵심 메시지: **"같은 AI, 같은 기능인데 — 정책이 있으면 자율, 없으면 승인. 서명 레이어에서 강제된다."**
