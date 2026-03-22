@@ -1,13 +1,15 @@
 # daemon 아키텍처 One-Pager
 
-> 사용자 메시지가 들어오면 AI와 tool call을 반복하여 온체인 작업을 실행하고, app의 서명된 승인을 WDK로 중계하는 오케스트레이션 호스트
+> 사용자 메시지가 들어오면 AI와 tool call을 반복하여 온체인 작업을 실행하고, app의 서명된 승인을 WDK facade로 중계하는 오케스트레이션 호스트
 
 ---
 
 ## 개요
 
 daemon은 WDK-APP 모노레포의 오케스트레이션 계층으로, AI(OpenClaw) ↔ WDK(서명 엔진) ↔ Relay(앱 통신) 사이에서 메시지를 중계한다.
-타입 의존성 그래프 기준 71 nodes, 106 edges, 16개 소스 파일로 구성.
+타입 의존성 그래프 기준 41 nodes, 50 edges, 17개 소스 파일로 구성.
+
+v0.4.6에서 store 경계 분리 (WDK facade 경유 + DaemonStore 자체 소유), v0.4.7에서 dead export 정리, v0.4.8에서 WS 채널 재설계 (control 단방향화 + event_stream 승격 + query 채널 추가 + protocol 타입 강제).
 
 ---
 
@@ -37,23 +39,24 @@ Aggregate Root: `executeToolCall()` — `tool-surface.ts`
   AnyToolResult = SendTransactionResult | TransferResult | ... | ToolErrorResult
 ```
 
-| 타입 | 역할 | 설명 |
-|------|------|------|
-| `ToolDefinition` | schema | OpenAI function calling 스키마 — name, description, parameters |
-| `TOOL_DEFINITIONS` | config | 12개 도구 정의 배열 |
-| `ToolExecutionContext` | config | 실행 맥락 — wdk, store, broker, journal, logger, chainId |
-| `AnyToolResult` | output | 12개 도구별 결과 DU + ToolErrorResult |
-| `executeToolCall()` | function | name으로 분기하여 도구 실행, 에러 시 ToolErrorResult 반환 |
+**v0.4.6 변경 — store 접근 패턴:**
 
-**도구 분류:**
+| 도구 | 접근 경로 | v0.4.6 이전 | v0.4.6 이후 |
+|------|----------|------------|------------|
+| sendTransaction, transfer, signTransaction | WDK | GuardedAccount 직접 | 동일 (변경 없음) |
+| policyList, policyPending, policyRequest | WDK | store 직접 | **facade** (loadPolicy, getPendingApprovals, createApprovalRequest) |
+| listRejections, listPolicyVersions | WDK | store 직접 | **facade** (listRejections, listPolicyVersions) |
+| registerCron, listCrons, removeCron | daemon 자체 | store 직접 | **DaemonStore** 직접 |
+| getBalance | WDK | GuardedAccount | 동일 |
 
-| 구분 | 도구 | WDK 경유 | Store 직접 접근 |
-|------|------|----------|----------------|
-| tx 실행 | sendTransaction, transfer, signTransaction | O (GuardedAccount) | O (journal, rejection) |
-| 잔액 조회 | getBalance | O (GuardedAccount) | X |
-| 정책 | policyList, policyPending, policyRequest | O (broker) | O (loadPolicy, loadPending) |
-| cron | registerCron, listCrons, removeCron | X | O (saveCron, listCrons, removeCron) |
-| 이력 | listRejections, listPolicyVersions | X | O (listRejections, listPolicyVersions) |
+**ToolExecutionContext (v0.4.6):**
+```ts
+{
+  facade: WDKInstance & ToolFacadePort  // WDK facade 경유
+  daemonStore: DaemonStore             // cron만 직접 접근
+  logger: Logger
+}
+```
 
 ### 2. 메시지 (Message)
 
@@ -66,24 +69,10 @@ Aggregate Root: `MessageQueueManager` — `message-queue.ts`
   handleChatMessage() ──→ [MessageQueueManager]
    (chat-handler.ts)              │
                                   ├──→ SessionMessageQueue (세션별 FIFO)
-                                  │        │
                                   │        └──→ QueuedMessage (value)
-                                  │               ├─ messageId, sessionId, userId
-                                  │               ├─ text, chainId, source
-                                  │               └─ abortController
                                   │
                                   └──→ CancelResult (output)
-                                       = { ok: true, wasProcessing } | { ok: false, reason }
 ```
-
-| 타입 | 역할 | 설명 |
-|------|------|------|
-| `MessageQueueManager` | core | 복수 세션 큐 관리 — `${userId}:${sessionId}` 키 |
-| `SessionMessageQueue` | value | 단일 세션 FIFO — enqueue, dequeue, cancel |
-| `QueuedMessage` | value | 큐 항목 — messageId, text, abortController 포함 |
-| `CancelResult` | output | 취소 결과 DU — 대기 중 제거 vs 처리 중 abort vs 실패 |
-| `ProcessResult` | output | 처리 결과 — ok + error |
-| `MessageProcessor` | port | `(msg, signal) => Promise<ProcessResult>` 콜백 |
 
 ### 3. 중계 (Relay)
 
@@ -92,26 +81,6 @@ Aggregate Root: `MessageQueueManager` — `message-queue.ts`
 Aggregate Root: `RelayClient` — `relay-client.ts`
 생애주기: disconnected → connected → sending/receiving → disconnected
 
-```
-  RelayClient (extends EventEmitter)
-      │
-      ├──→ connect(url, token) — WebSocket 연결 + JWT 인증
-      ├──→ send(type, payload, userId) — 메시지 전송 (optional E2E 암호화)
-      ├──→ onMessage(handler) — 수신 핸들러 등록
-      ├──→ setSessionKey(key) — NaCl secretbox E2E 암호화 설정
-      └──→ disconnect() — 정상 종료
-
-  EncryptedPayload (value) = { nonce, ciphertext }
-```
-
-| 타입 | 역할 | 설명 |
-|------|------|------|
-| `RelayClient` | core | WebSocket 클라이언트 — 재연결, 하트비트, E2E 암호화 |
-| `RelayClientOptions` | config | reconnectBaseMs, reconnectMaxMs, heartbeatIntervalMs |
-| `EncryptedPayload` | value | NaCl secretbox 암호문 — nonce + ciphertext |
-| `MessageHandler` | port | `(type, payload, raw) => void` 수신 콜백 |
-| `authenticateWithRelay()` | function | DAEMON_ID/SECRET → JWT 발급 (자동 등록 포함) |
-
 ### 4. 반복 (Cron)
 
 > "등록된 프롬프트를 주기적으로 AI에게 전달하여 자동 실행"
@@ -119,48 +88,26 @@ Aggregate Root: `RelayClient` — `relay-client.ts`
 Aggregate Root: `CronScheduler` — `cron-scheduler.ts`
 생애주기: registered → tick 도래 → dispatched → (반복)
 
-```
-  CronInput ──→ [CronScheduler] ──→ CronDispatch(callback)
-   (from store)       │                   │
-                      ├──→ CronEntry      └──→ _processChatDirect()
-                      │     = CronBase         (chat-handler.ts)
-                      │     + intervalMs
-                      │     + lastRunAt
-                      │
-                      └──→ tick(): due 체크 → dispatch
-```
-
-| 타입 | 역할 | 설명 |
-|------|------|------|
-| `CronScheduler` | core | 메모리 캐시 + 주기적 tick — start, stop, register, remove |
-| `CronBase` | value | id, sessionId, interval, prompt, chainId, accountIndex |
-| `CronEntry` | value | CronBase + intervalMs(파싱됨) + lastRunAt |
-| `CronDispatch` | port | `(cronId, sessionId, userId, prompt, chainId) => Promise<void>` |
-| `CronSchedulerConfig` | config | tickIntervalMs (기본 60000) |
-
-### 5. 저널 (Journal)
-
-> "tx 실행 의도를 추적하고 중복 실행을 방지하는 인메모리 인덱스"
-
-Aggregate Root: `ExecutionJournal` — `execution-journal.ts`
-생애주기: received → settled | signed | failed | rejected
+**v0.4.6 변경**: cron 데이터가 **DaemonStore**에 영속. WdkStore에서 완전 분리.
 
 ```
-  TrackMeta ──→ [ExecutionJournal] ──→ JournalEntry
-   (input)           │                    │
-                     ├──→ _hashIndex      ├─ intentHash
-                     │    (Map)           ├─ targetHash
-                     │                    ├─ status
-                     └──→ isDuplicate()   └─ txHash
-                          (중복 체크)
+  DaemonStore ──→ [CronScheduler] ──→ CronDispatch(callback)
+   (cron CRUD)         │                   │
+                       ├──→ CronEntry      └──→ _processChatDirect()
+                       └──→ tick()
 ```
 
-| 타입 | 역할 | 설명 |
-|------|------|------|
-| `ExecutionJournal` | core | 인메모리 인덱스 + store 위임 — track, updateStatus, isDuplicate |
-| `JournalEntry` | value | intentHash, targetHash, status, accountIndex, chainId, txHash |
-| `TrackMeta` | input | accountIndex, chainId, targetHash |
-| `JournalListOptions` | input | status, chainId, limit, accountIndex 필터 |
+**DaemonStore** (v0.4.6 신규):
+- 인터페이스: `daemon-store.ts`
+- 구현: `sqlite-daemon-store.ts` (SQLite, `~/.wdk/daemon-store/daemon.db`)
+- 메서드: `listCrons()`, `saveCron()`, `removeCron()`, `updateCronLastRun()`, `init()`, `dispose()`
+- **cron만 담당** — WDK 데이터는 facade 경유
+
+### 5. (삭제됨) 저널 (Journal)
+
+v0.4.6에서 **guarded-wdk로 이동**. daemon의 `execution-journal.ts` 삭제.
+이유: journal은 tx 중복 방지 기능이고, middleware가 tx를 실행하므로 WDK가 소유하는 게 맞음.
+daemon은 journal에 직접 접근하지 않음. WDK middleware가 내부에서 관리.
 
 ---
 
@@ -172,19 +119,22 @@ Aggregate Root: `ExecutionJournal` — `execution-journal.ts`
   │  중계   │←── send ──────│  메시지  │                 │  도구   │
   └────────┘               └─────────┘                 └───┬────┘
        │                        ▲                          │
-       │ control_message        │ dispatch                 │ track/dedup
-       │                   ┌────┴───┐                 ┌────▼────┐
-       └──→ WDK broker     │  Cron  │                 │ Journal │
-            (guarded-wdk)  │  반복   │                 │  저널    │
-                           └────────┘                 └─────────┘
+       │ control_message        │ dispatch          ┌──────┴──────┐
+       │                   ┌────┴───┐               │             │
+       └──→ WDK facade     │  Cron  │        WDK facade    DaemonStore
+            (승인 처리)     │  반복   │        (tx/정책)     (cron CRUD)
+                           └────┬───┘
+                                │
+                           DaemonStore
+                           (cron 영속)
 ```
 
 - **Relay → Message**: app 메시지 수신 → 큐에 enqueue
 - **Message → Tool**: 큐에서 dequeue → AI tool-call 루프 → executeToolCall()
-- **Message ← Relay**: tool 결과/스트림 → relay로 app에 전송
-- **Relay → WDK**: control_message(승인) → handleControlMessage() → broker.submitApproval()
-- **Cron → Message**: tick 도래 → _processChatDirect()로 직접 처리 (큐 경유)
-- **Tool → Journal**: tx 실행 전 isDuplicate() 체크, 실행 후 track() + updateStatus()
+- **Tool → WDK facade**: tx 실행, 정책 조회, 승인 요청 (store 직접 접근 없음)
+- **Tool → DaemonStore**: cron CRUD만 직접 접근
+- **Cron → DaemonStore**: 영속 + tick 관리
+- **Relay → WDK facade**: control_message → facade.submitApproval()
 
 ---
 
@@ -194,8 +144,8 @@ Aggregate Root: `ExecutionJournal` — `execution-journal.ts`
   ┌──────────────────┐  ┌──────────────────┐  ┌──────────────────┐
   │ 1. AI 대화 루프   │  │ 2. 제어 채널      │  │ 3. 자동화 인프라  │
   │"메시지→AI→도구    │  │"서명된 승인을     │  │"cron 실행 +      │
-  │ 반복→최종 답변"   │  │ 검증하고 처리"    │  │ 저널 추적"        │
-  │[Tool+Message     │  │[Relay+Message]   │  │[Cron+Journal]    │
+  │ 반복→최종 답변"   │  │ facade로 위임"    │  │ admin 상태 노출"  │
+  │[Tool+Message     │  │[Relay+WDK facade]│  │[Cron+DaemonStore]│
   │    +Relay]        │  │                  │  │                  │
   └────────┬─────────┘  └────────┬─────────┘  └────────┬─────────┘
            │                     │                      │
@@ -203,48 +153,7 @@ Aggregate Root: `ExecutionJournal` — `execution-journal.ts`
      최종 답변 + 결과       WDK 이벤트 emit        주기적 자동 실행
 ```
 
----
-
-### 축 1. AI 대화 루프 (Chat Loop)
-
-> "사용자 메시지가 들어오면 AI와 tool call을 반복하여 최종 답변을 만드는가?"
-
-```
-  app 메시지 ──→ Relay 수신 ──→ MessageQueue enqueue
-      │
-      ▼
-  _processChatDirect()
-      │
-      ├─ "typing" 표시 전송 (relay)
-      │
-      ▼
-  processChat() ── AI tool-call 루프 (최대 10회) ──
-      │
-      ├─ OpenClaw.chat(messages, TOOL_DEFINITIONS)
-      │     │
-      │     ├─ tool_calls 있음 → executeToolCall() 각각 실행
-      │     │     ├─ onToolStart / onToolDone 콜백
-      │     │     └─ 결과를 follow-up message로 수집
-      │     │
-      │     └─ tool_calls 없음 → 최종 답변 (break)
-      │
-      ├─ 첫 응답만 streaming (onDelta → relay "stream" 전송)
-      │
-      ▼
-  최종 답변 + toolResults → relay "done" 전송
-```
-
-| 컴포넌트 | 위치 | 도메인 | 역할 | 설명 |
-|----------|------|--------|------|------|
-| `handleChatMessage()` | `chat-handler.ts:33` | Message | function | 메시지 enqueue + "message_queued" 알림 |
-| `_processChatDirect()` | `chat-handler.ts:58` | Message+Tool | function | 큐에서 꺼낸 메시지 처리 — typing → loop → done |
-| `processChat()` | `tool-call-loop.ts:56` | Tool | function | AI ↔ tool-call 반복 루프 (max 10 iterations) |
-| `executeToolCall()` | `tool-surface.ts` | Tool | function | 12개 도구 분기 실행 |
-| `createOpenClawClient()` | `openclaw-client.ts` | Tool | function | OpenAI SDK 래퍼 — session keying + streaming |
-
-### 축 2. 제어 채널 (Control Channel)
-
-> "app의 서명된 승인/취소 메시지를 어떻게 처리하는가?"
+### 축 2. 제어 채널 — v0.4.8 변경
 
 ```
   app ──→ Relay ──→ ControlMessage 수신
@@ -255,195 +164,84 @@ Aggregate Root: `ExecutionJournal` — `execution-journal.ts`
       │ 승인 6종          │ 취소 2종          │
       ▼                  ▼                  │
   wire format 변환       cancelQueued()      │
-  (signature→sig,       cancelActive()      │
-   approverPubKey→      → CancelResult      │
-   approver)                                │
+      │                 cancelActive()      │
+      ▼                  │                  │
+  facade.submitApproval()│                  │
+      → return null      ▼                  │
+  (WDK 이벤트가          CancelEventPayload │
+   event_stream으로       (CancelCompleted   │
+   app에 전달)            | CancelFailed)    │
+                              │             │
+                              ▼             │
+                         return payload     │
+                         → index.ts가       │
+                           event_stream으로  │
+                           relay 전송        │
+```
+
+**v0.4.8 변경**:
+- ControlResult **삭제**. cancel 결과도 CancelCompleted/CancelFailed 이벤트로 event_stream 경유.
+- ControlEvent **삭제**. message_queued/message_started/cron_session_created가 events.ts로 이동, event_stream으로 전달.
+- control 채널은 **app→daemon 단방향**으로 통일.
+
+### 축 2-1. query 채널 — v0.4.8 신규
+
+```
+  app ──→ Relay ──→ query 수신 (WS 직접 전달, Redis 미경유)
+                         │
+                    handleQueryMessage(msg, deps)
+                         │
+      ┌──────────────────┼──────────────────┐
+      │ policyList        │ signerList       │
+      │ pendingApprovals  │ walletList       │
+      ▼                  ▼                  │
+  facade.loadPolicy()   facade.listSigners()│
+  facade.getApprovals() facade.listWallets()│
       │                                     │
-      ▼                                     │
-  broker.submitApproval()                   │
-      → return null                         │
-  (WDK 이벤트가 app에 전달)                  │
-                                            ▼
-                                     return ControlResult
-                                  (cancel만 직접 응답)
+      └──→ QueryResult (ok|error) ──────────┘
+              → relay 전송 (WS 직접 전달)
 ```
 
-| 컴포넌트 | 위치 | 도메인 | 역할 | 설명 |
-|----------|------|--------|------|------|
-| `handleControlMessage()` | `control-handler.ts:42` | Relay | function | 8종 control message 분기 처리 |
-| `ControlHandlerDeps` | `control-handler.ts:39` | Relay | config | broker + logger + queueManager 의존성 |
+**Port 인터페이스 (v0.4.8):**
 
-**승인 타입별 처리:**
+| Port | 소비자 | 메서드 |
+|------|--------|--------|
+| `ToolFacadePort` | tool-surface.ts | loadPolicy, getPendingApprovals, listRejections, listPolicyVersions, createApprovalRequest |
+| `AdminFacadePort` | admin-server.ts | listSigners, listWallets |
+| `ControlFacadePort` | control-handler.ts | submitApproval |
+| `QueryFacadePort` | query-handler.ts | loadPolicy, getPendingApprovals, listSigners, listWallets |
 
-| 타입 | wire → wdk 변환 | broker 호출 | 응답 |
-|------|-----------------|-------------|------|
-| tx_approval | signature→sig, approverPubKey→approver | submitApproval({ kind: 'tx' }) | null (WDK 이벤트) |
-| policy_approval | 동일 + policies 전달 | submitApproval({ kind: 'policy_approval' }) | null |
-| policy_reject | 동일 | submitApproval({ kind: 'policy_reject' }) | null |
-| device_revoke | 동일 + SHA-256(pubkey) 계산 | submitApproval({ kind: 'device_revoke' }) | null |
-| wallet_create | 동일 | submitApproval({ kind: 'wallet_create' }) | null |
-| wallet_delete | 동일 | submitApproval({ kind: 'wallet_delete' }) | null |
-| cancel_queued | — | queueManager.cancelQueued() | ControlResult |
-| cancel_active | — | queueManager.cancelActive() | ControlResult |
-
-### 축 3. 자동화 인프라 (Automation Infrastructure)
-
-> "cron으로 자동 실행하고, journal로 중복을 방지하며, admin으로 상태를 노출하는가?"
-
-```
-  CronScheduler.tick()
-      │
-      ├─ due 체크 (now - lastRunAt >= intervalMs)
-      │
-      ▼
-  CronDispatch callback
-      │
-      └──→ _processChatDirect(cron.prompt)
-           (source: 'cron', cronId 포함)
-
-  ExecutionJournal
-      │
-      ├─ track(intentHash, meta) → status: 'received'
-      ├─ isDuplicate(targetHash) → 인메모리 인덱스 체크
-      └─ updateStatus(hash, 'settled', txHash) → 인덱스 제거
-
-  AdminServer (Unix socket ~/.wdk/daemon.sock)
-      │
-      ├─ status → uptime, relay 연결, journal active, cron count
-      ├─ journal_list → 저널 필터 조회
-      ├─ signer_list → 서명자 목록 (store 직접)
-      ├─ cron_list → cron 목록
-      └─ wallet_list → 월렛 목록 (store 직접)
-```
-
-| 컴포넌트 | 위치 | 도메인 | 역할 | 설명 |
-|----------|------|--------|------|------|
-| `CronScheduler` | `cron-scheduler.ts` | Cron | core | 메모리 캐시 + tick 타이머 — register, remove, tick |
-| `ExecutionJournal` | `execution-journal.ts` | Journal | core | 인메모리 인덱스 + store 위임 — track, isDuplicate, recover |
-| `AdminServer` | `admin-server.ts` | Infra | core | Unix socket JSON-line 프로토콜 — 5개 명령 |
+각 handler는 자기에게 필요한 최소 인터페이스만 받음.
 
 ---
 
-## 시나리오
+## 통신 채널 전체 맵
+
+App ↔ Daemon은 직접 연결되지 않는다. Relay가 중간에서 WS로 양쪽과 연결하고, 영속 채널은 Redis Streams 단일 경로로 전달한다.
+
+v0.4.8: 직접 forward 제거 (이중 전달 해소). query/query_result는 WS 직접 전달 (Redis 미경유).
 
 ```
-  app 메시지 → [AI 대화 루프] → tool 실행 → 결과
-                                    │
-  app 승인 → [제어 채널] → WDK 이벤트  │
-                                    ▼
-  cron tick → [자동화 인프라] → AI 대화 루프 (재진입)
-                                    │
-                               Journal 추적
-```
-
-**시나리오 1: 사용자가 "ETH를 USDT로 swap해줘" 요청 (happy path)**
-
-app이 채팅 메시지 전송
-  → [AI 대화 루프] Relay 수신 → MessageQueue enqueue → dequeue
-  → OpenClaw에 메시지 전달 → AI가 `sendTransaction` tool_call 반환
-  → [Journal] isDuplicate() 체크 → 신규 (Journal: → received)
-  → [Tool] GuardedAccount.sendTransaction() → 정책 ALLOW → tx broadcast
-  → [Journal] updateStatus('settled', txHash) (Journal: received → settled)
-  → OpenClaw에 tool result 전달 → AI가 최종 답변 생성
-  → Relay로 "done" + tool results 전송
-
-**시나리오 2: AI가 새 정책을 요청하고 사용자가 승인**
-
-AI가 `policyRequest` tool_call → broker.createRequest('policy')
-  → [AI 대화 루프] PendingPolicyRequested 이벤트 → Relay로 app에 전달
-  → app이 정책 내용 확인 → 사용자가 Ed25519로 서명
-  → [제어 채널] policy_approval ControlMessage 수신
-  → handleControlMessage() → wire format 변환 → broker.submitApproval()
-  → WDK 6-step 검증 통과 → savePolicy() + removePending() + appendHistory()
-  → emit ApprovalVerified → PolicyApplied → Relay로 app에 전달
-
-**시나리오 3: cron이 자동으로 포지션 체크**
-
-CronScheduler.tick() → "check my AAVE positions" cron이 due
-  → [자동화 인프라] CronDispatch callback → _processChatDirect()
-  → [AI 대화 루프] OpenClaw에 프롬프트 전달 → AI가 getBalance tool_call
-  → GuardedAccount로 잔액 조회 → AI가 분석 결과 생성
-  → Relay로 결과 전송 (source: 'cron')
-
----
-
-## 설계 분석 메모
-
-### Store 경계 위반 현황
-
-daemon이 `wdk.getApprovalStore()`로 store 참조를 획득하여 직접 CRUD하는 현황:
-
-| 파일 | 직접 호출 메서드 | 건수 |
-|------|-----------------|------|
-| `tool-surface.ts` | saveRejection, loadPolicy, loadPendingApprovals, saveCron, listCrons, removeCron, listRejections, listPolicyVersions, getPolicyVersion | 12 |
-| `execution-journal.ts` | saveJournalEntry, updateJournalStatus, listJournal | 4 |
-| `cron-scheduler.ts` | listCrons, removeCron, updateCronLastRun | 3 |
-| `admin-server.ts` | listSigners, listWallets | 2 |
-| `wdk-host.ts` | getMasterSeed, listSigners | 2 |
-
-`ports.ts`에 `ToolStorePort`, `ApprovalBrokerPort`, `AdminStorePort` 인터페이스가 정의되어 있어 **의도는 경계 분리**이나, 실제로는 store를 직접 참조하는 상태.
-
-→ 개선 방향: `docs/handover/store-separation.md` 참조 (WdkStore / DaemonStore 물리적 분리)
-
-### Cron은 daemon의 관심사
-
-`CronInput`, `StoredCron` 타입이 guarded-wdk의 `ApprovalStore`에 정의되어 있지만, cron은 순수하게 daemon의 스케줄링 도메인. WDK는 cron에 대해 몰라야 한다.
-
-→ store 분리 시 cron 관련 타입/메서드를 guarded-wdk에서 철저히 제거, daemon 자체 store로 이동
-
-### WDK 이벤트 릴레이 (v0.4.2)
-
-index.ts에서 14개 WDK 이벤트를 구독하여 Relay로 전달:
-```
-IntentProposed, PolicyEvaluated, ExecutionBroadcasted, ExecutionSettled,
-ExecutionFailed, TransactionSigned, PendingPolicyRequested, ApprovalVerified,
-ApprovalRejected, PolicyApplied, SignerRevoked, WalletCreated, WalletDeleted,
-ApprovalFailed
-```
-
-승인 6종의 ControlResult 포워딩은 v0.4.2에서 제거됨. cancel만 ControlResult 반환.
-
-### 통신 채널 전체 맵
-
-App ↔ Daemon은 직접 연결되지 않는다. Relay가 중간에서 WS로 양쪽과 연결하고, Redis Streams로 메시지를 영속한다.
-
-```
+영속 채널 (chat, control, event_stream):
 App ──WS──→ Relay ──→ Redis XADD ──→ Poller XREAD ──→ Relay ──WS──→ Daemon
 App ←──WS── Relay ←── Redis XADD ←── Poller XREAD ←── Relay ←──WS── Daemon
+
+비영속 채널 (query, query_result):
+App ──WS('query')──→ Relay ──직접 forward──→ Daemon
+App ←──WS('query_result')── Relay ←──직접 forward── Daemon
 ```
 
-App/Daemon은 Redis의 존재를 모른다. WS가 유일한 전송 수단이고, Redis는 Relay 내부의 영속 + 전달 인프라.
+#### 메시지 타입별 방향과 전달 경로
 
-#### 메시지 타입별 방향과 Redis 스트림 키
-
-| 타입 | 방향 | Redis 스트림 키 | 용도 |
-|------|------|----------------|------|
-| `chat` | 양방향 | `chat:{userId}:{sessionId}` | AI 대화 (세션별 분리) |
-| `control` | app → daemon | `control:{userId}` | 서명된 승인 6종 + 취소 2종 (요청) |
-| `event_stream` | daemon → app | `control:{userId}` | WDK 이벤트 14종 (결과) |
-
-`control`과 `event_stream`은 같은 Redis 스트림을 공유한다 — 둘 다 세션에 종속되지 않는 사용자 레벨 메시지이기 때문.
+| 타입 | 방향 | 전달 경로 | Redis 스트림 키 | 용도 |
+|------|------|----------|----------------|------|
+| `chat` | 양방향 | Redis 단일 경로 | `chat:{userId}:{sessionId}` | AI 대화 (세션별 분리) |
+| `control` | app → daemon 단방향 | Redis 단일 경로 | `control:{userId}` | 승인 6종 + 취소 2종 (요청만) |
+| `event_stream` | daemon → app 단방향 | Redis 단일 경로 | `control:{userId}` | WDK 이벤트 14종 + cancel 결과 + MQ/MS/CSC 알림 |
+| `query` | app → daemon 단방향 | WS 직접 전달 | (없음) | 데이터 조회 요청 (4종) |
+| `query_result` | daemon → app 단방향 | WS 직접 전달 | (없음) | 조회 응답 (ok\|error) |
 
 #### chat 하위 타입 상세
-
-AI 대화는 `chat` 타입 안에서 하위 타입으로 세분화된다:
-
-```
-사용자 메시지 수신
-    │
-    ▼
-typing ──→ "처리 시작" 표시
-    │
-    ▼ (AI tool-call 루프, 최대 10회)
-    │
-    ├─ stream ──→ AI 응답 delta (토큰 단위 실시간 스트리밍)
-    ├─ tool_start ──→ tool 실행 시작 (toolName, toolCallId)
-    ├─ tool_done ──→ tool 실행 완료 (status: success/error)
-    │   (루프 반복...)
-    │
-    ▼
-done ──→ 최종 답변 + 전체 toolResults + iterations
-```
 
 | chat 하위 타입 | 내용 | 주요 데이터 |
 |---|---|---|
@@ -453,65 +251,97 @@ done ──→ 최종 답변 + 전체 toolResults + iterations
 | `tool_done` | tool 실행 완료 | toolName, toolCallId, status |
 | `done` | 최종 완료 | content, toolResults[], iterations |
 
-#### event_stream 이벤트 14종
+#### event_stream 이벤트 (v0.4.8: AnyStreamEvent)
 
-전부 daemon → app 단방향. WDK 내부에서 emit → daemon 리스너가 수신 → relay로 전송.
+| 이벤트 | 트리거 | 분류 |
+|--------|--------|------|
+| IntentProposed, PolicyEvaluated, ExecutionBroadcasted, ExecutionSettled, ExecutionFailed, TransactionSigned | AI tool call | WDK 이벤트 |
+| PendingPolicyRequested | AI tool call (policyRequest) | WDK 이벤트 |
+| ApprovalVerified, ApprovalFailed, ApprovalRejected, PolicyApplied, SignerRevoked, WalletCreated, WalletDeleted | app control (승인) | WDK 이벤트 |
+| CancelCompleted, CancelFailed | app control (취소) | Daemon 이벤트 (v0.4.8) |
+| message_queued, message_started, cron_session_created | daemon 내부 | Daemon 알림 (v0.4.8, control.ts에서 이동) |
 
-| 이벤트 | 발생 시점 | 트리거 |
-|--------|----------|--------|
-| **tx 실행 흐름** | | |
-| `IntentProposed` | AI가 tx 실행 요청 | AI tool call (sendTransaction) |
-| `PolicyEvaluated` | 정책 평가 완료 | AI tool call |
-| `ExecutionBroadcasted` | tx 브로드캐스트 성공 | AI tool call |
-| `ExecutionSettled` | tx 온체인 확인 | pollReceipt |
-| `ExecutionFailed` | tx 실행 실패 | AI tool call |
-| `TransactionSigned` | tx 서명 완료 (브로드캐스트 없이) | AI tool call (signTransaction) |
-| **승인 처리 흐름** | | |
-| `PendingPolicyRequested` | 정책 승인 요청 생성 | AI tool call (policyRequest) |
-| `ApprovalVerified` | 서명 검증 통과 | app control (승인) |
-| `ApprovalFailed` | 승인 처리 실패 | app control (승인) |
-| `ApprovalRejected` | 정책 거부 처리 완료 | app control (policy_reject) |
-| **도메인 작업 결과** | | |
-| `PolicyApplied` | 정책 반영 완료 | app control (policy_approval) |
-| `SignerRevoked` | 서명자 해지 완료 | app control (device_revoke) |
-| `WalletCreated` | 지갑 생성 완료 | app control (wallet_create) |
-| `WalletDeleted` | 지갑 삭제 완료 | app control (wallet_delete) |
+#### control 메시지 8종 (app→daemon 단방향)
 
-#### control 메시지 8종
+| 타입 | 결과 수신 |
+|------|----------|
+| tx/policy/device/wallet 승인 6종 | event_stream (WDK 이벤트) |
+| cancel_queued, cancel_active | event_stream (CancelCompleted/CancelFailed) |
 
-전부 app → daemon 방향. 현재 cancel만 ControlResult로 직접 응답하지만, 단방향 통일 예정.
+#### query 4종 (v0.4.8 신규)
 
-| 타입 | 내용 | 결과 수신 |
-|------|------|----------|
-| `tx_approval` | tx 승인 서명 제출 | event_stream (ApprovalVerified/Failed) |
-| `policy_approval` | 정책 승인 서명 제출 | event_stream (PolicyApplied/Failed) |
-| `policy_reject` | 정책 거부 서명 제출 | event_stream (ApprovalRejected/Failed) |
-| `device_revoke` | 서명자 해지 서명 제출 | event_stream (SignerRevoked/Failed) |
-| `wallet_create` | 지갑 생성 승인 제출 | event_stream (WalletCreated/Failed) |
-| `wallet_delete` | 지갑 삭제 승인 제출 | event_stream (WalletDeleted/Failed) |
-| `cancel_queued` | 대기 중 메시지 취소 | control 직접 응답 (→ event_stream 전환 예정) |
-| `cancel_active` | 처리 중 메시지 중단 | control 직접 응답 (→ event_stream 전환 예정) |
+| query 타입 | 반환 데이터 | facade 메서드 |
+|-----------|-----------|--------------|
+| policyList | StoredPolicy[] | loadPolicy() |
+| pendingApprovals | PendingApprovalRequest[] | getPendingApprovals() |
+| signerList | StoredSigner[] | listSigners() |
+| walletList | StoredWallet[] | listWallets() |
 
-#### App에서의 이벤트 소비 패턴
+#### v0.4.8에서 해결된 이슈
 
-```
-event_stream 수신 (항상 구독, 백그라운드 트래킹)
-    │
-    ├─ 전부 → useActivityStore에 기록 (이력 영속)
-    │
-    ├─ CancelCompleted, ApprovalFailed → 알림 (toast)
-    ├─ PolicyApplied, SignerRevoked → 알림 + 설정 화면 갱신
-    │
-    └─ IntentProposed, ExecutionBroadcasted 등
-         → 세션 화면 보고 있으면 표시, 아니면 store 기록만
-```
+1. ~~**채널 방향 비일관성**~~: **해결** — cancel도 event_stream으로 전환. control은 app→daemon 단방향 통일.
+2. ~~**메시지 중복 수신**~~: **해결** — relay 직접 forward 제거. Redis 단일 경로로 통일.
+3. ~~**데이터 조회 경로 부재**~~: **해결** — query/query_result 채널 추가 (4종).
 
-#### 현재 알려진 문제
+---
 
-1. **채널 방향 비일관성**: cancel만 control로 직접 응답, 나머지는 event_stream → 단방향 통일 예정 (`docs/handover/control-channel-unidirection.md`)
-2. **메시지 중복 수신**: relay가 직접 forward + Redis polling 이중 경로 → Redis 단일 경로로 통일 예정 (같은 handover)
+## 시나리오
+
+**시나리오 1: 사용자가 tx 실행 요청 (happy path)**
+
+app이 채팅 메시지 전송
+  → [AI 대화 루프] Relay 수신 → MessageQueue enqueue → dequeue
+  → OpenClaw에 메시지 전달 → AI가 `sendTransaction` tool_call 반환
+  → [Tool] GuardedAccount.sendTransaction() → WDK 내부에서 journal dedup + 정책 ALLOW → tx broadcast
+  → OpenClaw에 tool result 전달 → AI가 최종 답변 생성
+  → Relay로 "done" + tool results 전송
+
+**시나리오 2: AI가 새 정책을 요청하고 사용자가 승인**
+
+AI가 `policyRequest` tool_call → facade.createApprovalRequest('policy')
+  → PendingPolicyRequested 이벤트 → Relay로 app에 전달
+  → app이 정책 내용 확인 → 사용자가 Ed25519로 서명
+  → [제어 채널] policy_approval ControlMessage 수신
+  → handleControlMessage() → wire format 변환 → facade.submitApproval()
+  → WDK 6-step 검증 → savePolicy() + removePending() + appendHistory()
+  → emit ApprovalVerified → PolicyApplied → Relay로 app에 전달
+
+**시나리오 3: cron이 자동으로 포지션 체크**
+
+CronScheduler.tick() (DaemonStore에서 cron 로드)
+  → "check my AAVE positions" cron이 due
+  → CronDispatch callback → _processChatDirect()
+  → [AI 대화 루프] OpenClaw에 프롬프트 전달 → AI가 getBalance tool_call
+  → GuardedAccount로 잔액 조회 → AI가 분석 결과 생성
+  → Relay로 결과 전송 (source: 'cron')
+
+---
+
+## 설계 분석 메모
+
+### v0.4.6 Store 경계 분리 결과 (해결됨)
+
+이전에 daemon이 `getApprovalStore()`로 store를 직접 CRUD하던 23건이 전부 해소:
+
+| 항목 | Before | After |
+|------|--------|-------|
+| store 접근 | `getApprovalStore()` 직접 | facade 메서드 경유 |
+| broker 접근 | `getApprovalBroker()` 직접 | `facade.submitApproval()` |
+| cron 영속 | WdkStore (WDK가 cron을 앎) | DaemonStore (WDK는 cron을 모름) |
+| journal | daemon 소유 | WDK 내부 (daemon은 직접 접근하지 않음) |
+| rejection 기록 | daemon이 직접 saveRejection() | WDK middleware가 자동 기록 |
+
+### Port 패턴
+
+각 handler가 필요한 최소 인터페이스만 받는 구조 (`ports.ts`):
+- `ToolFacadePort` — tool-surface.ts 전용
+- `AdminFacadePort` — admin-server.ts 전용
+- `ControlFacadePort` — control-handler.ts 전용
+
+facade 전체를 넘기지 않고 port로 좁힘 → 의존 범위 명확.
 
 ---
 
 **작성일**: 2026-03-22 KST
-**갱신일**: 2026-03-22 KST — 통신 채널 전체 맵 추가 (메시지 타입, chat 하위 타입, event_stream 14종, control 8종, 이벤트 소비 패턴, 알려진 문제)
+**갱신일**: 2026-03-22 KST — v0.4.6 store 경계 분리 + v0.4.7 dead export 정리 반영
+**갱신일**: 2026-03-22 KST — v0.4.8 WS 채널 재설계 반영. control 단방향화, ControlResult/ControlEvent 삭제, event_stream top-level 승격, query 채널 4종 추가, QueryFacadePort 추가, 직접 forward 제거(Redis 단일 경로), 통신 채널 맵 전면 갱신, 알려진 문제 3건 "해결됨"

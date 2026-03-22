@@ -102,10 +102,6 @@ Aggregate Root: `IdentityKeyManager` — class (core/identity)
   │     (core, depth 1)         (value, depth 0)                     │
   │      singleton               { publicKey, secretKey } Uint8Array │
   │                                                                  │
-  │   [E2ECrypto] ──→ E2EKeyPair        ──→ EncryptedMessage         │
-  │    (core, depth 1)  (value, depth 0)      (output, depth 0)      │
-  │     ECDH box         Curve25519 pair       { nonce, ciphertext } │
-  │                                                                  │
   └──────────────────────────────────────────────────────────────────┘
 ```
 
@@ -113,9 +109,8 @@ Aggregate Root: `IdentityKeyManager` — class (core/identity)
 |------|------|------|------|
 | `IdentityKeyPair` | value | `IdentityKeyManager.ts:9` | Ed25519 keypair. publicKey=승인자 식별, secretKey=서명 |
 | `IdentityKeyManager` | core | `IdentityKeyManager.ts:24` | Singleton. SecureStore CRUD + sign/verify. 앱당 하나의 신원 |
-| `E2EKeyPair` | value | `E2ECrypto.ts:16` | Curve25519 keypair. ECDH 키 교환용 |
-| `EncryptedMessage` | output | `E2ECrypto.ts:21` | {nonce, ciphertext} base64. nacl.box 결과 |
-| `E2ECrypto` | core | `E2ECrypto.ts:26` | ECDH → shared secret → nacl.box encrypt/decrypt. SAS 검증 |
+
+v0.4.7에서 `E2ECrypto.ts` 파일 전체 삭제 (v0.3.4 pairing 제거 후 dead code).
 
 ### 2-4. 릴레이 (Relay Transport)
 
@@ -135,7 +130,12 @@ Aggregate Root: `RelayClient` — class (core/relay)
   │   RelayMessage = { channel, messageId, timestamp, payload,       │
   │                    sessionId }   (output, not in graph)           │
   │                                                                  │
-  │   채널: 'control' | 'chat'   (RelayChannel from @wdk-app/protocol)
+  │   채널: 'control' | 'chat' | 'event_stream' | 'query'            │
+  │         | 'query_result'  (RelayChannel from @wdk-app/protocol)  │
+  │                                                                  │
+  │   v0.4.8 추가:                                                    │
+  │   pendingQueries: Map<requestId, {resolve,reject}>               │
+  │   query<T>(type, params, timeout?) → Promise<T>                  │
   │                                                                  │
   └──────────────────────────────────────────────────────────────────┘
 ```

@@ -1,13 +1,15 @@
 # guarded-wdk 아키텍처 One-Pager
 
-> AI의 tx 요청을 정책으로 판정하고, 사람의 서명된 승인을 검증 후 도메인 작업을 수행하는 서명 엔진
+> AI의 tx 요청을 정책으로 판정하고, 중복 실행을 방지하며, 사람의 서명된 승인을 검증 후 도메인 작업을 수행하는 서명 엔진
 
 ---
 
 ## 개요
 
 guarded-wdk는 WDK-APP 모노레포의 Layer 1 패키지로, `@tetherto/wdk` 위에 정책 기반 지갑 제어 레이어를 제공한다.
-타입 의존성 그래프 기준 44 nodes, 94 edges, 12개 소스 파일로 구성.
+타입 의존성 그래프 기준 39 nodes, 84 edges, 13개 소스 파일로 구성.
+
+v0.4.6에서 store 경계 분리 (ApprovalStore → WdkStore, cron 제거, journal 내부화), v0.4.7에서 dead export 정리.
 
 ---
 
@@ -18,7 +20,7 @@ guarded-wdk는 WDK-APP 모노레포의 Layer 1 패키지로, `@tetherto/wdk` 위
 > "온체인 tx의 실행 가능 여부를 규칙 기반으로 판정하는 체계"
 
 Aggregate Root: `EvaluationResult` — `guarded-middleware.ts` (depth 4)
-생애주기: Policy loaded → evaluate(tx) → ALLOW | REJECT
+생애주기: Policy loaded → evaluate(tx) → ALLOW | REJECT → (REJECT 시 rejection 자동 기록)
 
 ```
   Transaction ──→ evaluatePolicy() ──→ [EvaluationResult]
@@ -34,33 +36,18 @@ Aggregate Root: `EvaluationResult` — `guarded-middleware.ts` (depth 4)
                    Policy = CallPolicy | TimestampPolicy (d2)
                            │
                      CallPolicy ──→ PermissionDict (d0)
-                        │              └─→ { [target]: { [selector]: Rule[] } }
-                        │
                      Rule ──→ ArgCondition (d0) + Decision (d0)
 
   SignTransactionResult (output, d0)
 ```
 
-| 타입 | 역할 | 설명 |
-|------|------|------|
-| `Decision` | enum | `'ALLOW' \| 'REJECT'` — 정책 판정 결과 |
-| `ArgCondition` | value | tx calldata 인자에 대한 조건 (`EQ`, `GT`, `ONE_OF` 등 8종) |
-| `Rule` | value | `order` + `args` 조건 + `valueLimit` + `decision` — 단일 규칙 |
-| `PermissionDict` | value | `target → selector → Rule[]` 3단계 딕셔너리 |
-| `CallPolicy` | value | `type: 'call'` + `permissions: PermissionDict` — 컨트랙트 호출 정책 |
-| `TimestampPolicy` | value | `type: 'timestamp'` + `validAfter/validUntil` — 시간 제약 정책 |
-| `Policy` | enum | `CallPolicy \| TimestampPolicy` discriminated union |
-| `FailedArg` | value | 매칭 실패한 인자 정보 (index, condition, expected vs actual) |
-| `RuleFailure` | value | 실패한 Rule + 실패 인자 목록 |
-| `EvaluationContext` | value | 평가 맥락 — 대상 target, selector, 적용된 규칙들, 실패 사유 |
-| `EvaluationResult` | core | 최종 판정 — decision + matchedPermission + reason + context |
-| `SignTransactionResult` | output | 서명 완료 tx — `signedTx` + `intentHash` + `requestId` |
+v0.4.6 변경: middleware에 `onRejection` 콜백 추가 — REJECT 시 `saveRejection()`을 WDK 내부에서 자동 호출. daemon이 직접 호출하던 것을 내부화.
 
 ### 2. 승인 (Approval)
 
 > "사람이 Ed25519로 서명한, 도메인 작업 수행을 위한 인가 토큰"
 
-Aggregate Root: `SignedApproval` — `approval-store.ts` (depth 1)
+Aggregate Root: `SignedApproval` — `wdk-store.ts` (depth 1)
 생애주기: Request created → Pending → Signed → 6-step Verified → Domain ops → History recorded
 
 ```
@@ -68,89 +55,75 @@ Aggregate Root: `SignedApproval` — `approval-store.ts` (depth 1)
    (input, d0)                (broker)             (core, d1)
    = tx                                               │
    | policy_approval                                  ├──→ ApprovalType (enum, d0)
-   | policy_reject                                    ├──→ targetHash: string
-   | device_revoke                                    ├──→ approver: publicKey
-   | wallet_create                                    ├──→ sig: Ed25519 서명
-   | wallet_delete                                    └──→ nonce + expiresAt
+   | policy_reject                                    ├──→ targetHash, approver, sig
+   | device_revoke                                    └──→ nonce + expiresAt
+   | wallet_create
+   | wallet_delete
 
-  ApprovalRequest (input, d1)
-    └──→ PendingApprovalRequest (extends, d2) + walletName
-
-  VerificationContext (input, d0)
-    = { currentPolicyVersion, expectedTargetHash }
-
-  ApprovalType = 'tx' | 'policy' | 'policy_reject'
-               | 'device_revoke' | 'wallet_create' | 'wallet_delete'
+  ApprovalRequest (input, d1) → PendingApprovalRequest (extends, d2)
+  VerificationContext (input, d0) — broker 내부 전용
 ```
 
-| 타입 | 역할 | 설명 |
-|------|------|------|
-| `ApprovalType` | enum | 6종 승인 유형 |
-| `SignedApproval` | core | 서명된 승인 — type, requestId, chainId, targetHash, approver, sig, nonce, expiresAt, policyVersion, content |
-| `ApprovalRequest` | input | 승인 요청 — requestId, type, chainId, targetHash, accountIndex, content, createdAt |
-| `PendingApprovalRequest` | value | ApprovalRequest + walletName — pending 상태로 store에 저장 |
-| `ApprovalSubmitContext` | input | 6-variant DU — kind별 도메인 작업에 필요한 데이터 (policies, description 등) |
-| `VerificationContext` | input | 검증 맥락 — currentPolicyVersion, expectedTargetHash |
+v0.4.6 변경: broker 접근이 `getApprovalBroker()` → facade 메서드(`submitApproval()`, `createApprovalRequest()`, `setTrustedApprovers()`)로 전환. daemon이 broker를 직접 참조하지 않음.
 
-### 3. 원장 (Ledger)
+### 3. 저널 (Journal)
 
-> "정책, 월렛, 서명자, 승인 이력 등 모든 영속 상태의 추상 저장소"
+> "tx 실행 의도를 추적하고 중복 실행을 방지하는 인메모리 인덱스"
 
-Aggregate Root: `ApprovalStore` — `approval-store.ts` (abstract class, max depth)
-생애주기: init() → CRUD operations → dispose()
+Aggregate Root: `ExecutionJournal` — `execution-journal.ts` (v0.4.6에서 daemon → wdk로 이동)
+생애주기: received → settled | signed | failed | rejected
 
 ```
-                        [ApprovalStore]  (port, abstract)
+  TrackMeta ──→ [ExecutionJournal] ──→ JournalEntry
+   (input)           │                    │
+                     ├──→ _hashIndex      ├─ intentHash
+                     │    (Map)           ├─ targetHash
+                     │                    ├─ status
+                     └──→ isDuplicate()   └─ txHash
+                          (중복 체크)
+```
+
+- **이동 이유**: journal은 tx 실행의 중복 방지 기능. middleware가 tx를 실행하므로 WDK가 소유하는 게 맞음
+- middleware에서 `isDuplicate()` 체크 → 중복 시 `DuplicateIntentError` throw
+- `track()` + `updateStatus()` 자동 호출
+
+### 4. 영속 (WdkStore)
+
+> "정책, 월렛, 서명자, 승인 이력 등 WDK 도메인 상태의 추상 저장소"
+
+Aggregate Root: `WdkStore` — `wdk-store.ts` (abstract class, v0.4.6에서 ApprovalStore → WdkStore 개명)
+생애주기: init() → CRUD → dispose()
+
+```
+                        [WdkStore]  (port, abstract)
                              │
   ┌──────────────────────────┼──────────────────────────┐
   │            │             │            │             │
   ▼            ▼             ▼            ▼             ▼
-MasterSeed  StoredWallet  StoredPolicy  StoredSigner  StoredCron
- (value)     (value)      (value, d1)    (value)      (value, d1)
-                           extends                     extends
-                          PolicyInput                 CronInput
+MasterSeed  StoredWallet  StoredPolicy  StoredSigner  StoredJournal
+ (value)     (value)      (value, d1)    (value)      (value, d2)
 
-  HistoryEntry (value, d2) → ApprovalType + HistoryAction + SignedApproval
-  StoredJournal (value, d2) extends JournalInput → JournalStatus + txHash
-  RejectionEntry (value, d0)
-  PolicyVersionEntry (value, d0)
+  HistoryEntry, RejectionEntry, PolicyVersionEntry
 
-  Implementations: JsonApprovalStore, SqliteApprovalStore
+  Implementations: JsonWdkStore, SqliteWdkStore
 ```
 
-| 타입 | 역할 | 설명 |
-|------|------|------|
-| `ApprovalStore` | port | 추상 클래스 — seed, wallet, policy, pending, history, signer, nonce, cron, journal, rejection, policyVersion |
-| `MasterSeed` | value | HD 월렛 시드 — mnemonic + createdAt |
-| `StoredWallet` | value | BIP-44 월렛 — accountIndex, name, address |
-| `PolicyInput` → `StoredPolicy` | input/value | 정책 저장 — policies[] + signature + accountIndex, chainId, policyVersion |
-| `StoredSigner` | value | Ed25519 서명자 — publicKey, name, registeredAt, revokedAt |
-| `CronInput` → `StoredCron` | input/value | 반복 작업 — sessionId, interval, prompt |
-| `JournalInput` → `StoredJournal` | input/value | tx 실행 저널 — intentHash, status, txHash |
-| `JournalStatus` | enum | `'received' \| 'settled' \| 'signed' \| 'failed' \| 'rejected'` |
-| `HistoryEntry` | value | 승인 이력 — type, action(approved/rejected), signedApproval 포함 |
-| `RejectionEntry` | value | 정책 거부 이력 — reason, context, policyVersion |
-| `PolicyVersionEntry` | value | 정책 버전 이력 — version, description, diff |
+v0.4.6 변경:
+- **Cron 전면 제거**: `CronInput`/`StoredCron` 타입 + `saveCron()`, `listCrons()`, `removeCron()`, `updateCronLastRun()` 메서드 전부 삭제 → daemon의 DaemonStore에서 자체 정의
+- **이름 변경**: ApprovalStore → WdkStore, SqliteApprovalStore → SqliteWdkStore, JsonApprovalStore → JsonWdkStore
 
-### 4. 암호 (Crypto)
+### 5. 암호 (Crypto)
 
-> "Ed25519 키 생성, 서명, 검증 프리미티브"
+> "Ed25519 서명 검증 프리미티브"
 
 Aggregate Root: `verify` — `crypto-utils.ts` (function)
-생애주기: 정적 (상태 없음)
+생애주기: 정적
 
 ```
-  generateKeyPair() ──→ KeyPair (value)
-  message + secretKey ──→ sign() ──→ sig
   message + sig + publicKey ──→ verify() → boolean
 ```
 
-| 타입 | 역할 | 설명 |
-|------|------|------|
-| `KeyPair` | value | publicKey + secretKey (hex string) |
-| `verify()` | function | tweetnacl Ed25519 서명 검증 |
-| `sign()` | function | tweetnacl Ed25519 서명 생성 |
-| `generateKeyPair()` | function | Ed25519 키쌍 생성 |
+v0.4.7 변경: `sign()`, `generateKeyPair()`, `KeyPair` 타입을 **internal로 전환**. 공개 API는 `verify()`만 남음. WDK 외부에서 서명을 생성할 필요가 없기 때문.
 
 ---
 
@@ -158,23 +131,35 @@ Aggregate Root: `verify` — `crypto-utils.ts` (function)
 
 ```
   ┌────────┐                  ┌────────┐
-  │ Policy │                  │Approval│
-  │  정책   │                  │  승인   │
+  │ Policy │──onRejection──→ │WdkStore│
+  │  정책   │                  │  영속   │
   └───┬────┘                  └───┬────┘
-      │                           │
-      │  loadPolicy()             │  verifyApproval()
-      │                           │  submitApproval()
-      ▼                           ▼
-  ┌────────┐                  ┌────────┐
-  │ Ledger │◄────────────────│ Crypto │
-  │  원장   │  verify(sig)    │  암호   │
-  └────────┘                  └────────┘
+      │                           ▲
+      │ loadPolicy()              │ appendHistory()
+      │                           │ saveRejection()
+      │                      ┌────┴───┐
+      │                      │Approval│
+      │                      │  승인   │
+      │                      └───┬────┘
+      │                           │ verify(sig)
+      │                      ┌────▼───┐
+      │                      │ Crypto │
+      │                      │  암호   │
+      │                      └────────┘
+      │
+      │ isDuplicate()
+      │ track()
+  ┌───▼────┐
+  │Journal │
+  │  저널   │
+  └────────┘
 ```
 
-- **Policy → Ledger** : 정책 평가 시 `loadPolicy()`로 현재 정책을 로드한다 (소비)
-- **Approval → Ledger** : 승인 처리 시 pending/history/signer/policy 등 CRUD를 수행한다 (소비+전이)
-- **Approval → Crypto** : 6-step 검증에서 `verify()`로 Ed25519 서명을 검증한다 (소비)
-- **Approval → Policy** : policy_approval 승인 시 정책을 저장한다 (전이: 정책 변경)
+- **Policy → WdkStore**: 정책 로드 + REJECT 시 rejection 자동 기록 (v0.4.6 내부화)
+- **Policy → Journal**: tx 실행 전 isDuplicate() 체크, 실행 후 track/updateStatus (v0.4.6 내부화)
+- **Approval → WdkStore**: 승인 처리 시 pending/history/signer/policy CRUD
+- **Approval → Crypto**: 6-step 검증에서 verify()
+- **Approval → Policy**: policy_approval 시 정책 저장 (broker 내부화)
 
 ---
 
@@ -184,9 +169,9 @@ Aggregate Root: `verify` — `crypto-utils.ts` (function)
   ┌──────────────────┐  ┌──────────────────┐  ┌──────────────────┐
   │  1. 정책 평가     │  │  2. 승인 처리     │  │  3. 보호 조립     │
   │"tx를 허용하는가?" │  │"서명이 유효한가?" │  │"WDK를 어떻게     │
-  │ [Policy+Ledger]  │  │[Approval+Crypto  │  │ 안전하게 감싸나?" │
-  │                  │  │    +Ledger]       │  │[Policy+Approval  │
-  │                  │  │                   │  │    +Ledger]       │
+  │ [Policy+WdkStore │  │[Approval+Crypto  │  │ 안전하게 감싸나?" │
+  │    +Journal]      │  │    +WdkStore]     │  │[Policy+Approval  │
+  │                  │  │                   │  │ +WdkStore+Journal]│
   └────────┬─────────┘  └────────┬──────────┘  └────────┬─────────┘
            │                     │                      │
            ▼                     ▼                      ▼
@@ -197,190 +182,114 @@ Aggregate Root: `verify` — `crypto-utils.ts` (function)
 
 > "AI가 보낸 tx를 현재 정책으로 허용해도 되는가?"
 
-```
-  Transaction ──→ policyResolver(chainId) ──→ evaluatePolicy() ──→ Decision
-      │              │                           │
-      │              └─ store.loadPolicy()        ├─ ALLOW → rawSend()
-      │                 + validatePolicies()      └─ REJECT → throw
-      │                                              PolicyRejectionError
-      ├─ TimestampPolicy 먼저 체크 (시간 범위)
-      └─ CallPolicy 매칭: target → selector → Rule[] → order 순 평가
-```
+v0.4.6 변경: rejection 기록 + journal 추적이 middleware 내부로 통합.
 
-매칭 로직: exactTarget[exactSelector] → exactTarget[*] → wildTarget[exactSelector] → wildTarget[*] → order 순 정렬 → args 조건 + valueLimit 검사 → 첫 매칭 Rule의 decision 반환
-
-| 컴포넌트 | 위치 | 도메인 | 역할 | 설명 |
-|----------|------|--------|------|------|
-| `evaluatePolicy()` | `guarded-middleware.ts:221` | Policy | function | Policy[] + chainId + tx → EvaluationResult |
-| `matchCondition()` | `guarded-middleware.ts:182` | Policy | function | 8종 비교 연산, BigInt 지원 |
-| `matchArgs()` | `guarded-middleware.ts:205` | Policy | function | calldata offset 기반 인자 추출 → ArgCondition 매칭 |
-| `validatePolicies()` | `guarded-middleware.ts:156` | Policy | function | Policy[] 구조 검증 |
-| `permissionsToDict()` | `guarded-middleware.ts:165` | Policy | function | Permission 배열 → PermissionDict 변환 |
+```
+  Transaction ──→ journal.isDuplicate() ──→ 중복이면 DuplicateIntentError
+      │
+      ▼ (신규)
+  journal.track(intentHash) → status: 'received'
+      │
+      ▼
+  policyResolver(chainId) → evaluatePolicy() → Decision
+      │                                           │
+      ├─ ALLOW → rawSend() → journal.updateStatus('settled', txHash)
+      │
+      └─ REJECT → onRejection(saveRejection) → PolicyRejectionError
+```
 
 ### 축 2. 승인 처리 (Approval Processing)
 
 > "사람의 서명된 승인이 유효하면, 어떤 도메인 작업을 수행하는가?"
 
-```
-  SignedApproval + ApprovalSubmitContext
-      │
-      ▼
-  verifyApproval() ── 6-step 검증 ──
-      │  1. approver ∈ trustedApprovers?
-      │  2. approver not revoked?
-      │  3. Ed25519 sig verify (crypto)
-      │  4. expiresAt > now?
-      │  5. nonce > lastNonce? (replay 방지)
-      │  6. type별 targetHash/policyVersion 검증
-      │
-      ▼ (실패 시 → emit ApprovalFailed + throw)
-  submitApproval() ── 도메인 작업 (type별 switch) ──
-      │
-      ├─ policy       → savePolicy() + removePending → PolicyApplied
-      ├─ policy_reject→ removePending → ApprovalRejected
-      ├─ device_revoke→ revokeSigner() + setTrusted → SignerRevoked
-      ├─ wallet_create→ createWallet() + removePending → WalletCreated
-      └─ wallet_delete→ deleteWallet() + removePending → WalletDeleted
-      │
-      ▼
-  appendHistory() → emit ApprovalVerified → emit domain events
-```
-
-원자성: 도메인 처리 완료 후 best-effort emit. 리스너 예외는 삼킴.
-
-| 컴포넌트 | 위치 | 도메인 | 역할 | 설명 |
-|----------|------|--------|------|------|
-| `SignedApprovalBroker` | `signed-approval-broker.ts:40` | Approval | core | 승인 생명주기 — createRequest, submitApproval, getPendingApprovals |
-| `verifyApproval()` | `approval-verifier.ts:32` | Approval | function | 6단계 검증 — trust → revoke → sig → expiry → nonce → type-specific |
-| `computeApprovalHash()` | `approval-verifier.ts:21` | Approval | function | sig 제외 필드 → canonicalJSON → SHA-256 |
-| `ApprovalSubmitContext` | `signed-approval-broker.ts:29` | Approval | input | 6-variant DU, No Optional 원칙 적용 |
+구조 동일 (v0.4.2에서 확정). daemon은 facade 메서드(`submitApproval()`)로만 접근.
 
 ### 축 3. 보호 조립 (Guard Assembly)
 
 > "WDK account를 어떻게 감싸서 AI에게 안전하게 노출하는가?"
 
+v0.4.6 변경: factory가 **facade 메서드 10+개**를 노출. `getApprovalBroker()`, `getApprovalStore()` 제거.
+
 ```
   GuardedWDKConfig ──→ createGuardedWDK() ──→ GuardedWDKFacade
-                           │                       │
-                           │ 1. new WDK(seed)      ├─ getAccount()
-                           │ 2. new EventEmitter   ├─ getApprovalBroker()
-                           │ 3. store.init()       ├─ getApprovalStore()
-                           │ 4. new Broker         ├─ on()/off()
-                           │ 5. registerWallet     └─ dispose()
-                           │ 6. registerProtocol
-                           │ 7. registerMiddleware
-                           │    (createGuardedMiddleware)
+                           │
+                           │ 조립:
+                           │ 1. new WDK(seed)
+                           │ 2. new EventEmitter (단일)
+                           │ 3. wdkStore.init()
+                           │ 4. new SignedApprovalBroker
+                           │ 5. new ExecutionJournal + recover()
+                           │ 6. registerMiddleware (journal + onRejection 주입)
+                           │
                            ▼
-                     GuardedAccount (래핑된 account)
-                       ├─ sendTransaction → 정책 평가 → rawSend
-                       ├─ transfer → ERC-20 변환 → 정책 평가 → rawTransfer
-                       ├─ signTransaction → 정책 평가 → rawSign
-                       ├─ sign → ForbiddenError (차단)
-                       ├─ signTypedData → ForbiddenError (차단)
-                       ├─ dispose → ForbiddenError (차단)
-                       └─ keyPair → ForbiddenError (getter 차단)
+                     GuardedWDKFacade
+                       ├─ getAccount(), getAccountByPath()
+                       ├─ on(), off(), dispose()
+                       │
+                       ├─ 승인: submitApproval(), createApprovalRequest()
+                       │        setTrustedApprovers(), getPendingApprovals()
+                       │
+                       ├─ 조회: loadPolicy(), getPolicyVersion()
+                       │        listSigners(), listWallets()
+                       │        listRejections(), listPolicyVersions()
+                       │        listJournal()
+                       │
+                       └─ 기록: saveRejection()
 ```
 
-단일 emitter: factory가 생성 → broker + middleware 공유
-
-| 컴포넌트 | 위치 | 도메인 | 역할 | 설명 |
-|----------|------|--------|------|------|
-| `createGuardedWDK()` | `guarded-wdk-factory.ts:44` | All | function | WDK + emitter + broker + middleware 조립 → GuardedWDKFacade |
-| `createGuardedMiddleware()` | `guarded-middleware.ts:327` | Policy | function | account 래핑 — tx 메서드에 정책 삽입, 위험 메서드 차단 |
-| `GuardedAccount` | `guarded-middleware.ts:70` | Policy | port | 래핑된 account 인터페이스 |
-| `pollReceipt()` | `guarded-middleware.ts:305` | Policy | function | tx broadcast 후 60초간 receipt 폴링 → ExecutionSettled |
+daemon은 이 facade만 사용. store/broker에 직접 접근 불가.
 
 ---
 
 ## 시나리오
 
-```
-  createGuardedWDK() → [보호 조립] → GuardedWDKFacade
-                                        │
-                    ┌───────────────────┤
-                    ▼                   ▼
-  AI tx 요청 → [정책 평가] → ALLOW    사람 서명 → [승인 처리] → domain ops
-                    │                                    │
-                    └────── Ledger (store) ──────────────┘
-```
-
 **시나리오 1: AI가 DeFi tx를 실행 (happy path)**
 
-AI가 `GuardedAccount.sendTransaction({ to, data, value })` 호출
-  → [보호 조립] middleware가 가로챔
-  → [정책 평가] `policyResolver(chainId)` → `evaluatePolicy()` → ALLOW (Policy: loaded → evaluated)
-  → `rawSendTransaction()` → `{ hash, fee }`
-  → emit IntentProposed → PolicyEvaluated → ExecutionBroadcasted
-  → `pollReceipt()` → ExecutionSettled (Ledger: journal updated)
-
-**시나리오 2: 사람이 정책을 변경**
-
-Daemon이 `broker.createRequest('policy', opts)` → PendingPolicyRequested emit
-  → App이 사용자에게 표시 → 사용자가 Ed25519로 서명
-  → [승인 처리] `broker.submitApproval(signedApproval, { kind: 'policy_approval', policies, description })`
-  → `verifyApproval()` 6-step 통과 (Approval: pending → verified)
-  → `savePolicy()` + `removePending()` + `appendHistory()` (Ledger: policy updated, history created)
-  → emit ApprovalVerified → PolicyApplied
-
-**시나리오 3: 정책 위반 tx 거부 (unhappy path)**
-
 AI가 `GuardedAccount.sendTransaction(tx)` 호출
-  → [정책 평가] `evaluatePolicy()` → REJECT (Policy: evaluated → rejected)
-  → emit IntentProposed → PolicyEvaluated(REJECT)
-  → throw `PolicyRejectionError(reason, context)`
-  → context에 target, selector, effectiveRules, ruleFailures 포함 — AI가 왜 거부됐는지 진단 가능
+  → [Journal] isDuplicate() → 신규 → track() (Journal: → received)
+  → [정책 평가] evaluatePolicy() → ALLOW
+  → rawSendTransaction() → { hash, fee }
+  → [Journal] updateStatus('settled', txHash) (Journal: received → settled)
+  → emit IntentProposed → PolicyEvaluated → ExecutionBroadcasted
+
+**시나리오 2: 중복 tx 거부 (v0.4.6 신규)**
+
+AI가 같은 tx를 다시 요청
+  → [Journal] isDuplicate(targetHash) → true
+  → throw DuplicateIntentError(dedupKey, intentHash)
+  → tx 실행하지 않음
+
+**시나리오 3: 정책 위반 tx 거부 + 자동 기록**
+
+AI가 GuardedAccount.sendTransaction(tx) 호출
+  → [정책 평가] evaluatePolicy() → REJECT
+  → [onRejection] saveRejection() 자동 호출 (v0.4.6: daemon이 하던 것을 WDK가 직접)
+  → throw PolicyRejectionError(reason, context)
 
 ---
 
 ## 설계 분석 메모
 
-### verifyApproval() 6-step 검증 파이프라인
+### v0.4.6 Store 경계 분리 결과
 
-`approval-verifier.ts:32-106`. 순서: "누가 → 진짜 서명했나 → 유효한가 → 맞는 대상인가"
+| 항목 | Before | After |
+|------|--------|-------|
+| Store 이름 | ApprovalStore | WdkStore |
+| Cron | WdkStore에 포함 | 제거 → DaemonStore |
+| Journal | daemon 소유 | WDK로 이동 (middleware 내부화) |
+| Rejection 기록 | daemon이 직접 호출 | middleware onRejection 콜백으로 자동 |
+| Broker 접근 | `getApprovalBroker()` | facade: `submitApproval()` 등 |
+| Store 접근 | `getApprovalStore()` | facade: `loadPolicy()` 등 10개 메서드 |
 
-| Step | 검증 내용 | 실패 시 | 목적 |
-|------|----------|---------|------|
-| 1 | `approver ∈ trustedApprovers` | `UntrustedApproverError` | 사전 등록된 서명자만 허용 |
-| 2 | `store.isSignerRevoked(approver)` | `SignerRevokedError` | 해지된 서명자 거부 |
-| 3 | `verify(canonicalHash, sig, approver)` | `SignatureError` | Ed25519 서명 위조 방지 |
-| 4 | `expiresAt > now` | `ApprovalExpiredError` | 캡처된 승인 무기한 재사용 방지 |
-| 5 | `nonce > lastNonce` | `ReplayError` | 동일 서명 중복 제출 방지 |
-| 6 | type별 `targetHash`/`policyVersion` 비교 | `SignatureError` | 승인 대상 일치 확인 |
+### VerificationContext 간접층 문제 (미해결)
 
-Step 1~5는 모든 ApprovalType에 공통. Step 6만 type별 분기.
+`ApprovalSubmitContext` → `VerificationContext` 변환이 여전히 존재. `currentPolicyVersion`이 항상 null인 dead 필드. 후속 정리 대상.
 
-### VerificationContext 간접층 문제
+### Dead Export 타입 gap 패턴 (해결됨)
 
-현재 흐름:
-```
-daemon → ApprovalSubmitContext → broker → VerificationContext 변환 → verifyApproval()
-```
-
-문제점:
-1. `currentPolicyVersion`이 **항상 null** — dead 필드
-2. `expectedTargetHash`가 null이면 스킵 — 사실상 optional 패턴 (No Optional 원칙 위반)
-3. `verifyApproval()`의 Step 6이 type별 switch를 하는데, `ApprovalSubmitContext`가 이미 kind별 데이터를 갖고 있음 — 같은 분기를 두 곳에서 수행
-4. `verifyApproval()`의 외부 사용자가 **없음** — broker 전용
-
-개선 방향: `VerificationContext` 제거, `verifyApproval()`이 `ApprovalSubmitContext`를 직접 받으면 변환 코드 제거 + kind narrowing으로 null 체크 불필요.
-
-단, Step 1~5가 전 타입 공통이므로 OOP 구현체 분리(strategy)는 과잉 — DU + switch가 이 규모에서 더 단순.
-
-### Dead Export 타입 gap 패턴
-
-`FailedArg`, `RuleFailure`는 dead-exports 체크에 잡히지만 **런타임에서는 사용 중**:
-```
-matchArgs() → FailedArg[] 생성
-  → evaluatePolicy() → RuleFailure[] 수집 → EvaluationContext에 담김
-    → PolicyRejectionError(reason, context: unknown) → daemon이 catch
-```
-
-소비자(daemon)가 `context: unknown`으로 받아서 타입을 import하지 않을 뿐. export 제거하면 나중에 타입 좁히기가 불가능해짐.
-
-이 패턴("런타임 사용 O, 타입 import X")이 126건 dead export 중 얼마나 되는지가 dead-exports 분류 작업의 핵심.
-→ 분류 작업 위임서: `docs/handover/dead-exports-triage.md`
+`FailedArg`, `RuleFailure`는 `PolicyRejectionError.context: EvaluationContext | null`을 통해 타입 체인이 연결됨. 이전에 `context: unknown`이었던 것이 구체 타입으로 좁혀져서 소비자(daemon)가 타입 안전하게 접근 가능. dead export가 아니라 정상적으로 참조되는 상태.
 
 ---
 
 **작성일**: 2026-03-22 KST
-**갱신일**: 2026-03-22 KST — 설계 분석 메모 추가 (verifyApproval 6-step, VerificationContext 문제, dead export 타입 gap)
+**갱신일**: 2026-03-22 KST — v0.4.6 store 경계 분리 + v0.4.7 dead export 정리 반영. 도메인 5개(Policy/Approval/Journal/WdkStore/Crypto), Journal 도메인 신규 추가, Cron 제거, facade 메서드 확장
