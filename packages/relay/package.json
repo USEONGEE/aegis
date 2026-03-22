@@ -20,7 +20,7 @@
     "pino": "^9.6.0",
     "jsonwebtoken": "^9.0.2",
     "expo-server-sdk": "^3.13.0",
-    "@wdk-app/protocol": "workspace:*"
+    "@wdk-app/protocol": "*"
   },
   "devDependencies": {
     "typescript": "^5.4.0",

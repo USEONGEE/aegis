@@ -20,8 +20,8 @@ interface RedisQueueOptions {
  *   online:{userId}                  - daemon heartbeat key with TTL
  */
 export class RedisQueue extends QueueAdapter {
-  redis: InstanceType<typeof Redis>
-  blockingRedis: InstanceType<typeof Redis>
+  redis: Redis
+  blockingRedis: Redis
 
   constructor (opts: RedisQueueOptions = {}) {
     super()
