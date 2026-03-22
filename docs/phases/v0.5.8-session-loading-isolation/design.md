@@ -104,28 +104,30 @@ resetSessionTransient(currentSessionId);
 
 `addMessage` 내 `MAX_SESSIONS` 초과 시 오래된 세션 제거 로직에서 `sessionTransient` 엔트리도 함께 삭제.
 
-### TD-7: CancelCompleted/CancelFailed 세션 식별
+### TD-7: CancelCompleted/CancelFailed 처리
 
 현재 `CancelCompleted`/`CancelFailed` 이벤트에는 `sessionId`가 없다 (Daemon/Relay 변경은 비목표).
-해결 규칙: `sessionTransient`를 순회하여 `queuedMessageId`가 일치하는 세션을 찾아 리셋한다.
+
+**현재 취소 흐름 분석:**
+1. 사용자가 취소 버튼 클릭 → `cancelPendingMessage()`에서 relay에 취소 요청 전송 후 **즉시 optimistic reset** (queuedMessageId=null, messageState=idle, isLoading=false, isTyping=false)
+2. 서버가 `CancelCompleted`/`CancelFailed` 이벤트 전송 → 도착 시점에 이미 상태가 reset된 상태
+
+**해결 규칙:** optimistic reset을 유지하고, `CancelCompleted`/`CancelFailed`는 완전 무시(return만)한다. 세션 역조회 불필요, 버퍼도 건드리지 않는다.
 
 ```typescript
 case 'CancelCompleted':
 case 'CancelFailed': {
-  // sessionId 없는 이벤트 → queuedMessageId로 세션 역조회
-  const transients = get().sessionTransient;
-  for (const [sid, state] of Object.entries(transients)) {
-    if (state.queuedMessageId != null) {
-      resetSessionTransient(sid);
-    }
-  }
-  streamBufferRef.current = '';
-  streamMsgIdRef.current = null;
+  // optimistic reset이 cancelPendingMessage()에서 이미 완료.
+  // sessionId가 없으므로 어떤 세션의 상태/버퍼도 건드리지 않는다.
+  // (세션 A 취소 후 세션 B 활성 중에 도착 시 세션 B 버퍼 오염 방지)
   return;
 }
 ```
 
-세션 수가 소수(< 10)이므로 순회 비용 무시 가능. 실질적으로 `queuedMessageId`가 설정된 세션은 항상 1개 (동일 세션 내 단일 in-flight).
+안전한 이유:
+1. `cancelPendingMessage()`가 `resetSessionTransient(currentSessionId)`를 호출하여 해당 세션만 정확히 리셋
+2. 스트림 버퍼(`streamBufferRef`, `streamMsgIdRef`)도 `cancelPendingMessage()`에서 이미 정리됨
+3. 서버 이벤트 도착 시점에 추가 작업 불필요 — 다른 세션의 활성 스트림을 보호
 
 ## 테스트 전략
 
@@ -133,7 +135,8 @@ case 'CancelFailed': {
 1. 세션 A에서 메시지 전송 → 세션 B로 이동 → 전송 버튼 활성 상태 확인
 2. 세션 B에서 메시지 전송 → 세션 A로 돌아오기 → 세션 A 로딩 상태 유지 확인
 3. 로딩 중 세션 전환 후 복귀 → 로딩 표시 유지 + 취소 버튼 동작 확인
-4. tsc 통과 확인
+4. 세션 A 취소 직후 세션 B에서 새 응답 스트리밍 중 → 세션 B 스트림이 끊기지 않는지 확인
+5. tsc 통과 확인
 
 ## 마이그레이션
 
