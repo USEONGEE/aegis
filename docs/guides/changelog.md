@@ -1,5 +1,27 @@
 # Changelog
 
+## v0.5.8 - 세션별 isLoading 분리 (2026-03-23)
+
+- **sessionTransient 구조 전환**: useChatStore의 4개 글로벌 transient 필드(isLoading, isTyping, queuedMessageId, messageState) → `sessionTransient: Record<string, SessionTransientState>` + getter/setter/reset 3개 액션으로 전환
+- **ChatDetailScreen 세션 키 기반 전환**: 모든 transient 상태 읽기/쓰기를 세션 키 기반으로 전환. 세션 A 로딩 중에도 세션 B에서 독립적으로 전송 가능
+- **CancelCompleted/CancelFailed no-op 전환**: optimistic reset 활용으로 이벤트 핸들러를 no-op으로 변경
+- **isLoading 가드 추가**: sendMessage에 isLoading 체크 추가하여 키보드 submit 경로 이중 전송 차단
+- 📝 [Phase 문서](../archive/v0.5.8-session-loading-isolation/README.md)
+
+## v0.5.10 - Wallet Address Display + Multi-Wallet 관리 (2026-03-23)
+
+- **getWalletAddress query**: Protocol에 경량 주소 조회 query 타입 추가, Daemon query-handler에서 `facade.getAccount().getAddress()` 호출
+- **useWalletStore**: zustand + persist — 현재 선택된 accountIndex 추적. wallets/addresses는 transient (SSOT 원칙)
+- **Wallet 탭 UI 확장**: 주소 축약 표시 + 탭 복사(expo-clipboard), 지갑 목록/선택, 추가/삭제 (기존 sendApproval 경로 활용)
+- **accountIndex 하드코딩 제거**: Dashboard, Policy, Settings 3곳의 `accountIndex: 0` → useWalletStore 참조로 전환
+- 📝 [Phase 문서](../archive/v0.5.10-wallet-address-display/README.md)
+
+## v0.5.12 - Chat Session 삭제 (2026-03-23)
+
+- **deleteSessions 액션**: useChatStore에 세션 일괄 삭제 — sessions, streamCursors, sessionTransient 동시 정리. 활성 세션 삭제 시 currentSessionId → null
+- **편집 모드 UI**: ChatListScreen 헤더 "편집" 버튼 → 체크박스 선택 모드, 하단 "전체선택" + "삭제" 버튼, Alert 확인 후 삭제
+- 📝 [Phase 문서](../archive/v0.5.12-chat-session-delete/README.md)
+
 ## v0.5.9 - Chat Markdown 렌더링 (2026-03-23)
 
 - **MarkdownBubble 컴포넌트**: AI(assistant) 응답을 `@ronradtke/react-native-markdown-display`로 마크다운 렌더링. 헤딩, 볼드, 코드블록, 목록, 테이블, 링크 지원

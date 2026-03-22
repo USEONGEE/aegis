@@ -4,12 +4,6 @@ AI DeFi Agent 서명 엔진 + 제어 인프라.
 
 ## 현재 페이즈
 
-### v0.5.8 — 세션별 isLoading 분리
-- **상태**: Step 1 - PRD
-- **문서**: [docs/phases/v0.5.8-session-loading-isolation/](docs/phases/v0.5.8-session-loading-isolation/)
-- **Codex Session ID**: `/Users/mousebook/Documents/GitHub/WDK-APP/docs/phases/v0.5.8-session-loading-isolation`
-- **시작일**: 2026-03-23
-
 ### v0.5.2 — Chat Protocol 타입 강제 적용
 - **상태**: Step 1 - PRD
 - **문서**: [docs/phases/v0.5.2-chat-protocol-enforcement/](docs/phases/v0.5.2-chat-protocol-enforcement/)
@@ -98,6 +92,11 @@ AI DeFi Agent 서명 엔진 + 제어 인프라.
 | v0.5.6 | Portfolio Enso Pricing |
 | v0.5.9 | Chat Markdown 렌더링 |
 | v0.5.7 | Manifest DeFi Tools |
+| v0.5.10 | Wallet Address Display + Multi-Wallet 관리 |
+| v0.5.11 | Transfer Tool 정리 + Manifest Tool 연결 + getWalletAddress |
+| v0.5.13 | KittenSwap 전면 제거 |
+| v0.5.8 | 세션별 isLoading 분리 |
+| v0.5.12 | Chat Session 삭제 |
 
 ## 프로젝트 구조
 
