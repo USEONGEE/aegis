@@ -16,21 +16,22 @@
     "test": "node --experimental-vm-modules ../../node_modules/.bin/jest"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.80.0",
+    "@wdk-app/canonical": "*",
+    "@wdk-app/guarded-wdk": "*",
+    "@wdk-app/protocol": "*",
     "openai": "^4.40.0",
-    "ws": "^8.16.0",
     "pino": "^8.19.0",
     "tweetnacl": "^1.0.3",
-    "@wdk-app/guarded-wdk": "*",
-    "@wdk-app/canonical": "*",
-    "@wdk-app/protocol": "*"
+    "ws": "^8.16.0"
   },
   "devDependencies": {
-    "typescript": "^5.4.0",
-    "ts-node": "^10.9.0",
-    "ts-jest": "^29.1.0",
+    "@jest/globals": "^29.7.0",
     "@types/node": "^20.11.0",
     "@types/ws": "^8.5.10",
     "jest": "^29.7.0",
-    "@jest/globals": "^29.7.0"
+    "ts-jest": "^29.1.0",
+    "ts-node": "^10.9.0",
+    "typescript": "^5.4.0"
   }
 }

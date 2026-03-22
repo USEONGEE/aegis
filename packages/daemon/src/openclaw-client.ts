@@ -1,9 +1,9 @@
-import OpenAI from 'openai'
+import Anthropic from '@anthropic-ai/sdk'
 import type { DaemonConfig } from './config.js'
 import type { ToolDefinition } from './ai-tool-schema.js'
 
 // ---------------------------------------------------------------------------
-// Types
+// Types (unchanged — tool-call-loop.ts depends on these)
 // ---------------------------------------------------------------------------
 
 export interface ChatMessage {
@@ -42,116 +42,188 @@ export interface OpenClawClient {
   chatStream (userId: string, sessionId: string, messages: ChatMessage[], tools: ToolDefinition[], onDelta: ((delta: string) => void) | null, opts?: { signal?: AbortSignal }): Promise<ChatResponse>
 }
 
-/**
- * Create an OpenClaw client using the OpenAI SDK.
- *
- * OpenClaw is OpenAI-compatible, so we use the official SDK pointed at the
- * local gateway (default: http://localhost:18789).
- */
-export function createOpenClawClient (config: DaemonConfig): OpenClawClient {
-  const client = new OpenAI({
-    baseURL: config.openclawBaseUrl,
-    apiKey: config.openclawToken || 'no-key'
-  })
+// ---------------------------------------------------------------------------
+// Adapter: OpenAI-style messages → Anthropic format
+// ---------------------------------------------------------------------------
+
+function convertMessages (messages: ChatMessage[]): { system: string | undefined, anthropicMessages: Anthropic.MessageParam[] } {
+  let system: string | undefined
+  const anthropicMessages: Anthropic.MessageParam[] = []
+
+  for (const msg of messages) {
+    if (msg.role === 'system') {
+      system = msg.content || undefined
+      continue
+    }
+
+    if (msg.role === 'user') {
+      anthropicMessages.push({ role: 'user', content: msg.content || '' })
+      continue
+    }
+
+    if (msg.role === 'assistant') {
+      const content: Anthropic.ContentBlockParam[] = []
+      if (msg.content) {
+        content.push({ type: 'text', text: msg.content })
+      }
+      if (msg.tool_calls) {
+        for (const tc of msg.tool_calls) {
+          let input: Record<string, unknown>
+          try { input = JSON.parse(tc.function.arguments) } catch { input = {} }
+          content.push({
+            type: 'tool_use',
+            id: tc.id,
+            name: tc.function.name,
+            input
+          })
+        }
+      }
+      if (content.length > 0) {
+        anthropicMessages.push({ role: 'assistant', content })
+      }
+      continue
+    }
+
+    if (msg.role === 'tool') {
+      anthropicMessages.push({
+        role: 'user',
+        content: [{
+          type: 'tool_result',
+          tool_use_id: msg.tool_call_id || '',
+          content: msg.content || ''
+        }]
+      })
+      continue
+    }
+  }
+
+  return { system, anthropicMessages }
+}
+
+function convertTools (tools: ToolDefinition[]): Anthropic.Tool[] {
+  return tools.map(t => ({
+    name: t.function.name,
+    description: t.function.description || '',
+    input_schema: t.function.parameters as Anthropic.Tool.InputSchema
+  }))
+}
+
+function convertResponse (response: Anthropic.Message): ChatResponse {
+  let textContent = ''
+  const toolCalls: ToolCall[] = []
+
+  for (const block of response.content) {
+    if (block.type === 'text') {
+      textContent += block.text
+    } else if (block.type === 'tool_use') {
+      toolCalls.push({
+        id: block.id,
+        type: 'function',
+        function: {
+          name: block.name,
+          arguments: JSON.stringify(block.input)
+        }
+      })
+    }
+  }
 
   return {
-    /**
-     * Send a chat completion request to OpenClaw.
-     *
-     * OpenClaw manages sessions internally keyed by `user` field.
-     * We only need to send the latest user message -- OpenClaw loads prior
-     * history from its JSONL store automatically.
-     */
-    async chat (userId: string, sessionId: string, messages: ChatMessage[], tools: ToolDefinition[], opts?: { signal?: AbortSignal }): Promise<ChatResponse> {
-      const userField = sessionId ? `${userId}:${sessionId}` : userId
+    choices: [{
+      index: 0,
+      message: {
+        role: 'assistant',
+        content: textContent || null,
+        tool_calls: toolCalls.length > 0 ? toolCalls : undefined
+      },
+      finish_reason: response.stop_reason === 'tool_use' ? 'tool_calls' : 'stop'
+    }]
+  }
+}
 
-      const params: Record<string, unknown> = {
-        model: 'default',
-        stream: false,
-        user: userField,
-        messages
+// ---------------------------------------------------------------------------
+// Factory
+// ---------------------------------------------------------------------------
+
+export function createOpenClawClient (config: DaemonConfig): OpenClawClient {
+  const client = new Anthropic({
+    apiKey: config.anthropicApiKey || undefined
+  })
+
+  const model = config.anthropicModel
+
+  return {
+    async chat (_userId: string, _sessionId: string, messages: ChatMessage[], tools: ToolDefinition[], opts?: { signal?: AbortSignal }): Promise<ChatResponse> {
+      const { system, anthropicMessages } = convertMessages(messages)
+      const anthropicTools = tools.length > 0 ? convertTools(tools) : undefined
+
+      const params: Anthropic.MessageCreateParamsNonStreaming = {
+        model,
+        max_tokens: 4096,
+        messages: anthropicMessages,
+        ...(system ? { system } : {}),
+        ...(anthropicTools ? { tools: anthropicTools } : {})
       }
 
-      if (tools && tools.length > 0) {
-        params.tools = tools
-      }
-
-      const response = await client.chat.completions.create(params as unknown as OpenAI.ChatCompletionCreateParamsNonStreaming, { signal: opts?.signal })
-      return response as unknown as ChatResponse
+      const response = await client.messages.create(params, { signal: opts?.signal })
+      return convertResponse(response)
     },
 
-    /**
-     * Send a chat completion request and stream the response.
-     */
-    async chatStream (userId: string, sessionId: string, messages: ChatMessage[], tools: ToolDefinition[], onDelta: ((delta: string) => void) | null, opts?: { signal?: AbortSignal }): Promise<ChatResponse> {
-      const userField = sessionId ? `${userId}:${sessionId}` : userId
+    async chatStream (_userId: string, _sessionId: string, messages: ChatMessage[], tools: ToolDefinition[], onDelta: ((delta: string) => void) | null, opts?: { signal?: AbortSignal }): Promise<ChatResponse> {
+      const { system, anthropicMessages } = convertMessages(messages)
+      const anthropicTools = tools.length > 0 ? convertTools(tools) : undefined
 
-      const params: Record<string, unknown> = {
-        model: 'default',
+      const params: Anthropic.MessageCreateParamsStreaming = {
+        model,
+        max_tokens: 4096,
         stream: true,
-        user: userField,
-        messages
+        messages: anthropicMessages,
+        ...(system ? { system } : {}),
+        ...(anthropicTools ? { tools: anthropicTools } : {})
       }
 
-      if (tools && tools.length > 0) {
-        params.tools = tools
-      }
+      const stream = client.messages.stream(params, { signal: opts?.signal })
 
-      const stream = await client.chat.completions.create(params as unknown as OpenAI.ChatCompletionCreateParamsStreaming, { signal: opts?.signal })
-
-      let role = 'assistant'
-      let content = ''
+      let textContent = ''
       const toolCalls: ToolCall[] = []
-      let finishReason: string | null = null
+      let stopReason: string | null = null
 
-      for await (const chunk of stream) {
-        const choice = chunk.choices?.[0]
-        if (!choice) continue
-
-        if (choice.finish_reason) {
-          finishReason = choice.finish_reason
-        }
-
-        const delta = choice.delta
-        if (!delta) continue
-
-        if (delta.role) {
-          role = delta.role
-        }
-
-        if (delta.content) {
-          content += delta.content
-          if (onDelta) onDelta(delta.content)
-        }
-
-        // Accumulate tool_calls deltas
-        if (delta.tool_calls) {
-          for (const tc of delta.tool_calls) {
-            if (!toolCalls[tc.index]) {
-              toolCalls[tc.index] = {
-                id: tc.id || '',
-                type: 'function',
-                function: { name: '', arguments: '' }
-              }
+      for await (const event of stream) {
+        if (event.type === 'content_block_delta') {
+          if (event.delta.type === 'text_delta') {
+            textContent += event.delta.text
+            if (onDelta) onDelta(event.delta.text)
+          } else if (event.delta.type === 'input_json_delta') {
+            // Tool input streaming — accumulate in the last tool call
+            const lastTc = toolCalls[toolCalls.length - 1]
+            if (lastTc) {
+              lastTc.function.arguments += event.delta.partial_json
             }
-            const target = toolCalls[tc.index]
-            if (tc.id) target.id = tc.id
-            if (tc.function?.name) target.function.name += tc.function.name
-            if (tc.function?.arguments) target.function.arguments += tc.function.arguments
           }
+        } else if (event.type === 'content_block_start') {
+          if (event.content_block.type === 'tool_use') {
+            toolCalls.push({
+              id: event.content_block.id,
+              type: 'function',
+              function: {
+                name: event.content_block.name,
+                arguments: ''
+              }
+            })
+          }
+        } else if (event.type === 'message_delta') {
+          stopReason = event.delta.stop_reason || null
         }
       }
 
-      // Assemble a response object matching non-streaming shape
       return {
         choices: [{
           index: 0,
           message: {
-            role,
-            content: content || null,
+            role: 'assistant',
+            content: textContent || null,
             tool_calls: toolCalls.length > 0 ? toolCalls : undefined
           },
-          finish_reason: finishReason || 'stop'
+          finish_reason: stopReason === 'tool_use' ? 'tool_calls' : 'stop'
         }]
       }
     }
