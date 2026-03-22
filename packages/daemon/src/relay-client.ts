@@ -196,7 +196,9 @@ export class RelayClient extends EventEmitter {
       lastControlIds: null
     }
 
-    const message = JSON.stringify(envelope)
+    const message = JSON.stringify(envelope, (_key, value) =>
+      typeof value === 'bigint' ? value.toString() : value
+    )
 
     try {
       this._ws.send(message)

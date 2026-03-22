@@ -308,6 +308,7 @@ export async function executeToolCall (name: string, args: ToolArgs, ctx: ToolEx
         const account = await facade.getAccount(chain, acctIdx) as unknown as ToolAccount
         const result = await account.sendTransaction({ to, data, value })
 
+        logger.info({ hash: result.hash, fee: String(result.fee), name: 'sendTransaction' }, 'Transaction executed')
         return {
           status: 'executed',
           hash: result.hash,
@@ -317,6 +318,7 @@ export async function executeToolCall (name: string, args: ToolArgs, ctx: ToolEx
       } catch (err: unknown) {
         const e = errObj(err)
         if (e.name === 'PolicyRejectionError') {
+          logger.warn({ reason: errMsg(err), name: 'sendTransaction', context: e.context ?? null }, 'Policy rejected sendTransaction')
           return { status: 'rejected', reason: errMsg(err), intentHash: hash, context: e.context ?? null }
         }
 
