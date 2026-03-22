@@ -6,6 +6,7 @@ import type {
   PolicyListResult, PolicyPendingResult, PolicyRequestResult,
   RegisterCronResult, ListCronsResult, RemoveCronResult,
   SignTransactionResult, ListRejectionsResult, ListPolicyVersionsResult,
+  KittenFetchResult, KittenMintResult, KittenBurnResult,
   ToolErrorResult
 } from './tool-surface.js'
 import type { OpenClawClient, ChatMessage } from './openclaw-client.js'
@@ -27,6 +28,9 @@ type ToolResultEntry =
   | { toolCallId: string; name: 'signTransaction'; args: Record<string, unknown>; result: SignTransactionResult }
   | { toolCallId: string; name: 'listRejections'; args: Record<string, unknown>; result: ListRejectionsResult }
   | { toolCallId: string; name: 'listPolicyVersions'; args: Record<string, unknown>; result: ListPolicyVersionsResult }
+  | { toolCallId: string; name: 'kittenFetch'; args: Record<string, unknown>; result: KittenFetchResult }
+  | { toolCallId: string; name: 'kittenMint'; args: Record<string, unknown>; result: KittenMintResult }
+  | { toolCallId: string; name: 'kittenBurn'; args: Record<string, unknown>; result: KittenBurnResult }
   | { toolCallId: string; name: string; args: Record<string, unknown>; result: ToolErrorResult }
 
 interface ProcessChatResult {

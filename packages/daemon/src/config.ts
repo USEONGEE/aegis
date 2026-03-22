@@ -25,6 +25,9 @@ export interface DaemonConfig {
   daemonId: string
   daemonSecret: string
 
+  // --- DeFi CLIs ---
+  kittenCliPath: string
+
   // --- Daemon tuning ---
   toolCallMaxIterations: number
   approvalTimeoutMs: number
@@ -59,6 +62,9 @@ export function loadConfig (): DaemonConfig {
     // --- Daemon Identity (v0.3.0) ---
     daemonId: process.env.DAEMON_ID || '',
     daemonSecret: process.env.DAEMON_SECRET || '',
+
+    // --- DeFi CLIs ---
+    kittenCliPath: process.env.KITTEN_CLI_PATH || 'kitten-cli',
 
     // --- Daemon tuning ---
     toolCallMaxIterations: parseInt(process.env.TOOL_CALL_MAX_ITERATIONS || '10', 10),

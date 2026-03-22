@@ -39,8 +39,14 @@ export async function initWDK (config: DaemonConfig, logger: Logger): Promise<WD
   const store = new SqliteWdkStore(dbPath)
   await store.init()
 
-  // Load master seed
-  const masterSeed = await store.getMasterSeed()
+  // Load master seed (or provision from MASTER_SEED env var)
+  let masterSeed = await store.getMasterSeed()
+  if (!masterSeed && process.env.MASTER_SEED) {
+    const envMnemonic = process.env.MASTER_SEED
+    await store.setMasterSeed(envMnemonic)
+    masterSeed = { mnemonic: envMnemonic, createdAt: Date.now() }
+    logger.info('Master seed provisioned from MASTER_SEED environment variable')
+  }
   if (!masterSeed) {
     logger.warn('No master seed found. WDK will not be initialized until a seed is added.')
     await store.dispose()

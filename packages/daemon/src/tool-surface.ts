@@ -1,4 +1,6 @@
 import { randomUUID } from 'node:crypto'
+import { execFile } from 'node:child_process'
+import { promisify } from 'node:util'
 import { intentHash, policyHash, CHAIN_IDS } from '@wdk-app/canonical'
 import type { PolicyObject } from '@wdk-app/canonical'
 import type { Logger } from 'pino'
@@ -191,6 +193,40 @@ interface ListPolicyVersionsSuccess {
 
 export type ListPolicyVersionsResult = ListPolicyVersionsSuccess | ToolErrorResult
 
+// 13. kittenFetch
+interface KittenFetchSuccess {
+  status: 'ok'
+  pool: {
+    sqrtPriceX96: string
+    currentTick: number
+    liquidity: string
+    token0Balance: string
+    token1Balance: string
+  }
+}
+
+export type KittenFetchResult = KittenFetchSuccess | ToolErrorResult
+
+// 14. kittenMint
+interface KittenMintPrepared {
+  status: 'prepared'
+  tx: { to: string; data: string; value: string }
+  policy: Record<string, unknown>
+  description: string
+}
+
+export type KittenMintResult = KittenMintPrepared | ToolErrorResult
+
+// 15. kittenBurn
+interface KittenBurnPrepared {
+  status: 'prepared'
+  txs: Array<{ to: string; data: string; value: string }>
+  policy: Record<string, unknown>
+  description: string
+}
+
+export type KittenBurnResult = KittenBurnPrepared | ToolErrorResult
+
 // All tool results union
 export type AnyToolResult =
   | SendTransactionResult
@@ -205,6 +241,9 @@ export type AnyToolResult =
   | SignTransactionResult
   | ListRejectionsResult
   | ListPolicyVersionsResult
+  | KittenFetchResult
+  | KittenMintResult
+  | KittenBurnResult
 
 interface SendTransactionArgs {
   chain: string
@@ -258,7 +297,38 @@ interface PolicyVersionListArgs {
   chain: string
 }
 
-type ToolArgs = SendTransactionArgs | TransferArgs | ChainArgs | PolicyRequestArgs | RegisterCronArgs | CronIdArgs | RejectionListArgs | PolicyVersionListArgs | Record<string, unknown>
+interface KittenFetchArgs {
+  pool: string
+  rpc: string
+  accountIndex: number
+}
+
+interface KittenMintArgs {
+  token0: string
+  token1: string
+  deployer: string
+  tickLower: number
+  tickUpper: number
+  amount0Desired: string
+  amount1Desired: string
+  amount0Min: string
+  amount1Min: string
+  recipient: string
+  deadline: string
+  accountIndex: number
+}
+
+interface KittenBurnArgs {
+  tokenId: string
+  liquidity: string
+  amount0Min: string
+  amount1Min: string
+  deadline: string
+  recipient: string
+  accountIndex: number
+}
+
+type ToolArgs = SendTransactionArgs | TransferArgs | ChainArgs | PolicyRequestArgs | RegisterCronArgs | CronIdArgs | RejectionListArgs | PolicyVersionListArgs | KittenFetchArgs | KittenMintArgs | KittenBurnArgs | Record<string, unknown>
 
 // ---------------------------------------------------------------------------
 // Tool call dispatcher
@@ -377,9 +447,15 @@ export async function executeToolCall (name: string, args: ToolArgs, ctx: ToolEx
     // 6. policyRequest
     // -----------------------------------------------------------------------
     case 'policyRequest': {
-      const { chain, description, policies, accountIndex: acctIdx } = args as PolicyRequestArgs
+      const { chain, description, policies: rawPolicies, accountIndex: acctIdx } = args as PolicyRequestArgs
       try {
         const chainId = resolveChainId(chain)
+        // Wrap bare PermissionDict as CallPolicy if needed
+        const policies = rawPolicies.map(p => {
+          const obj = p as Record<string, unknown>
+          if (obj.type === 'call' || obj.type === 'timestamp') return obj as unknown as Policy
+          return { type: 'call', permissions: obj } as unknown as Policy
+        })
         const hash = policyHash(policies as unknown as PolicyObject[])
 
         await facade.createApprovalRequest('policy', {
@@ -388,7 +464,8 @@ export async function executeToolCall (name: string, args: ToolArgs, ctx: ToolEx
           targetHash: hash,
           accountIndex: acctIdx,
           content: description,
-          walletName: 'Policy Request'
+          walletName: 'Policy Request',
+          policies
         })
 
         return { status: 'pending', policyHash: hash }
@@ -505,6 +582,60 @@ export async function executeToolCall (name: string, args: ToolArgs, ctx: ToolEx
     }
 
     // -----------------------------------------------------------------------
+    // 13. kittenFetch
+    // -----------------------------------------------------------------------
+    case 'kittenFetch': {
+      const { pool, rpc } = args as KittenFetchArgs
+      try {
+        const result = await callKittenCli(['fetch', '--pool', pool, '--rpc', rpc], logger)
+        return { status: 'ok', pool: result as KittenFetchSuccess['pool'] }
+      } catch (err: unknown) {
+        logger.error({ err, name: 'kittenFetch' }, 'Tool execution error')
+        return { status: 'error', error: errMsg(err) }
+      }
+    }
+
+    // -----------------------------------------------------------------------
+    // 14. kittenMint
+    // -----------------------------------------------------------------------
+    case 'kittenMint': {
+      const { accountIndex: _acctIdx, ...mintInput } = args as KittenMintArgs
+      try {
+        const result = await callKittenCli(['mint', '--json', JSON.stringify(mintInput)], logger)
+        const { tx, policy } = result as { tx: { to: string; data: string; value: string }; policy: Record<string, unknown> }
+        return {
+          status: 'prepared',
+          tx,
+          policy,
+          description: 'KittenSwap LP mint position'
+        }
+      } catch (err: unknown) {
+        logger.error({ err, name: 'kittenMint' }, 'Tool execution error')
+        return { status: 'error', error: errMsg(err) }
+      }
+    }
+
+    // -----------------------------------------------------------------------
+    // 15. kittenBurn
+    // -----------------------------------------------------------------------
+    case 'kittenBurn': {
+      const { accountIndex: _acctIdx, ...burnInput } = args as KittenBurnArgs
+      try {
+        const result = await callKittenCli(['burn', '--json', JSON.stringify(burnInput)], logger)
+        const { txs, policy } = result as { txs: Array<{ to: string; data: string; value: string }>; policy: Record<string, unknown> }
+        return {
+          status: 'prepared',
+          txs,
+          policy,
+          description: 'KittenSwap LP burn (remove liquidity)'
+        }
+      } catch (err: unknown) {
+        logger.error({ err, name: 'kittenBurn' }, 'Tool execution error')
+        return { status: 'error', error: errMsg(err) }
+      }
+    }
+
+    // -----------------------------------------------------------------------
     // Unknown tool
     // -----------------------------------------------------------------------
     default:
@@ -543,4 +674,30 @@ function encodeTransferData (token: string, to: string, amount: string): string 
   const paddedTo = to.replace('0x', '').padStart(64, '0')
   const paddedAmount = BigInt(amount).toString(16).padStart(64, '0')
   return `${selector}${paddedTo}${paddedAmount}`
+}
+
+// ---------------------------------------------------------------------------
+// DeFi CLI helpers
+// ---------------------------------------------------------------------------
+
+const execFileAsync = promisify(execFile)
+
+/**
+ * Call kitten-cli as a subprocess and parse JSON stdout.
+ * CLI path is configurable via KITTEN_CLI_PATH env var.
+ */
+async function callKittenCli (cliArgs: string[], logger: Logger): Promise<Record<string, unknown>> {
+  const kittenPath = process.env.KITTEN_CLI_PATH || 'kitten-cli'
+  logger.info({ cmd: kittenPath, args: cliArgs }, 'Calling kitten-cli')
+
+  const { stdout, stderr } = await execFileAsync(kittenPath, cliArgs, {
+    timeout: 30000,
+    env: { ...process.env }
+  })
+
+  if (stderr) {
+    logger.warn({ stderr: stderr.slice(0, 500) }, 'kitten-cli stderr')
+  }
+
+  return JSON.parse(stdout) as Record<string, unknown>
 }

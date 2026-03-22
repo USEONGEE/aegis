@@ -90,8 +90,8 @@ function buildContext (overrides: Record<string, any> = {}): ToolExecutionContex
 // ---------------------------------------------------------------------------
 
 describe('TOOL_DEFINITIONS', () => {
-  test('exports exactly 12 tool definitions', () => {
-    expect(TOOL_DEFINITIONS).toHaveLength(12)
+  test('exports exactly 15 tool definitions', () => {
+    expect(TOOL_DEFINITIONS).toHaveLength(15)
   })
 
   test('every tool has a valid function schema', () => {

@@ -10,7 +10,8 @@ import type {
   StoredSigner,
   StoredWallet,
   SignedApproval,
-  ApprovalSubmitContext
+  ApprovalSubmitContext,
+  Policy
 } from '@wdk-app/guarded-wdk'
 
 // ---------------------------------------------------------------------------
@@ -24,6 +25,7 @@ interface CreateRequestOptions {
   accountIndex: number
   content: string
   walletName: string
+  policies: Policy[]
 }
 
 /**

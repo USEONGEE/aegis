@@ -20,6 +20,8 @@ interface AdminServerDeps {
   cronScheduler: CronScheduler | null
   relayClient: RelayClient
   logger: Logger
+  relayHttpBase?: string
+  relayToken?: string
 }
 
 type AdminRequest =
@@ -64,6 +66,8 @@ export class AdminServer {
   private _logger: Logger
   private _server: Server | null
   private _startedAt: number
+  private _relayHttpBase: string | null
+  private _relayToken: string | null
 
   constructor (config: AdminServerConfig, deps: AdminServerDeps) {
     this._socketPath = config.socketPath
@@ -73,6 +77,8 @@ export class AdminServer {
     this._logger = deps.logger
     this._server = null
     this._startedAt = Date.now()
+    this._relayHttpBase = deps.relayHttpBase || null
+    this._relayToken = deps.relayToken || null
   }
 
   /**
@@ -236,6 +242,26 @@ export class AdminServer {
             }))
           }
         }
+      }
+
+      // -------------------------------------------------------------------
+      // enroll -- request a new enrollment code from relay
+      // -------------------------------------------------------------------
+      case 'enroll': {
+        if (!this._relayHttpBase || !this._relayToken) {
+          return { ok: false, error: 'Relay connection not configured' }
+        }
+        const res = await fetch(`${this._relayHttpBase}/api/auth/daemon/enroll`, {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${this._relayToken}` },
+        })
+        if (!res.ok) {
+          const body = await res.text()
+          return { ok: false, error: `Relay returned ${res.status}: ${body}` }
+        }
+        const { enrollmentCode, expiresIn } = await res.json() as { enrollmentCode: string, expiresIn: number }
+        this._logger.info({ enrollmentCode, expiresIn }, 'Enrollment code generated')
+        return { ok: true, data: { enrollmentCode, expiresIn } }
       }
 
       // -------------------------------------------------------------------

@@ -8,7 +8,8 @@
     "packages/manifest",
     "packages/daemon",
     "packages/relay",
-    "packages/app"
+    "packages/app",
+    "packages/kitten-cli"
   ],
   "scripts": {
     "test": "node --experimental-vm-modules node_modules/.bin/jest --projects packages/canonical packages/guarded-wdk packages/manifest packages/daemon",

@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import { mkdir } from 'node:fs/promises'
 import { pino } from 'pino'
 import { loadConfig } from './config.js'
 import { initWDK } from './wdk-host.js'
@@ -39,6 +40,7 @@ async function main (): Promise<void> {
   const { facade } = await initWDK(config, logger)
 
   // 2b. Init daemon store (cron persistence)
+  await mkdir(config.daemonStorePath, { recursive: true })
   const daemonStore = new SqliteDaemonStore(config.daemonStorePath + '/daemon.db')
   await daemonStore.init()
 
@@ -156,12 +158,15 @@ async function main (): Promise<void> {
   })
 
   // v0.3.0: Daemon bootstrap — login with DAEMON_ID/SECRET to get JWT, then connect
+  let relayHttpBase: string | undefined
+  let relayToken: string | undefined
   if (config.relayUrl && config.daemonId && config.daemonSecret) {
     // RELAY_URL is the base URL (http://host:port). Derive HTTP and WS URLs.
-    const relayHttpBase = config.relayUrl.replace(/\/$/, '')
+    relayHttpBase = config.relayUrl.replace(/\/$/, '')
     const relayWsUrl = relayHttpBase.replace(/^http/, 'ws') + '/ws/daemon'
     try {
       const token = await authenticateWithRelay(relayHttpBase, config.daemonId, config.daemonSecret, logger)
+      relayToken = token
 
       // F29: Request enrollment code and display in terminal
       try {
@@ -219,7 +224,7 @@ async function main (): Promise<void> {
   // 8. Start admin server
   const adminServer = new AdminServer(
     { socketPath: config.socketPath },
-    { facade: facade!, cronScheduler, relayClient, logger }
+    { facade: facade!, cronScheduler, relayClient, logger, relayHttpBase, relayToken }
   )
   await adminServer.start()
 
