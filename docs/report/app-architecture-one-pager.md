@@ -142,7 +142,7 @@ Aggregate Root: `RelayClient` — class (core/relay)
 
 | 타입 | 역할 | 위치 | 설명 |
 |------|------|------|------|
-| `RelayClient` | core | `RelayClient.ts:49` | Singleton. WebSocket + exponential backoff + heartbeat. sendChat/sendControl/sendApproval |
+| `RelayClient` | core | `RelayClient.ts:49` | Singleton. WebSocket + exponential backoff + heartbeat. sendChat/sendControl/sendApproval/query(). v0.4.8: pendingQueries(requestId→Promise), query_result 수신 핸들러 |
 | `ControlEnvelope` | value | `RelayClient.ts:29` | 제어 메시지 래퍼. type으로 메시지 종류 구분 |
 | `EncryptedPayload` | value | `RelayClient.ts:36` | E2E 암호화된 payload. sessionKey 설정 시 자동 적용 |
 | `RelayMessage` | output | `RelayClient.ts:21` | 수신 메시지 정규화. channel + payload + cursor 메타 |
@@ -316,23 +316,28 @@ Aggregate Root: `PolicyGroup` — interface (stores/usePolicyStore)
 ┃  "daemon에서 발생한 이벤트가 앱 화면에 실시간 반영되는가?"            ┃
 ┃  관여 도메인: Relay, Activity, Chat, Policy                        ┃
 ┃                                                                    ┃
-┃  daemon event_stream ──→ RelayClient ──→ handler 분기               ┃
-┃                           (control ch)      │                      ┃
-┃                                             ├─ event_stream        ┃
-┃                                             │    ├─ ActivityStore   ┃
-┃                                             │    ├─ Dashboard 갱신  ┃
-┃                                             │    └─ Settings 갱신   ┃
-┃                                             │                      ┃
-┃                                             ├─ cron_session_created┃
-┃                                             │    └─ registerSession ┃
-┃                                             │       + subscribeChatStream
-┃                                             │                      ┃
-┃                                             ├─ message_queued/started
-┃                                             │    └─ messageState 전이┃
-┃                                             │                      ┃
-┃                                             └─ chat cursor tracking┃
-┃                                                  └─ streamCursors  ┃
-┃                                                     controlCursor  ┃
+┃  v0.4.8: event_stream은 top-level 채널 (control에서 분리)            ┃
+┃                                                                    ┃
+┃  daemon ──→ Relay ──→ RelayClient ──→ handler 분기                  ┃
+┃                    (event_stream ch)    │                           ┃
+┃                                        ├─ WDK 이벤트 (14종)        ┃
+┃                                        │    ├─ ActivityStore 적재   ┃
+┃                                        │    ├─ Dashboard 갱신       ┃
+┃                                        │    └─ Settings 갱신        ┃
+┃                                        │                           ┃
+┃                                        ├─ CancelCompleted/Failed   ┃
+┃                                        │    └─ messageState→idle   ┃
+┃                                        │                           ┃
+┃                                        ├─ cron_session_created     ┃
+┃                                        │    └─ registerSession     ┃
+┃                                        │       + subscribeChatStream┃
+┃                                        │                           ┃
+┃                                        ├─ message_queued/started   ┃
+┃                                        │    └─ messageState 전이    ┃
+┃                                        │                           ┃
+┃                                        └─ chat cursor tracking     ┃
+┃                                             └─ streamCursors       ┃
+┃                                                controlCursor       ┃
 ┃                                                                    ┃
 ┃  ActivityEventType (15종):                                         ┃
 ┃    IntentProposed → PolicyEvaluated → ApprovalRequested            ┃
@@ -422,3 +427,4 @@ Aggregate Root: `PolicyGroup` — interface (stores/usePolicyStore)
 ---
 
 **작성일**: 2026-03-22 KST
+**갱신일**: 2026-03-22 KST — v0.4.8 반영. RelayChannel 5종 확장, query() 메서드 + pendingQueries, event_stream top-level 채널 분리, CancelCompleted/CancelFailed 수신, cancel_queued/cancel_active→event_stream 채널 전환
