@@ -20,6 +20,9 @@ export interface DaemonConfig {
   toolApiPort: number
   toolApiToken: string
 
+  // --- EVM RPC ---
+  evmRpcUrl: string
+
   // --- Relay ---
   /** Relay base URL (e.g. http://localhost:3000). WS path is appended automatically. */
   relayUrl: string
@@ -59,6 +62,9 @@ export function loadConfig (): DaemonConfig {
     // --- Tool API ---
     toolApiPort: parseInt(process.env.TOOL_API_PORT || '18790', 10),
     toolApiToken: process.env.TOOL_API_TOKEN || '',
+
+    // --- EVM RPC ---
+    evmRpcUrl: process.env.EVM_RPC_URL || 'https://rpc.hyperliquid.xyz/evm',
 
     // --- Relay ---
     relayUrl: process.env.RELAY_URL || 'http://localhost:3000',

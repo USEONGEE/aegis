@@ -16,6 +16,7 @@
     "test": "node --experimental-vm-modules ../../node_modules/.bin/jest"
   },
   "dependencies": {
+    "@tetherto/wdk-wallet-evm": "^1.0.0-beta.10",
     "@wdk-app/canonical": "*",
     "@wdk-app/guarded-wdk": "*",
     "@wdk-app/protocol": "*",

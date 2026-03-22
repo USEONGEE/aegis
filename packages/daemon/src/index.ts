@@ -59,6 +59,7 @@ async function main (): Promise<void> {
   const ctx: ToolExecutionContext = {
     facade,
     daemonStore,
+    config,
     logger
   }
 

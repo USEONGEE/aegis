@@ -1,7 +1,7 @@
 import { join, dirname } from 'node:path'
 import { mkdir } from 'node:fs/promises'
 import { SqliteWdkStore, createGuardedWDK } from '@wdk-app/guarded-wdk'
-import { StubWalletManager } from './stub-wallet-manager.js'
+import WalletManagerEvm from '@tetherto/wdk-wallet-evm'
 import type { DaemonConfig } from './config.js'
 import type { Logger } from 'pino'
 
@@ -71,7 +71,7 @@ export async function initWDK (config: DaemonConfig, logger: Logger): Promise<WD
   const facade = await createGuardedWDK({
     seed: mnemonic,
     wallets: {
-      [EVM_CHAIN_KEY]: { Manager: StubWalletManager as never, config: {} }
+      [EVM_CHAIN_KEY]: { Manager: WalletManagerEvm as never, config: { provider: config.evmRpcUrl } as never }
     },
     protocols: {},
     approvalStore: store,

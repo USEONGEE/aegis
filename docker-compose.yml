@@ -95,10 +95,13 @@ services:
       # Tool API (called by OpenClaw plugin)
       TOOL_API_PORT: 18790
       TOOL_API_TOKEN: ${TOOL_API_TOKEN:-wdk-tool-token}
-      # Master seed (BIP-39 mnemonic) + derived wallet address
+      # EVM RPC (HyperEVM chain 999)
+      EVM_RPC_URL: ${EVM_RPC_URL:-https://rpc.hyperliquid.xyz/evm}
+      # Master seed (BIP-39 mnemonic)
       MASTER_SEED: ${MASTER_SEED:-}
-      WALLET_ADDRESS: ${WALLET_ADDRESS:-}
     depends_on:
       relay:
         condition: service_started
+      openclaw:
+        condition: service_healthy
     restart: unless-stopped
