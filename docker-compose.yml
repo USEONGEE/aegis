@@ -87,6 +87,8 @@ services:
       # OpenClaw
       OPENCLAW_BASE_URL: http://openclaw:18789
       OPENCLAW_TOKEN: ${OPENCLAW_TOKEN:-}
+      # Master seed (BIP-39 mnemonic)
+      MASTER_SEED: ${MASTER_SEED:-}
     depends_on:
       relay:
         condition: service_started
