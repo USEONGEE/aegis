@@ -54,15 +54,7 @@ export default function register (api: { registerTool: (tool: unknown) => void }
       accountIndex: Type.Number({ description: 'BIP-44 account index' })
     })))
 
-  api.registerTool(tool('transfer',
-    'Transfer a token to an address. High-level wrapper around sendTransaction.',
-    Type.Object({
-      chain: Type.String({ description: 'Target chain identifier' }),
-      token: Type.String({ description: 'Token symbol or contract address' }),
-      to: Type.String({ description: 'Recipient address' }),
-      amount: Type.String({ description: 'Amount as decimal string (human-readable)' }),
-      accountIndex: Type.Number({ description: 'BIP-44 account index' })
-    })))
+  // transfer 제거됨 (v0.5.5) — erc20Transfer + policyRequest + sendTransaction 플로우로 대체
 
   api.registerTool(tool('getBalance',
     'Get token balances for the active wallet on the specified chain.',
@@ -148,44 +140,6 @@ export default function register (api: { registerTool: (tool: unknown) => void }
     'Remove a registered cron job by its ID.',
     Type.Object({
       cronId: Type.String({ description: 'The cron job ID to remove' }),
-      accountIndex: Type.Number({ description: 'BIP-44 account index' })
-    })))
-
-  // DeFi (KittenSwap) tools
-  api.registerTool(tool('kittenFetch',
-    'Fetch pool state from a KittenSwap liquidity pool (read-only).',
-    Type.Object({
-      pool: Type.String({ description: 'Pool contract address (0x-prefixed)' }),
-      rpc: Type.String({ description: 'JSON-RPC endpoint URL for the target chain' }),
-      accountIndex: Type.Number({ description: 'BIP-44 account index' })
-    })))
-
-  api.registerTool(tool('kittenMint',
-    'Prepare an LP mint transaction and required policy for a KittenSwap pool.',
-    Type.Object({
-      token0: Type.String({ description: 'Token0 contract address (0x-prefixed)' }),
-      token1: Type.String({ description: 'Token1 contract address (0x-prefixed)' }),
-      deployer: Type.String({ description: 'Pool deployer address (0x-prefixed)' }),
-      tickLower: Type.Number({ description: 'Lower tick boundary' }),
-      tickUpper: Type.Number({ description: 'Upper tick boundary' }),
-      amount0Desired: Type.String({ description: 'Desired amount of token0' }),
-      amount1Desired: Type.String({ description: 'Desired amount of token1' }),
-      amount0Min: Type.String({ description: 'Minimum amount of token0' }),
-      amount1Min: Type.String({ description: 'Minimum amount of token1' }),
-      recipient: Type.String({ description: 'LP position recipient address (0x-prefixed)' }),
-      deadline: Type.String({ description: 'Transaction deadline (unix timestamp)' }),
-      accountIndex: Type.Number({ description: 'BIP-44 account index' })
-    })))
-
-  api.registerTool(tool('kittenBurn',
-    'Prepare LP burn (remove liquidity) transactions for a KittenSwap pool.',
-    Type.Object({
-      tokenId: Type.String({ description: 'LP position NFT token ID' }),
-      liquidity: Type.String({ description: 'Amount of liquidity to remove' }),
-      amount0Min: Type.String({ description: 'Minimum amount of token0 to receive' }),
-      amount1Min: Type.String({ description: 'Minimum amount of token1 to receive' }),
-      deadline: Type.String({ description: 'Transaction deadline (unix timestamp)' }),
-      recipient: Type.String({ description: 'Token recipient address (0x-prefixed)' }),
       accountIndex: Type.Number({ description: 'BIP-44 account index' })
     })))
 

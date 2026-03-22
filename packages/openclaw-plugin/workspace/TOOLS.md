@@ -43,7 +43,6 @@ These tools **build** a transaction + policy but do NOT execute. You must call `
 | Tool | Purpose | Key Params |
 |------|---------|------------|
 | `sendTransaction` | Submit raw tx on-chain | chain, to, data, value, accountIndex |
-| `transfer` | High-level token transfer | chain, token, to, amount, accountIndex |
 | `signTransaction` | Sign without broadcasting | chain, to, data, value, accountIndex |
 
 ### 4. Policy Management (requires owner approval)
@@ -58,14 +57,6 @@ These tools **build** a transaction + policy but do NOT execute. You must call `
 |------|---------|
 | `registerCron` | Schedule recurring prompt execution |
 | `removeCron` | Remove a scheduled job |
-
-### 6. DeFi (KittenSwap)
-
-| Tool | Purpose |
-|------|---------|
-| `kittenFetch` | Read pool state |
-| `kittenMint` | Prepare LP mint tx + policy |
-| `kittenBurn` | Prepare LP burn tx + policy |
 
 ## Common Patterns
 

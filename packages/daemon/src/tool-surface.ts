@@ -1,6 +1,4 @@
 import { randomUUID } from 'node:crypto'
-import { execFile } from 'node:child_process'
-import { promisify } from 'node:util'
 import { intentHash, policyHash, CHAIN_IDS } from '@wdk-app/canonical'
 import type { PolicyObject } from '@wdk-app/canonical'
 import type { Logger } from 'pino'
@@ -70,12 +68,6 @@ interface IntentRejectedResult {
   context: EvaluationContext | null
 }
 
-interface TransferRejectedResult {
-  status: 'rejected'
-  reason: string
-  context: EvaluationContext | null
-}
-
 // 1. sendTransaction
 interface SendTransactionExecuted {
   status: 'executed'
@@ -95,19 +87,7 @@ export type SendTransactionResult =
   | IntentRejectedResult
   | IntentErrorResult
 
-// 2. transfer
-interface TransferExecuted {
-  status: 'executed'
-  hash: string
-  fee: string
-  token: string
-  amount: string
-}
-
-export type TransferResult =
-  | TransferExecuted
-  | TransferRejectedResult
-  | ToolErrorResult
+// 2. transfer — 제거됨 (v0.5.5), erc20Transfer + policyRequest + sendTransaction으로 대체
 
 // 3. getBalance
 interface GetBalanceSuccess {
@@ -201,44 +181,19 @@ interface ListPolicyVersionsSuccess {
 
 export type ListPolicyVersionsResult = ListPolicyVersionsSuccess | ToolErrorResult
 
-// 13. kittenFetch
-interface KittenFetchSuccess {
-  status: 'ok'
-  pool: {
-    sqrtPriceX96: string
-    currentTick: number
-    liquidity: string
-    token0Balance: string
-    token1Balance: string
-  }
-}
-
-export type KittenFetchResult = KittenFetchSuccess | ToolErrorResult
-
-// 14. kittenMint
-interface KittenMintPrepared {
+// Manifest tool result (erc20Transfer, erc20Approve, hyperlendDepositUsdt)
+interface ManifestPreparedResult {
   status: 'prepared'
   tx: { to: string; data: string; value: string }
   policy: Record<string, unknown>
   description: string
 }
 
-export type KittenMintResult = KittenMintPrepared | ToolErrorResult
-
-// 15. kittenBurn
-interface KittenBurnPrepared {
-  status: 'prepared'
-  txs: Array<{ to: string; data: string; value: string }>
-  policy: Record<string, unknown>
-  description: string
-}
-
-export type KittenBurnResult = KittenBurnPrepared | ToolErrorResult
+export type ManifestToolResult = ManifestPreparedResult | ToolErrorResult
 
 // All tool results union
 export type AnyToolResult =
   | SendTransactionResult
-  | TransferResult
   | GetBalanceResult
   | GetWalletAddressResult
   | PolicyListResult
@@ -250,23 +205,13 @@ export type AnyToolResult =
   | SignTransactionResult
   | ListRejectionsResult
   | ListPolicyVersionsResult
-  | KittenFetchResult
-  | KittenMintResult
-  | KittenBurnResult
+  | ManifestToolResult
 
 interface SendTransactionArgs {
   chain: string
   to: string
   data: string
   value: string
-  accountIndex: number
-}
-
-interface TransferArgs {
-  chain: string
-  token: string
-  to: string
-  amount: string
   accountIndex: number
 }
 
@@ -306,38 +251,7 @@ interface PolicyVersionListArgs {
   chain: string
 }
 
-interface KittenFetchArgs {
-  pool: string
-  rpc: string
-  accountIndex: number
-}
-
-interface KittenMintArgs {
-  token0: string
-  token1: string
-  deployer: string
-  tickLower: number
-  tickUpper: number
-  amount0Desired: string
-  amount1Desired: string
-  amount0Min: string
-  amount1Min: string
-  recipient: string
-  deadline: string
-  accountIndex: number
-}
-
-interface KittenBurnArgs {
-  tokenId: string
-  liquidity: string
-  amount0Min: string
-  amount1Min: string
-  deadline: string
-  recipient: string
-  accountIndex: number
-}
-
-type ToolArgs = SendTransactionArgs | TransferArgs | ChainArgs | PolicyRequestArgs | RegisterCronArgs | CronIdArgs | RejectionListArgs | PolicyVersionListArgs | KittenFetchArgs | KittenMintArgs | KittenBurnArgs | Record<string, unknown>
+type ToolArgs = SendTransactionArgs | ChainArgs | PolicyRequestArgs | RegisterCronArgs | CronIdArgs | RejectionListArgs | PolicyVersionListArgs | Record<string, unknown>
 
 // ---------------------------------------------------------------------------
 // Tool call dispatcher
@@ -351,13 +265,13 @@ export async function executeToolCall (name: string, args: ToolArgs, ctx: ToolEx
   const accountIndex = (args as Record<string, unknown>).accountIndex as number | undefined
 
   // Tools that require facade (WDK) — fail fast if not initialized
-  const FACADE_REQUIRED = ['sendTransaction', 'transfer', 'getBalance', 'getWalletAddress', 'policyList', 'policyPending', 'policyRequest', 'signTransaction', 'listRejections', 'listPolicyVersions']
+  const FACADE_REQUIRED = ['sendTransaction', 'getBalance', 'getWalletAddress', 'policyList', 'policyPending', 'policyRequest', 'signTransaction', 'listRejections', 'listPolicyVersions']
   if (FACADE_REQUIRED.includes(name) && !facadeOrNull) {
     return { status: 'error', error: 'WDK not initialized (no master seed)' }
   }
 
   // After the guard, facade is non-null for FACADE_REQUIRED tools.
-  // Non-facade tools (cron, kitten) never access this variable.
+  // Non-facade tools (cron, manifest) never access this variable.
   const facade = facadeOrNull!
 
   switch (name) {
@@ -391,31 +305,11 @@ export async function executeToolCall (name: string, args: ToolArgs, ctx: ToolEx
     }
 
     // -----------------------------------------------------------------------
-    // 2. transfer
+    // 2. transfer — 제거됨 (v0.5.5)
+    // 이유: manifest의 erc20Transfer가 tx + policy를 한 묶음으로 빌드해주므로,
+    // AI가 policy 없이 바로 실행하는 transfer는 항상 PolicyRejectionError.
+    // 올바른 플로우: erc20Transfer → policyRequest → 사용자 승인 → sendTransaction
     // -----------------------------------------------------------------------
-    case 'transfer': {
-      const { chain, token, to, amount, accountIndex: acctIdx } = args as TransferArgs
-
-      try {
-        const account = await facade.getAccount(chain, acctIdx) as unknown as ToolAccount
-        const result = await account.sendTransaction({ to, data: encodeTransferData(token, to, amount), value: token.toLowerCase() === 'eth' ? amount : '0' })
-
-        return {
-          status: 'executed',
-          hash: result.hash,
-          fee: String(result.fee),
-          token,
-          amount
-        }
-      } catch (err: unknown) {
-        const e = errObj(err)
-        if (e.name === 'PolicyRejectionError') {
-          return { status: 'rejected', reason: errMsg(err), context: e.context ?? null }
-        }
-        logger.error({ err, name: 'transfer' }, 'Tool execution error')
-        return { status: 'error', error: errMsg(err) }
-      }
-    }
 
     // -----------------------------------------------------------------------
     // 3. getBalance
@@ -615,59 +509,7 @@ export async function executeToolCall (name: string, args: ToolArgs, ctx: ToolEx
       }
     }
 
-    // -----------------------------------------------------------------------
-    // 13. kittenFetch
-    // -----------------------------------------------------------------------
-    case 'kittenFetch': {
-      const { pool, rpc } = args as KittenFetchArgs
-      try {
-        const result = await callKittenCli(['fetch', '--pool', pool, '--rpc', rpc], logger)
-        return { status: 'ok', pool: result as KittenFetchSuccess['pool'] }
-      } catch (err: unknown) {
-        logger.error({ err, name: 'kittenFetch' }, 'Tool execution error')
-        return { status: 'error', error: errMsg(err) }
-      }
-    }
-
-    // -----------------------------------------------------------------------
-    // 14. kittenMint
-    // -----------------------------------------------------------------------
-    case 'kittenMint': {
-      const { accountIndex: _acctIdx, ...mintInput } = args as KittenMintArgs
-      try {
-        const result = await callKittenCli(['mint', '--json', JSON.stringify(mintInput)], logger)
-        const { tx, policy } = result as { tx: { to: string; data: string; value: string }; policy: Record<string, unknown> }
-        return {
-          status: 'prepared',
-          tx,
-          policy,
-          description: 'KittenSwap LP mint position'
-        }
-      } catch (err: unknown) {
-        logger.error({ err, name: 'kittenMint' }, 'Tool execution error')
-        return { status: 'error', error: errMsg(err) }
-      }
-    }
-
-    // -----------------------------------------------------------------------
-    // 15. kittenBurn
-    // -----------------------------------------------------------------------
-    case 'kittenBurn': {
-      const { accountIndex: _acctIdx, ...burnInput } = args as KittenBurnArgs
-      try {
-        const result = await callKittenCli(['burn', '--json', JSON.stringify(burnInput)], logger)
-        const { txs, policy } = result as { txs: Array<{ to: string; data: string; value: string }>; policy: Record<string, unknown> }
-        return {
-          status: 'prepared',
-          txs,
-          policy,
-          description: 'KittenSwap LP burn (remove liquidity)'
-        }
-      } catch (err: unknown) {
-        logger.error({ err, name: 'kittenBurn' }, 'Tool execution error')
-        return { status: 'error', error: errMsg(err) }
-      }
-    }
+    // kittenFetch/kittenMint/kittenBurn — 제거됨 (v0.5.13)
 
     // -----------------------------------------------------------------------
     // Manifest tools (pure computation — no facade required)
@@ -722,41 +564,5 @@ function resolveChainId (chain: string): number {
   return id
 }
 
-/**
- * Encode a basic ERC-20 transfer calldata.
- * In production this would use the actual token ABI; here it's a placeholder.
- */
-function encodeTransferData (token: string, to: string, amount: string): string {
-  // ERC-20 transfer(address,uint256) selector = 0xa9059cbb
-  // This is a simplified placeholder -- real implementation would use ethers/abi
-  const selector = '0xa9059cbb'
-  const paddedTo = to.replace('0x', '').padStart(64, '0')
-  const paddedAmount = BigInt(amount).toString(16).padStart(64, '0')
-  return `${selector}${paddedTo}${paddedAmount}`
-}
-
-// ---------------------------------------------------------------------------
-// DeFi CLI helpers
-// ---------------------------------------------------------------------------
-
-const execFileAsync = promisify(execFile)
-
-/**
- * Call kitten-cli as a subprocess and parse JSON stdout.
- * CLI path is configurable via KITTEN_CLI_PATH env var.
- */
-async function callKittenCli (cliArgs: string[], logger: Logger): Promise<Record<string, unknown>> {
-  const kittenPath = process.env.KITTEN_CLI_PATH || 'kitten-cli'
-  logger.info({ cmd: kittenPath, args: cliArgs }, 'Calling kitten-cli')
-
-  const { stdout, stderr } = await execFileAsync(kittenPath, cliArgs, {
-    timeout: 30000,
-    env: { ...process.env }
-  })
-
-  if (stderr) {
-    logger.warn({ stderr: stderr.slice(0, 500) }, 'kitten-cli stderr')
-  }
-
-  return JSON.parse(stdout) as Record<string, unknown>
-}
+// encodeTransferData 제거됨 (v0.5.5) — manifest/tools/erc20.ts의 encodeCall로 대체
+// callKittenCli 제거됨 (v0.5.13) — KittenSwap 전면 제거
