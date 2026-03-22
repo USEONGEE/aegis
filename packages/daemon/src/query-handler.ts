@@ -1,13 +1,19 @@
 import type { Logger } from 'pino'
 import type { QueryMessage, QueryResult } from '@wdk-app/protocol'
 import type { QueryFacadePort } from './ports.js'
+import { getPortfolio } from './portfolio.js'
 
 // ---------------------------------------------------------------------------
 // Handler
 // ---------------------------------------------------------------------------
 
+/** Account provider — resolves account index to wallet address. */
+interface AccountProvider {
+  getAccount (chain: string, index: number): Promise<{ getAddress (): Promise<string> }>
+}
+
 interface QueryHandlerDeps {
-  facade: QueryFacadePort
+  facade: QueryFacadePort & Partial<AccountProvider>
   logger: Logger
 }
 
@@ -15,6 +21,7 @@ interface QueryHandlerDeps {
  * Handle query channel messages from the Relay.
  *
  * v0.4.8: 4종 query → facade 조회 → QueryResult 반환.
+ * v0.5.6: getPortfolio 추가 — 999체인 토큰 잔액 + Enso USD 가격.
  * query/query_result는 WS 직접 전달 (Redis 미경유).
  */
 export async function handleQueryMessage (
@@ -43,6 +50,16 @@ export async function handleQueryMessage (
       case 'walletList': {
         const wallets = await facade.listWallets()
         return { requestId: msg.requestId, status: 'ok', data: wallets }
+      }
+
+      case 'getPortfolio': {
+        if (!facade.getAccount) {
+          return { requestId: msg.requestId, status: 'error', error: 'Account provider not available' }
+        }
+        const account = await facade.getAccount('ethereum', msg.params.accountIndex)
+        const walletAddress = await account.getAddress()
+        const result = await getPortfolio(walletAddress, logger)
+        return { requestId: msg.requestId, status: 'ok', data: result }
       }
 
       default: {

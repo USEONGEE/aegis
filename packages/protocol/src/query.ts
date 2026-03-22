@@ -9,12 +9,14 @@ export type QueryType =
   | 'pendingApprovals'
   | 'signerList'
   | 'walletList'
+  | 'getPortfolio'
 
 export type QueryMessage =
   | { type: 'policyList'; requestId: string; params: { accountIndex: number; chainId: number } }
   | { type: 'pendingApprovals'; requestId: string; params: { accountIndex: number } }
   | { type: 'signerList'; requestId: string; params: Record<string, never> }
   | { type: 'walletList'; requestId: string; params: Record<string, never> }
+  | { type: 'getPortfolio'; requestId: string; params: { accountIndex: number } }
 
 interface QueryResultOk {
   requestId: string

@@ -2,21 +2,17 @@ import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
-  FlatList,
-  Pressable,
+  ScrollView,
   RefreshControl,
   StyleSheet,
 } from 'react-native';
 import { RelayClient } from '../../../core/relay/RelayClient';
 
 /**
- * DashboardScreen — Balances and positions overview.
+ * DashboardScreen — Portfolio overview with real token balances.
  *
- * Data comes from daemon via Relay:
- * - Balances: native + ERC20 token balances per chain
- * - Positions: DeFi positions placeholder (Aave, Uniswap, etc.)
- *
- * In Phase 1 this is read-only. AI manages positions via tool_calls.
+ * v0.5.6: Fetches balances + USD prices from daemon via query channel.
+ * Daemon queries 999-chain (Hyperliquid EVM) token balances + Enso pricing.
  */
 
 interface TokenBalance {
@@ -25,133 +21,70 @@ interface TokenBalance {
   balance: string;
   usdValue: string;
   chainId: number;
-  contractAddress?: string;
+  address: string;
 }
 
-interface DeFiPosition {
-  protocol: string;
-  type: string;           // 'lending', 'lp', 'perp', etc.
-  chainId: number;
-  description: string;
-  valueUSD: string;
-  healthFactor?: string;
+interface PortfolioData {
+  balances: TokenBalance[];
+  totalUSD: string;
 }
 
 export function DashboardScreen() {
   const [balances, setBalances] = useState<TokenBalance[]>([]);
-  const [positions, setPositions] = useState<DeFiPosition[]>([]);
   const [totalUSD, setTotalUSD] = useState('0.00');
   const [refreshing, setRefreshing] = useState(false);
   const [connected, setConnected] = useState(false);
+  const [loading, setLoading] = useState(true);
 
   const relay = RelayClient.getInstance();
 
-  // Step 09: Subscribe to event_stream events for real-time balance/position updates
+  // v0.5.6: Fetch portfolio via query channel
+  const fetchPortfolio = useCallback(async () => {
+    try {
+      const result = await relay.query<PortfolioData>('getPortfolio', { accountIndex: 0 }, 30_000);
+      setBalances(result.balances);
+      setTotalUSD(result.totalUSD);
+    } catch (_err: unknown) {
+      // Silently fail — keep existing data
+    } finally {
+      setLoading(false);
+    }
+  }, [relay]);
+
+  // Fetch on mount + connection
   useEffect(() => {
-    const handler = (message: { channel: string; payload: unknown }) => {
-      if (message.channel !== 'control') return;
-      const data = message.payload as {
-        type?: string;
-        event?: { type?: string; balances?: TokenBalance[]; positions?: DeFiPosition[] } & Record<string, unknown>;
-        balances?: TokenBalance[];
-        positions?: DeFiPosition[];
-      };
-
-      // v0.4.4: event_stream에서 event.type으로 판별 (eventName 제거됨)
-      if (data.type === 'event_stream' && data.event) {
-        if (
-          (data.event.type === 'ExecutionSettled' || data.event.type === 'ExecutionBroadcasted')
-        ) {
-          const eventBalances = data.event.balances as TokenBalance[] | undefined;
-          const eventPositions = data.event.positions as DeFiPosition[] | undefined;
-          if (eventBalances) {
-            setBalances(eventBalances);
-            const total = eventBalances.reduce(
-              (sum, b) => sum + parseFloat(b.usdValue || '0'),
-              0,
-            );
-            setTotalUSD(total.toFixed(2));
-          }
-          if (eventPositions) {
-            setPositions(eventPositions);
-          }
-        }
-        return;
-      }
-
-      // Also handle direct balance_update / position_update for backward compat
-      if (data.type === 'balance_update' && data.balances) {
-        setBalances(data.balances);
-        const total = data.balances.reduce(
-          (sum, b) => sum + parseFloat(b.usdValue || '0'),
-          0,
-        );
-        setTotalUSD(total.toFixed(2));
-      }
-
-      if (data.type === 'position_update' && data.positions) {
-        setPositions(data.positions);
+    const connHandler = (isConnected: boolean) => {
+      setConnected(isConnected);
+      if (isConnected) {
+        fetchPortfolio();
       }
     };
-
-    relay.addMessageHandler(handler);
-
-    const connHandler = (isConnected: boolean) => setConnected(isConnected);
     relay.addConnectionHandler(connHandler);
 
+    // If already connected, fetch immediately
+    if (relay.isConnected()) {
+      fetchPortfolio();
+    }
+
     return () => {
-      relay.removeMessageHandler(handler);
       relay.removeConnectionHandler(connHandler);
     };
-  }, [relay]);
+  }, [relay, fetchPortfolio]);
 
-  // Step 09: Manual refresh via chat — ask AI to fetch balances
+  // Pull-to-refresh
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
-    try {
-      const sessionId = `dashboard_refresh_${Date.now()}`;
-      await relay.sendChat(sessionId, 'Show my current wallet balances and DeFi positions.');
-
-      // Listen for the chat response with balance data
-      const responseHandler = (message: { channel: string; payload: unknown; sessionId: string | null }) => {
-        if (message.channel !== 'chat' || message.sessionId !== sessionId) return;
-        const data = message.payload as {
-          role?: string;
-          content?: string;
-          toolResults?: Array<{
-            name?: string;
-            result?: { balances?: TokenBalance[]; positions?: DeFiPosition[] };
-          }>;
-        };
-        if (data.role === 'assistant' && data.toolResults) {
-          for (const tr of data.toolResults) {
-            if (tr.result?.balances) {
-              setBalances(tr.result.balances);
-              const total = tr.result.balances.reduce(
-                (sum, b) => sum + parseFloat(b.usdValue || '0'),
-                0,
-              );
-              setTotalUSD(total.toFixed(2));
-            }
-            if (tr.result?.positions) {
-              setPositions(tr.result.positions);
-            }
-          }
-          relay.removeMessageHandler(responseHandler);
-        }
-      };
-      relay.addMessageHandler(responseHandler);
-
-      // Auto-cleanup after timeout
-      setTimeout(() => relay.removeMessageHandler(responseHandler), 30_000);
-    } catch (_err: unknown) {
-      return
-    }
-    setTimeout(() => setRefreshing(false), 1000);
-  }, [relay]);
+    await fetchPortfolio();
+    setRefreshing(false);
+  }, [fetchPortfolio]);
 
   return (
-    <View style={styles.container}>
+    <ScrollView
+      style={styles.container}
+      refreshControl={
+        <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor="#3b82f6" />
+      }
+    >
       {/* Total Portfolio Value */}
       <View style={styles.portfolioHeader}>
         <Text style={styles.portfolioLabel}>Total Portfolio Value</Text>
@@ -166,43 +99,22 @@ export function DashboardScreen() {
 
       {/* Balances */}
       <Text style={styles.sectionHeader}>Balances</Text>
-      {balances.length === 0 ? (
+      {loading ? (
+        <View style={styles.placeholder}>
+          <Text style={styles.placeholderText}>Loading portfolio...</Text>
+        </View>
+      ) : balances.length === 0 ? (
         <View style={styles.placeholder}>
           <Text style={styles.placeholderText}>
-            No balance data yet. Connect to your daemon to see wallet balances.
+            No tokens with balance found on Hyperliquid EVM.
           </Text>
         </View>
       ) : (
-        <FlatList
-          data={balances}
-          keyExtractor={(item) => `${item.chainId}-${item.symbol}-${item.contractAddress ?? 'native'}`}
-          renderItem={({ item }) => <BalanceRow token={item} />}
-          scrollEnabled={false}
-          style={styles.list}
-        />
+        balances.map((token) => (
+          <BalanceRow key={`${token.chainId}-${token.symbol}-${token.address}`} token={token} />
+        ))
       )}
-
-      {/* Positions */}
-      <Text style={styles.sectionHeader}>DeFi Positions</Text>
-      {positions.length === 0 ? (
-        <View style={styles.placeholder}>
-          <Text style={styles.placeholderText}>
-            No positions yet. Ask your AI agent to deploy capital on DeFi protocols.
-          </Text>
-        </View>
-      ) : (
-        <FlatList
-          data={positions}
-          keyExtractor={(item, i) => `${item.protocol}-${item.type}-${i}`}
-          renderItem={({ item }) => <PositionRow position={item} />}
-          scrollEnabled={false}
-          style={styles.list}
-          refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor="#3b82f6" />
-          }
-        />
-      )}
-    </View>
+    </ScrollView>
   );
 }
 
@@ -213,40 +125,11 @@ function BalanceRow({ token }: { token: TokenBalance }) {
     <View style={styles.row}>
       <View style={styles.tokenInfo}>
         <Text style={styles.tokenSymbol}>{token.symbol}</Text>
-        <Text style={styles.tokenChain}>{token.chainId}</Text>
+        <Text style={styles.tokenChain}>{token.name}</Text>
       </View>
       <View style={styles.tokenValues}>
         <Text style={styles.tokenBalance}>{token.balance}</Text>
         <Text style={styles.tokenUSD}>${token.usdValue}</Text>
-      </View>
-    </View>
-  );
-}
-
-// --- Position Row ---
-
-function PositionRow({ position }: { position: DeFiPosition }) {
-  return (
-    <View style={styles.row}>
-      <View style={styles.tokenInfo}>
-        <Text style={styles.tokenSymbol}>{position.protocol}</Text>
-        <Text style={styles.tokenChain}>
-          {position.type} on {position.chainId}
-        </Text>
-      </View>
-      <View style={styles.tokenValues}>
-        <Text style={styles.tokenBalance}>{position.description}</Text>
-        <Text style={styles.tokenUSD}>${position.valueUSD}</Text>
-        {position.healthFactor && (
-          <Text
-            style={[
-              styles.healthFactor,
-              parseFloat(position.healthFactor) < 1.5 ? styles.healthDanger : styles.healthSafe,
-            ]}
-          >
-            HF: {position.healthFactor}
-          </Text>
-        )}
       </View>
     </View>
   );
@@ -314,14 +197,12 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     lineHeight: 20,
   },
-  list: {
-    paddingHorizontal: 16,
-  },
   row: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingVertical: 12,
+    paddingHorizontal: 16,
     borderBottomWidth: 1,
     borderBottomColor: '#1a1a1a',
   },
@@ -349,16 +230,5 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#6b7280',
     marginTop: 2,
-  },
-  healthFactor: {
-    fontSize: 11,
-    fontWeight: '600',
-    marginTop: 2,
-  },
-  healthSafe: {
-    color: '#22c55e',
-  },
-  healthDanger: {
-    color: '#ef4444',
   },
 });
