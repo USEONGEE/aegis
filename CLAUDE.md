@@ -4,6 +4,11 @@ AI DeFi Agent 서명 엔진 + 제어 인프라.
 
 ## 현재 페이즈
 
+### v0.5.0 — Chat Poller 구현
+- **상태**: Step 1 - PRD
+- **문서**: [docs/phases/v0.5.0-chat-poller/](docs/phases/v0.5.0-chat-poller/)
+- **시작일**: 2026-03-22
+
 ### v0.4.3 — Relay 타입 구조 정리
 - **상태**: 개발 완료 (Codex 리뷰 통과, 커밋 대기)
 - **문서**: [docs/phases/v0.4.3-relay-type-structure/](docs/phases/v0.4.3-relay-type-structure/)
@@ -75,6 +80,7 @@ AI DeFi Agent 서명 엔진 + 제어 인프라.
 | v0.4.4 | App WDK 이벤트 마이그레이션 — sendApproval() 전환 + eventName→event.type + 이벤트 자동 소비 |
 | v0.4.8 | WS 채널 재설계 + Protocol 타입 강제 적용 |
 | v0.4.9 | 도메인 모델 Null 제거 |
+| v0.5.1 | EVM Wallet Bootstrap |
 
 ## 프로젝트 구조
 

@@ -1,6 +1,7 @@
 import { join, dirname } from 'node:path'
 import { mkdir } from 'node:fs/promises'
 import { SqliteWdkStore, createGuardedWDK } from '@wdk-app/guarded-wdk'
+import { StubWalletManager } from './stub-wallet-manager.js'
 import type { DaemonConfig } from './config.js'
 import type { Logger } from 'pino'
 
@@ -61,10 +62,15 @@ export async function initWDK (config: DaemonConfig, logger: Logger): Promise<WD
     .filter(d => d.status.kind === 'active')
     .map(d => d.publicKey)
 
+  // EVM wallet manager 등록: policy 평가 미들웨어가 chain '1'에 대해 동작하도록.
+  const EVM_CHAIN_KEY = '1'
+
   // Factory가 emitter + broker를 소유. daemon은 facade 메서드만 사용.
   const facade = await createGuardedWDK({
     seed: mnemonic,
-    wallets: {},
+    wallets: {
+      [EVM_CHAIN_KEY]: { Manager: StubWalletManager as never, config: {} }
+    },
     protocols: {},
     approvalStore: store,
     trustedApprovers

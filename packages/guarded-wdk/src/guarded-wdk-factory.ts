@@ -143,6 +143,14 @@ export async function createGuardedWDK (config: GuardedWDKConfig): Promise<Guard
     }))
   }
 
+  // Auto-create accountIndex=0 wallet if wallets are registered but store is empty
+  if (Object.keys(wallets).length > 0) {
+    const existing = await approvalStore.getWallet(0)
+    if (!existing) {
+      await approvalStore.createWallet(0, 'Default Wallet', '')
+    }
+  }
+
   return {
     async getAccount (chain: string, index: number) {
       currentAccountIndex = index
