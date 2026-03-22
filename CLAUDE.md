@@ -5,11 +5,10 @@ AI DeFi Agent 서명 엔진 + 제어 인프라.
 ## 현재 페이즈
 
 ### v0.4.3 — Relay 타입 구조 정리
-- **상태**: Step 1 - PRD
+- **상태**: 개발 완료 (Codex 리뷰 통과, 커밋 대기)
 - **문서**: [docs/phases/v0.4.3-relay-type-structure/](docs/phases/v0.4.3-relay-type-structure/)
 - **Codex Session ID**: `/Users/mousebook/Documents/GitHub/WDK-APP/docs/phases/v0.4.3-relay-type-structure`
 - **시작일**: 2026-03-22
-- **선행 조건**: v0.4.0 완료 후 진행
 
 ### v0.4.0 — No Optional 원칙 전면 적용
 - **상태**: Step 1 - PRD
@@ -56,6 +55,7 @@ AI DeFi Agent 서명 엔진 + 제어 인프라.
 | v0.4.0 | No Optional 원칙 전면 적용 |
 | v0.4.1 | Strict CI Checks (no-empty-catch, no-console, no-explicit-any) |
 | v0.4.2 | WDK 이벤트 단일화 + 타입 규격화 |
+| v0.4.3 | (후속) App ControlResult→WDK 이벤트 전환 — app의 sendApproval()이 ApprovalVerified/ApprovalFailed를 수신하도록 변경 |
 
 ## 프로젝트 구조
 
