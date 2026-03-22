@@ -34,4 +34,4 @@ COPY packages/daemon/      packages/daemon/
 
 WORKDIR /app/packages/daemon
 
-CMD ["sh", "-c", "mkdir -p /root/.wdk/daemon-store && exec tsx src/index.ts"]
+CMD ["sh", "-c", "mkdir -p /root/.wdk/daemon-store && WDK_SOCKET_PATH=/tmp/daemon.sock exec tsx src/index.ts"]

@@ -89,7 +89,8 @@ export class AdminServer {
     try {
       await unlink(this._socketPath)
     } catch (err: unknown) {
-      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err
+      const errCode = (err as NodeJS.ErrnoException).code
+      if (errCode !== 'ENOENT' && errCode !== 'ENOTSUP') throw err
     }
 
     return new Promise<void>((resolve, reject) => {

@@ -27,3 +27,4 @@ dist/
 build/
 *.tsbuildinfo
 docs/type-dep-graph/
+.docker-data/

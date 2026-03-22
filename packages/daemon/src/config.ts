@@ -49,7 +49,7 @@ export function loadConfig (): DaemonConfig {
     wdkHome,
     storePath: join(wdkHome, 'store'),
     daemonStorePath: join(wdkHome, 'daemon-store'),
-    socketPath: join(wdkHome, 'daemon.sock'),
+    socketPath: process.env.WDK_SOCKET_PATH || join(wdkHome, 'daemon.sock'),
 
     // --- OpenClaw ---
     openclawBaseUrl: process.env.OPENCLAW_BASE_URL || 'http://localhost:18789',
