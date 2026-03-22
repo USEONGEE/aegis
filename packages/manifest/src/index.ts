@@ -16,7 +16,7 @@ export type {
 // Policy types: re-exported from guarded-wdk via types.ts
 export type { ArgCondition, Rule, PermissionDict, Decision } from './types.js'
 
-// Examples
-export { aaveV3Manifest } from './examples/aave-v3.js'
-export { uniswapV2Manifest } from './examples/uniswap-v2.js'
-export { kittenSwapManifest } from './examples/kittenswap.js'
+// Tools
+export type { ToolCall } from './tools/types.js'
+export { erc20Transfer, erc20Approve } from './tools/erc20.js'
+export { hyperlendDepositUsdt } from './tools/hyperlend.js'
