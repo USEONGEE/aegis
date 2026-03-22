@@ -332,4 +332,55 @@ AI가 `GuardedAccount.sendTransaction(tx)` 호출
 
 ---
 
+## 설계 분석 메모
+
+### verifyApproval() 6-step 검증 파이프라인
+
+`approval-verifier.ts:32-106`. 순서: "누가 → 진짜 서명했나 → 유효한가 → 맞는 대상인가"
+
+| Step | 검증 내용 | 실패 시 | 목적 |
+|------|----------|---------|------|
+| 1 | `approver ∈ trustedApprovers` | `UntrustedApproverError` | 사전 등록된 서명자만 허용 |
+| 2 | `store.isSignerRevoked(approver)` | `SignerRevokedError` | 해지된 서명자 거부 |
+| 3 | `verify(canonicalHash, sig, approver)` | `SignatureError` | Ed25519 서명 위조 방지 |
+| 4 | `expiresAt > now` | `ApprovalExpiredError` | 캡처된 승인 무기한 재사용 방지 |
+| 5 | `nonce > lastNonce` | `ReplayError` | 동일 서명 중복 제출 방지 |
+| 6 | type별 `targetHash`/`policyVersion` 비교 | `SignatureError` | 승인 대상 일치 확인 |
+
+Step 1~5는 모든 ApprovalType에 공통. Step 6만 type별 분기.
+
+### VerificationContext 간접층 문제
+
+현재 흐름:
+```
+daemon → ApprovalSubmitContext → broker → VerificationContext 변환 → verifyApproval()
+```
+
+문제점:
+1. `currentPolicyVersion`이 **항상 null** — dead 필드
+2. `expectedTargetHash`가 null이면 스킵 — 사실상 optional 패턴 (No Optional 원칙 위반)
+3. `verifyApproval()`의 Step 6이 type별 switch를 하는데, `ApprovalSubmitContext`가 이미 kind별 데이터를 갖고 있음 — 같은 분기를 두 곳에서 수행
+4. `verifyApproval()`의 외부 사용자가 **없음** — broker 전용
+
+개선 방향: `VerificationContext` 제거, `verifyApproval()`이 `ApprovalSubmitContext`를 직접 받으면 변환 코드 제거 + kind narrowing으로 null 체크 불필요.
+
+단, Step 1~5가 전 타입 공통이므로 OOP 구현체 분리(strategy)는 과잉 — DU + switch가 이 규모에서 더 단순.
+
+### Dead Export 타입 gap 패턴
+
+`FailedArg`, `RuleFailure`는 dead-exports 체크에 잡히지만 **런타임에서는 사용 중**:
+```
+matchArgs() → FailedArg[] 생성
+  → evaluatePolicy() → RuleFailure[] 수집 → EvaluationContext에 담김
+    → PolicyRejectionError(reason, context: unknown) → daemon이 catch
+```
+
+소비자(daemon)가 `context: unknown`으로 받아서 타입을 import하지 않을 뿐. export 제거하면 나중에 타입 좁히기가 불가능해짐.
+
+이 패턴("런타임 사용 O, 타입 import X")이 126건 dead export 중 얼마나 되는지가 dead-exports 분류 작업의 핵심.
+→ 분류 작업 위임서: `docs/handover/dead-exports-triage.md`
+
+---
+
 **작성일**: 2026-03-22 KST
+**갱신일**: 2026-03-22 KST — 설계 분석 메모 추가 (verifyApproval 6-step, VerificationContext 문제, dead export 타입 gap)
