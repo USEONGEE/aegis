@@ -1,7 +1,8 @@
 import { createHash } from 'node:crypto'
 import type { Logger } from 'pino'
-import type { SignedApproval, VerificationContext, StoredSigner } from '@wdk-app/guarded-wdk'
-import { SqliteApprovalStore, SignedApprovalBroker } from '@wdk-app/guarded-wdk'
+import type { SignedApproval } from '@wdk-app/guarded-wdk'
+import { SignedApprovalBroker } from '@wdk-app/guarded-wdk'
+import type { ApprovalSubmitContext } from '@wdk-app/guarded-wdk'
 import type {
   SignedApprovalFields, ControlMessage, ControlResult
 } from '@wdk-app/protocol'
@@ -38,23 +39,20 @@ function toSignedApproval (fields: SignedApprovalFields, type: SignedApproval['t
 export interface ControlHandlerDeps {
   broker: SignedApprovalBroker
   logger: Logger
-  approvalStore: InstanceType<typeof SqliteApprovalStore>
   queueManager: MessageQueueManager
 }
 
 /**
  * Handle control channel messages from the Relay.
  *
- * Supported msg.type values:
- *   - policy_approval  -> broker.submitApproval (applies policy)
- *   - policy_reject    -> broker.submitApproval (rejects policy request)
- *   - device_revoke    -> broker.submitApproval (revokes a signer)
+ * v0.4.2: 승인 6종은 broker.submitApproval() 한 줄로 처리 후 null 반환 (WDK 이벤트가 앱에 전달).
+ *         cancel 2종은 기존 ControlResult 반환 유지.
  */
 export async function handleControlMessage (
   msg: ControlMessage,
   deps: ControlHandlerDeps
-): Promise<ControlResult> {
-  const { broker, logger, approvalStore, queueManager } = deps
+): Promise<ControlResult | null> {
+  const { broker, logger, queueManager } = deps
   if (!msg.type || !msg.payload) {
     logger.warn({ msg }, 'Malformed control message: missing type or payload')
     return { ok: false, error: 'Malformed control message' }
@@ -70,14 +68,13 @@ export async function handleControlMessage (
       const payload = msg.payload
       try {
         const signedApproval = toSignedApproval(payload, 'tx')
-        const context: VerificationContext = { currentPolicyVersion: null, expectedTargetHash: payload.targetHash }
+        const context: ApprovalSubmitContext = { kind: 'tx', expectedTargetHash: payload.targetHash }
         await broker.submitApproval(signedApproval, context)
-
         logger.info({ requestId: payload.requestId }, 'Tx approval submitted successfully')
-        return { ok: true, type: 'tx_approval', requestId: payload.requestId }
+        return null
       } catch (err: unknown) {
         logger.error({ err, requestId: payload.requestId }, 'Tx approval verification failed')
-        return { ok: false, type: 'tx_approval', requestId: payload.requestId, error: (err as Error).message }
+        return null
       }
     }
 
@@ -88,38 +85,18 @@ export async function handleControlMessage (
       const payload = msg.payload
       try {
         const signedApproval = toSignedApproval(payload, 'policy')
-
-        // Build verification context + capture description BEFORE submitApproval
-        const context: VerificationContext = { currentPolicyVersion: null, expectedTargetHash: null }
-        let description = ''
-        if (payload.requestId) {
-          const pending = await approvalStore.loadPendingByRequestId(payload.requestId)
-          if (pending) {
-            context.expectedTargetHash = pending.targetHash
-            description = pending.content
-            logger.debug({ requestId: payload.requestId, targetHash: pending.targetHash }, 'Policy context loaded from server-side pending')
-          } else {
-            logger.warn({ requestId: payload.requestId }, 'No pending request found for policy_approval')
-          }
+        const context: ApprovalSubmitContext = {
+          kind: 'policy_approval',
+          expectedTargetHash: payload.targetHash,
+          policies: (payload.policies as unknown[]) || [],
+          description: ''
         }
-
         await broker.submitApproval(signedApproval, context)
-
-        if (payload.policies) {
-          await approvalStore.savePolicy(
-            payload.accountIndex,
-            payload.chainId,
-            { policies: payload.policies as unknown[], signature: {} },
-            description
-          )
-          logger.info({ chainId: payload.chainId, accountIndex: payload.accountIndex }, 'Policy saved to store')
-        }
-
         logger.info({ requestId: payload.requestId }, 'Policy approval submitted successfully')
-        return { ok: true, type: 'policy_approval', requestId: payload.requestId }
+        return null
       } catch (err: unknown) {
         logger.error({ err, requestId: payload.requestId }, 'Policy approval verification failed')
-        return { ok: false, type: 'policy_approval', requestId: payload.requestId, error: (err as Error).message }
+        return null
       }
     }
 
@@ -130,13 +107,13 @@ export async function handleControlMessage (
       const payload = msg.payload
       try {
         const signedApproval = toSignedApproval(payload, 'policy_reject')
-        await broker.submitApproval(signedApproval)
-
+        const context: ApprovalSubmitContext = { kind: 'policy_reject' }
+        await broker.submitApproval(signedApproval, context)
         logger.info({ requestId: payload.requestId }, 'Policy rejection submitted successfully')
-        return { ok: true, type: 'policy_reject', requestId: payload.requestId }
+        return null
       } catch (err: unknown) {
         logger.error({ err, requestId: payload.requestId }, 'Policy rejection verification failed')
-        return { ok: false, type: 'policy_reject', requestId: payload.requestId, error: (err as Error).message }
+        return null
       }
     }
 
@@ -147,31 +124,17 @@ export async function handleControlMessage (
       const payload = msg.payload
       try {
         const signedApproval = toSignedApproval(payload, 'device_revoke')
-
-        // The signed approval's targetHash = SHA-256(publicKey of signer being revoked)
-        // Verifier Step 6 checks targetHash matches expectedTargetHash if provided.
-        // App sends targetPublicKey (the public key of the signer to revoke).
         const targetPubKey = payload.targetPublicKey || payload.signerId
         const expectedTargetHash = targetPubKey
           ? '0x' + createHash('sha256').update(targetPubKey).digest('hex')
-          : null
-        const context: VerificationContext = { currentPolicyVersion: null, expectedTargetHash }
-
+          : ''
+        const context: ApprovalSubmitContext = { kind: 'device_revoke', expectedTargetHash }
         await broker.submitApproval(signedApproval, context)
-
-        // After revocation, update trusted approvers from store (source of truth)
-        const signers: StoredSigner[] = await approvalStore.listSigners()
-        const active: string[] = signers
-          .filter(d => d.revokedAt === null || d.revokedAt === undefined)
-          .map(d => d.publicKey)
-        broker.setTrustedApprovers(active)
-        logger.info({ activeSigners: active.length }, 'Trusted approvers updated after signer revocation')
-
         logger.info({ requestId: payload.requestId }, 'Signer revocation submitted successfully')
-        return { ok: true, type: 'device_revoke', requestId: payload.requestId }
+        return null
       } catch (err: unknown) {
         logger.error({ err, requestId: payload.requestId }, 'Signer revocation verification failed')
-        return { ok: false, type: 'device_revoke', requestId: payload.requestId, error: (err as Error).message }
+        return null
       }
     }
 
@@ -182,13 +145,13 @@ export async function handleControlMessage (
       const payload = msg.payload
       try {
         const signedApproval = toSignedApproval(payload, 'wallet_create')
-        await broker.submitApproval(signedApproval)
-
-        logger.info({ requestId: payload.requestId, accountIndex: payload.accountIndex }, 'Wallet creation approval submitted successfully')
-        return { ok: true, type: 'wallet_create', requestId: payload.requestId }
+        const context: ApprovalSubmitContext = { kind: 'wallet_create' }
+        await broker.submitApproval(signedApproval, context)
+        logger.info({ requestId: payload.requestId }, 'Wallet creation approval submitted successfully')
+        return null
       } catch (err: unknown) {
         logger.error({ err, requestId: payload.requestId }, 'Wallet creation approval verification failed')
-        return { ok: false, type: 'wallet_create', requestId: payload.requestId, error: (err as Error).message }
+        return null
       }
     }
 
@@ -199,13 +162,13 @@ export async function handleControlMessage (
       const payload = msg.payload
       try {
         const signedApproval = toSignedApproval(payload, 'wallet_delete')
-        await broker.submitApproval(signedApproval)
-
-        logger.info({ requestId: payload.requestId, accountIndex: payload.accountIndex }, 'Wallet deletion approval submitted successfully')
-        return { ok: true, type: 'wallet_delete', requestId: payload.requestId }
+        const context: ApprovalSubmitContext = { kind: 'wallet_delete' }
+        await broker.submitApproval(signedApproval, context)
+        logger.info({ requestId: payload.requestId }, 'Wallet deletion approval submitted successfully')
+        return null
       } catch (err: unknown) {
         logger.error({ err, requestId: payload.requestId }, 'Wallet deletion approval verification failed')
-        return { ok: false, type: 'wallet_delete', requestId: payload.requestId, error: (err as Error).message }
+        return null
       }
     }
 

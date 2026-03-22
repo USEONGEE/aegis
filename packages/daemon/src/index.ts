@@ -95,10 +95,10 @@ async function main (): Promise<void> {
   relayClient.onMessage((type, payload, raw) => {
     switch (type) {
       case 'control':
-        // TODO: v0.2.9+ — wire JSON parse/validate 후 ControlMessage로 변환. 현재는 as cast.
-        handleControlMessage(payload as ControlMessage, { broker: broker!, logger, approvalStore: store, queueManager })
+        // v0.4.2: 승인 6종은 null 반환 (WDK 이벤트로 앱에 전달). cancel 2종만 ControlResult forward.
+        handleControlMessage(payload as ControlMessage, { broker: broker!, logger, queueManager })
           .then((result) => {
-            // v0.3.0: Forward control result with userId from incoming message
+            if (result === null) return // 승인 타입: WDK 이벤트가 대신 전달
             const incomingUserId = (payload as Record<string, unknown>)?.userId as string | undefined
             relayClient.send('control', result as unknown as Record<string, unknown>, incomingUserId)
           })
@@ -118,18 +118,21 @@ async function main (): Promise<void> {
   })
 
   // Step 07: Forward WDK events to relay for app consumption
+  // v0.4.2: ApprovalFailed 추가 (13→14종). eventName 제거 — event.type이 source of truth.
   const RELAY_EVENTS = [
     'IntentProposed', 'PolicyEvaluated',
     'ExecutionBroadcasted', 'ExecutionSettled', 'ExecutionFailed',
     'TransactionSigned',
     'PendingPolicyRequested', 'ApprovalVerified', 'ApprovalRejected', 'PolicyApplied', 'SignerRevoked',
-    'WalletCreated', 'WalletDeleted'
+    'WalletCreated', 'WalletDeleted',
+    'ApprovalFailed'
   ] as const
 
   if (wdk) {
     for (const eventName of RELAY_EVENTS) {
       wdk.on(eventName, (event: unknown) => {
-        relayClient.send('control', { type: 'event_stream', eventName, event })
+        // v0.4.2: eventName 제거. event.type이 유일한 판별자.
+        relayClient.send('control', { type: 'event_stream', event: event as Record<string, unknown> })
       })
     }
     logger.info({ eventCount: RELAY_EVENTS.length }, 'WDK event relay registered')

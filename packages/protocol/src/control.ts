@@ -2,6 +2,8 @@
 // Control channel wire types (app <-> daemon)
 // ---------------------------------------------------------------------------
 
+import type { AnyWDKEvent } from './events.js'
+
 // --- app -> daemon: ControlMessage ---
 
 export interface SignedApprovalFields {
@@ -134,8 +136,7 @@ export interface CronSessionCreatedEvent {
 
 export interface EventStreamEvent {
   type: 'event_stream'
-  eventName: string
-  event: unknown
+  event: AnyWDKEvent
 }
 
 export type ControlEvent =

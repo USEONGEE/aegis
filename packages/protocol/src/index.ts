@@ -36,3 +36,22 @@ export {
   type RelayChannel,
   type RelayEnvelope
 } from './relay.js'
+
+export {
+  type WDKEventBase,
+  type IntentProposedEvent,
+  type PolicyEvaluatedEvent,
+  type ExecutionBroadcastedEvent,
+  type ExecutionSettledEvent,
+  type ExecutionFailedEvent,
+  type TransactionSignedEvent,
+  type PendingPolicyRequestedEvent,
+  type ApprovalVerifiedEvent,
+  type ApprovalRejectedEvent,
+  type PolicyAppliedEvent,
+  type SignerRevokedEvent,
+  type WalletCreatedEvent,
+  type WalletDeletedEvent,
+  type ApprovalFailedEvent,
+  type AnyWDKEvent
+} from './events.js'

@@ -25,7 +25,7 @@ interface GuardedWDKConfig {
   seed: string
   wallets: Record<string, WalletEntry>
   protocols: Record<string, ProtocolEntry[]>
-  approvalBroker: SignedApprovalBroker | null
+  approvalBroker?: SignedApprovalBroker | null
   approvalStore: ApprovalStore
   trustedApprovers: string[]
 }
@@ -46,7 +46,7 @@ export async function createGuardedWDK (config: GuardedWDKConfig): Promise<Guard
     seed,
     wallets,
     protocols,
-    approvalBroker: externalBroker,
+    approvalBroker: externalBroker = null,
     approvalStore,
     trustedApprovers
   } = config
@@ -64,10 +64,9 @@ export async function createGuardedWDK (config: GuardedWDKConfig): Promise<Guard
   if (externalBroker !== null) {
     approvalBroker = externalBroker
   } else {
-    if (!Array.isArray(trustedApprovers) || trustedApprovers.length === 0) {
-      throw new Error('trustedApprovers must be a non-empty array when approvalStore is provided.')
-    }
-    approvalBroker = new SignedApprovalBroker(trustedApprovers, approvalStore, emitter)
+    // v0.4.2: 빈 trustedApprovers 허용. daemon이 첫 부팅 시 signer가 없을 수 있음.
+    // daemon이 이후 broker.setTrustedApprovers()로 업데이트.
+    approvalBroker = new SignedApprovalBroker(trustedApprovers || [], approvalStore, emitter)
   }
 
   let currentAccountIndex = 0

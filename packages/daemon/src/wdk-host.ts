@@ -26,13 +26,13 @@ export interface WDKInitResult {
 }
 
 /**
- * Initialize the WDK host: load master seed, create store + broker, build guarded WDK.
+ * Initialize the WDK host: load master seed, create store, build guarded WDK.
  *
  * Returns { wdk, broker, store } or null wdk if no seed is available.
  *
- * NOTE: createGuardedWDK depends on @tetherto/wdk which may not be available
- * in all environments. The import is deferred so the rest of the daemon can
- * still load. When the real WDK is unavailable, a mock is returned.
+ * v0.4.2: Factory가 emitter + broker를 소유. daemon은 wdk.getApprovalBroker()로 획득.
+ * Dual emitter 버그 수정 — 이전에는 daemon이 별도 emitter/broker를 생성하여
+ * broker 이벤트가 wdk.on()에 도달하지 않았음.
  */
 export async function initWDK (config: DaemonConfig, logger: Logger): Promise<WDKInitResult> {
   const dbPath = config.storePath.endsWith('.db')
@@ -57,11 +57,7 @@ export async function initWDK (config: DaemonConfig, logger: Logger): Promise<WD
     .filter(d => d.revokedAt === null || d.revokedAt === undefined)
     .map(d => d.publicKey)
 
-  // Create shared EventEmitter and pass to broker
-  const emitter = new EventEmitter()
-  const broker = new SignedApprovalBroker(trustedApprovers, store, emitter)
-
-  // Try to create the real guarded WDK; fall back to mock if @tetherto/wdk is absent
+  // v0.4.2: Factory가 emitter + broker를 소유. daemon은 직접 생성하지 않음.
   let wdk: WDKInstance
   try {
     const mod = await import('@wdk-app/guarded-wdk')
@@ -69,14 +65,16 @@ export async function initWDK (config: DaemonConfig, logger: Logger): Promise<WD
       seed: mnemonic,
       wallets: {},
       protocols: {},
-      approvalBroker: null,
       approvalStore: store,
       trustedApprovers
     })
   } catch (err: unknown) {
     logger.warn({ err: (err as Error).message }, 'Could not create real GuardedWDK. Using mock host.')
-    wdk = createMockWDK(broker, store)
+    wdk = createMockWDK(store, trustedApprovers)
   }
+
+  // Factory 산출물에서 broker를 획득
+  const broker = wdk.getApprovalBroker() as SignedApprovalBroker
 
   logger.info({ approverCount: trustedApprovers.length }, 'WDK host initialized.')
 
@@ -92,11 +90,14 @@ export async function switchSeed (config: DaemonConfig, logger: Logger): Promise
 
 /**
  * Minimal mock WDK for environments where @tetherto/wdk is not installed.
- * Exposes the same interface shape so the daemon can boot and handle admin commands.
+ * v0.4.2: 실제 EventEmitter + broker를 내장하여 wdk.on()이 동작.
  */
-function createMockWDK (broker: SignedApprovalBroker, store: InstanceType<typeof SqliteApprovalStore>): WDKInstance {
+function createMockWDK (store: InstanceType<typeof SqliteApprovalStore>, trustedApprovers: string[]): WDKInstance {
+  const emitter = new EventEmitter()
+  const broker = new SignedApprovalBroker(trustedApprovers, store, emitter)
+
   return {
-    async getAccount (_chain: string, _index: number) {
+    async getAccount (_chain: string, _index: number = 0) {
       return {
         chain: _chain,
         index: _index,
@@ -118,8 +119,12 @@ function createMockWDK (broker: SignedApprovalBroker, store: InstanceType<typeof
     getApprovalStore () {
       return store
     },
-    on (): void {},
-    off (): void {},
+    on (type: string, handler: (...args: unknown[]) => void): void {
+      emitter.on(type, handler)
+    },
+    off (type: string, handler: (...args: unknown[]) => void): void {
+      emitter.off(type, handler)
+    },
     dispose (): void {
       broker.dispose()
     }

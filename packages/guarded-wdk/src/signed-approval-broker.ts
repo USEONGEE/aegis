@@ -22,6 +22,18 @@ interface Waiter {
 
 type PendableApprovalType = 'policy' | 'wallet_create' | 'wallet_delete'
 
+// ---------------------------------------------------------------------------
+// v0.4.2: ApprovalSubmitContext — discriminated union, No Optional
+// ---------------------------------------------------------------------------
+
+export type ApprovalSubmitContext =
+  | { kind: 'tx'; expectedTargetHash: string }
+  | { kind: 'policy_approval'; expectedTargetHash: string; policies: unknown[]; description: string }
+  | { kind: 'policy_reject' }
+  | { kind: 'device_revoke'; expectedTargetHash: string }
+  | { kind: 'wallet_create' }
+  | { kind: 'wallet_delete' }
+
 /**
  * Unified approval broker for tx, policy, wallet, and device operations.
  */
@@ -72,131 +84,163 @@ export class SignedApprovalBroker {
   }
 
   /**
-   * Submit a signed approval. Verifies the signature and resolves the waiting promise.
+   * Submit a signed approval. Verifies the signature, performs domain operations,
+   * and emits events atomically.
+   *
+   * v0.4.2: 원자적 이벤트 발행.
+   * - 도메인 처리(검증→도메인작업→히스토리) 완료 후 best-effort emit
+   * - 중간 실패 시 ApprovalFailed만 emit
+   * - 리스너 예외는 삼킴 (caller에 전파하지 않음)
    */
-  async submitApproval (signedApproval: SignedApproval, context: VerificationContext = { currentPolicyVersion: null, expectedTargetHash: null }): Promise<void> {
-    // Verify using 6-step logic (throws on failure)
-    await verifyApproval(signedApproval, this._trustedApprovers, this._store, context)
-
+  async submitApproval (signedApproval: SignedApproval, context: ApprovalSubmitContext): Promise<void> {
     const { type, requestId } = signedApproval
+    const pendingEvents: Array<{ name: string; payload: Record<string, unknown> }> = []
 
-    // Emit verification success
-    this._emitter.emit('ApprovalVerified', {
-      type: 'ApprovalVerified',
-      requestId,
-      approvalType: type,
-      approver: signedApproval.approver,
-      timestamp: Date.now()
-    })
-
-    // Type-specific post-processing
-    // NOTE: domain operations (createWallet, deleteWallet, revokeSigner) are
-    // intentionally inside the broker, not delegated to the caller.
-    // This guarantees that these operations can only execute after
-    // verifyApproval() passes — making unapproved execution structurally impossible.
-    switch (type) {
-      case 'policy': {
-        // Remove from pending, apply policy
-        await this._store.removePendingApproval(requestId)
-        this._emitter.emit('PolicyApplied', {
-          type: 'PolicyApplied',
-          requestId,
-          chainId: signedApproval.chainId,
-          timestamp: Date.now()
-        })
-        // Resolve waiting policy promise if any
-        const waiter = this._waiters.get(requestId)
-        if (waiter) {
-          clearTimeout(waiter.timer)
-          waiter.resolve(signedApproval)
-          this._waiters.delete(requestId)
-        }
-        break
-      }
-
-      case 'policy_reject': {
-        await this._store.removePendingApproval(requestId)
-        this._emitter.emit('ApprovalRejected', {
-          type: 'ApprovalRejected',
-          requestId,
-          timestamp: Date.now()
-        })
-        const waiter = this._waiters.get(requestId)
-        if (waiter) {
-          clearTimeout(waiter.timer)
-          waiter.reject(new Error('Policy rejected by owner'))
-          this._waiters.delete(requestId)
-        }
-        break
-      }
-
-      case 'device_revoke': {
-        const targetHash = signedApproval.targetHash
-        if (!targetHash) {
-          throw new Error('device_revoke requires targetHash')
-        }
-        // Find signer whose SHA-256(publicKey) === targetHash
-        const signers = await this._store.listSigners()
-        const target = signers.find(s => {
-          const hash = '0x' + createHash('sha256').update(s.publicKey).digest('hex')
-          return hash === targetHash
-        })
-        if (!target) {
-          throw new Error('device_revoke target signer not found')
-        }
-        await this._store.revokeSigner(target.publicKey)
-        this._emitter.emit('SignerRevoked', {
-          type: 'SignerRevoked',
-          publicKey: target.publicKey,
-          timestamp: Date.now()
-        })
-        break
-      }
-
-      case 'wallet_create': {
-        const accountIndex = signedApproval.accountIndex
-        // Read wallet name from pending request (single source of truth)
-        const pending = await this._store.loadPendingByRequestId(requestId)
-        const name = (pending as PendingApprovalRequest | null)?.walletName ?? `Wallet ${accountIndex}`
-        // Address should be derived externally and passed via control flow
-        // For now, use a placeholder that the daemon will replace
-        await this._store.createWallet(accountIndex, name, '')
-        await this._store.removePendingApproval(requestId)
-        this._emitter.emit('WalletCreated', {
-          type: 'WalletCreated',
-          accountIndex,
-          name,
-          timestamp: Date.now()
-        })
-        break
-      }
-
-      case 'wallet_delete': {
-        const accountIndex = signedApproval.accountIndex
-        await this._store.removePendingApproval(requestId)
-        await this._store.deleteWallet(accountIndex)
-        this._emitter.emit('WalletDeleted', {
-          type: 'WalletDeleted',
-          accountIndex,
-          timestamp: Date.now()
-        })
-        break
-      }
+    // Build VerificationContext from ApprovalSubmitContext
+    const verificationContext: VerificationContext = {
+      currentPolicyVersion: null,
+      expectedTargetHash: 'expectedTargetHash' in context ? context.expectedTargetHash : null
     }
 
-    // Record in history
-    await this._store.appendHistory({
-      accountIndex: signedApproval.accountIndex,
-      type,
-      requestId,
-      chainId: signedApproval.chainId,
-      targetHash: signedApproval.targetHash,
-      approver: signedApproval.approver,
-      action: type === 'policy_reject' ? 'rejected' : 'approved',
-      content: signedApproval.content,
-      signedApproval,
-      timestamp: Date.now()
-    })
+    // ── 원자성 경계 시작 (도메인 처리) ──
+    try {
+      // Step 1: Verify using 6-step logic (throws on failure)
+      await verifyApproval(signedApproval, this._trustedApprovers, this._store, verificationContext)
+
+      // Step 2: Type-specific domain operations (buffer events, don't emit yet)
+      switch (type) {
+        case 'policy': {
+          // v0.4.2: savePolicy를 broker 내부에서 수행.
+          // pending을 삭제하기 전에 먼저 읽어서 description을 확보.
+          if (context.kind === 'policy_approval' && context.policies) {
+            const pending = await this._store.loadPendingByRequestId(requestId)
+            const description = context.description || (pending as PendingApprovalRequest | null)?.content || ''
+            await this._store.savePolicy(
+              signedApproval.accountIndex,
+              signedApproval.chainId,
+              { policies: context.policies, signature: {} },
+              description
+            )
+          }
+          await this._store.removePendingApproval(requestId)
+          pendingEvents.push({
+            name: 'PolicyApplied',
+            payload: { type: 'PolicyApplied', requestId, chainId: signedApproval.chainId, timestamp: Date.now() }
+          })
+          const waiter = this._waiters.get(requestId)
+          if (waiter) {
+            clearTimeout(waiter.timer)
+            waiter.resolve(signedApproval)
+            this._waiters.delete(requestId)
+          }
+          break
+        }
+
+        case 'policy_reject': {
+          await this._store.removePendingApproval(requestId)
+          pendingEvents.push({
+            name: 'ApprovalRejected',
+            payload: { type: 'ApprovalRejected', requestId, timestamp: Date.now() }
+          })
+          const waiter = this._waiters.get(requestId)
+          if (waiter) {
+            clearTimeout(waiter.timer)
+            waiter.reject(new Error('Policy rejected by owner'))
+            this._waiters.delete(requestId)
+          }
+          break
+        }
+
+        case 'device_revoke': {
+          const targetHash = signedApproval.targetHash
+          if (!targetHash) {
+            throw new Error('device_revoke requires targetHash')
+          }
+          const signers = await this._store.listSigners()
+          const target = signers.find(s => {
+            const hash = '0x' + createHash('sha256').update(s.publicKey).digest('hex')
+            return hash === targetHash
+          })
+          if (!target) {
+            throw new Error('device_revoke target signer not found')
+          }
+          await this._store.revokeSigner(target.publicKey)
+          // v0.4.2: setTrustedApprovers를 broker 내부에서 수행
+          const activeSigs = signers.filter(s => s.publicKey !== target.publicKey && (s.revokedAt === null || s.revokedAt === undefined))
+          this._trustedApprovers = activeSigs.map(s => s.publicKey)
+          pendingEvents.push({
+            name: 'SignerRevoked',
+            payload: { type: 'SignerRevoked', publicKey: target.publicKey, timestamp: Date.now() }
+          })
+          break
+        }
+
+        case 'wallet_create': {
+          const accountIndex = signedApproval.accountIndex
+          const pending = await this._store.loadPendingByRequestId(requestId)
+          const name = (pending as PendingApprovalRequest | null)?.walletName ?? `Wallet ${accountIndex}`
+          await this._store.createWallet(accountIndex, name, '')
+          await this._store.removePendingApproval(requestId)
+          pendingEvents.push({
+            name: 'WalletCreated',
+            payload: { type: 'WalletCreated', accountIndex, name, timestamp: Date.now() }
+          })
+          break
+        }
+
+        case 'wallet_delete': {
+          const accountIndex = signedApproval.accountIndex
+          await this._store.removePendingApproval(requestId)
+          await this._store.deleteWallet(accountIndex)
+          pendingEvents.push({
+            name: 'WalletDeleted',
+            payload: { type: 'WalletDeleted', accountIndex, timestamp: Date.now() }
+          })
+          break
+        }
+      }
+
+      // Step 3: Record in history
+      await this._store.appendHistory({
+        accountIndex: signedApproval.accountIndex,
+        type,
+        requestId,
+        chainId: signedApproval.chainId,
+        targetHash: signedApproval.targetHash,
+        approver: signedApproval.approver,
+        action: type === 'policy_reject' ? 'rejected' : 'approved',
+        content: signedApproval.content,
+        signedApproval,
+        timestamp: Date.now()
+      })
+    } catch (err: unknown) {
+      // ── 원자성 경계 실패: ApprovalFailed만 emit ──
+      try {
+        this._emitter.emit('ApprovalFailed', {
+          type: 'ApprovalFailed',
+          requestId,
+          approvalType: type,
+          error: (err as Error).message,
+          timestamp: Date.now()
+        })
+      } catch { void 0 /* listener exception on ApprovalFailed — swallow. broker has no logger; daemon logs the original error. */ }
+      throw err
+    }
+    // ── 원자성 경계 끝 ──
+
+    // ── best-effort emit (경계 밖, 리스너 예외는 삼킴) ──
+    try {
+      this._emitter.emit('ApprovalVerified', {
+        type: 'ApprovalVerified',
+        requestId,
+        approvalType: type,
+        approver: signedApproval.approver,
+        timestamp: Date.now()
+      })
+      for (const { name, payload } of pendingEvents) {
+        this._emitter.emit(name, payload)
+      }
+    } catch { void 0 /* listener exception — swallow. listener bugs are not broker's responsibility. */ }
   }
 
   /**

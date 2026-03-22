@@ -1,5 +1,6 @@
 export { createGuardedWDK } from './guarded-wdk-factory.js'
 export { SignedApprovalBroker } from './signed-approval-broker.js'
+export type { ApprovalSubmitContext } from './signed-approval-broker.js'
 export { ApprovalStore } from './approval-store.js'
 export { JsonApprovalStore } from './json-approval-store.js'
 export { SqliteApprovalStore } from './sqlite-approval-store.js'
