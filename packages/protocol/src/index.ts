@@ -1,8 +1,6 @@
 export {
   type SignedApprovalFields,
-  type ControlMessage,
-  type ControlResult,
-  type ControlEvent
+  type ControlMessage
 } from './control.js'
 
 export {
@@ -16,5 +14,19 @@ export {
 } from './relay.js'
 
 export {
-  type AnyWDKEvent
+  type QueryType,
+  type QueryMessage,
+  type QueryResult
+} from './query.js'
+
+export {
+  type AnyWDKEvent,
+  type DaemonEvent,
+  type CancelCompletedEvent,
+  type CancelFailedEvent,
+  type AnyStreamEvent,
+  type EventStreamPayload,
+  type MessageQueuedEvent,
+  type MessageStartedEvent,
+  type CronSessionCreatedEvent
 } from './events.js'

@@ -2,7 +2,7 @@
 // Relay transport types
 // ---------------------------------------------------------------------------
 
-export type RelayChannel = 'control' | 'chat'
+export type RelayChannel = 'control' | 'chat' | 'event_stream' | 'query' | 'query_result'
 
 /**
  * Wire envelope for all relay ↔ daemon/app messages.

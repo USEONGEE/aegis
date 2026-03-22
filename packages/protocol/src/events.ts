@@ -159,7 +159,7 @@ interface ApprovalFailedEvent extends WDKEventBase {
 }
 
 // ---------------------------------------------------------------------------
-// Union
+// Union — WDK events (from guarded-wdk)
 // ---------------------------------------------------------------------------
 
 export type AnyWDKEvent =
@@ -177,3 +177,65 @@ export type AnyWDKEvent =
   | WalletCreatedEvent
   | WalletDeletedEvent
   | ApprovalFailedEvent
+
+// ---------------------------------------------------------------------------
+// Daemon-originated events (NOT WDK events)
+// ---------------------------------------------------------------------------
+
+export interface CancelCompletedEvent extends WDKEventBase {
+  type: 'CancelCompleted'
+  cancelType: 'cancel_queued' | 'cancel_active'
+  messageId: string
+  wasProcessing: boolean
+}
+
+export interface CancelFailedEvent extends WDKEventBase {
+  type: 'CancelFailed'
+  cancelType: 'cancel_queued' | 'cancel_active'
+  messageId: string
+  reason: string
+}
+
+export type DaemonEvent = CancelCompletedEvent | CancelFailedEvent
+
+// ---------------------------------------------------------------------------
+// Daemon → App async notifications (moved from control.ts)
+// ---------------------------------------------------------------------------
+
+export interface MessageQueuedEvent {
+  type: 'message_queued'
+  userId: string
+  sessionId: string
+  messageId: string
+}
+
+export interface MessageStartedEvent {
+  type: 'message_started'
+  userId: string
+  sessionId: string
+  messageId: string
+}
+
+export interface CronSessionCreatedEvent {
+  type: 'cron_session_created'
+  userId: string
+  sessionId: string
+  cronId: string
+}
+
+// ---------------------------------------------------------------------------
+// event_stream channel payload
+// ---------------------------------------------------------------------------
+
+/** All events deliverable via the event_stream channel */
+export type AnyStreamEvent =
+  | AnyWDKEvent
+  | DaemonEvent
+  | MessageQueuedEvent
+  | MessageStartedEvent
+  | CronSessionCreatedEvent
+
+/** event_stream channel payload — independent from ControlEvent */
+export interface EventStreamPayload {
+  event: AnyStreamEvent
+}
