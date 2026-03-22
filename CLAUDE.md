@@ -87,6 +87,7 @@ AI DeFi Agent 서명 엔진 + 제어 인프라.
 | v0.4.8 | WS 채널 재설계 + Protocol 타입 강제 적용 |
 | v0.4.9 | 도메인 모델 Null 제거 |
 | v0.5.1 | EVM Wallet Bootstrap |
+| v0.5.4 | Wallet Address SSOT |
 
 ## 프로젝트 구조
 

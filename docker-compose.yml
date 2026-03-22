@@ -41,6 +41,7 @@ services:
       - ./.docker-data/openclaw:/home/node/.openclaw
     environment:
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OPENCLAW_GATEWAY_TOKEN: ${OPENCLAW_GATEWAY_TOKEN:-openclaw-dev-token}
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://localhost:18789/healthz"]
       interval: 10s
@@ -87,6 +88,9 @@ services:
       # OpenClaw
       OPENCLAW_BASE_URL: http://openclaw:18789
       OPENCLAW_TOKEN: ${OPENCLAW_TOKEN:-}
+      # Anthropic (direct API)
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-haiku-4-5-20251001}
       # Master seed (BIP-39 mnemonic)
       MASTER_SEED: ${MASTER_SEED:-}
     depends_on:

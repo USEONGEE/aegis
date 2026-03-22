@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.5.4 - Wallet Address SSOT (2026-03-23)
+
+- **wallets.address 컬럼 제거**: 항상 빈 문자열로 저장되던 dead column 삭제. 주소는 `wdk.getAccount(chain, index).getAddress()` derivation이 유일한 SSOT
+- **createWallet() 시그니처 변경**: `(accountIndex, name, address)` → `(accountIndex, name)`. 3번째 파라미터 제거
+- **StoredWallet/WalletRow 타입 정리**: address 필드 제거. daemon admin-server wallet_list 응답에서도 제거
+- 📝 [Phase 문서](../archive/v0.5.4-wallet-address-ssot/README.md)
+
+### 수치
+- guarded-wdk + daemon tsc 0 errors, 관련 테스트 148건 pass
+- 7 src files + 5 test files changed
+
 ## v0.4.9 - 도메인 모델 Null 제거 (2026-03-22)
 
 - **EvaluationResult 3-variant DU**: `context: EvaluationContext | null` + `matchedPermission: Rule | null` 동시 해소. AllowResult / SimpleRejectResult / DetailedRejectResult로 분리. protocol wire 타입도 DU 전환
