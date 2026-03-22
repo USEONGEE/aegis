@@ -76,7 +76,7 @@ export function createOpenClawClient (config: DaemonConfig): OpenClawClient {
         params.tools = tools
       }
 
-      const response = await client.chat.completions.create(params, { signal: opts?.signal })
+      const response = await client.chat.completions.create(params as any, { signal: opts?.signal })
       return response as unknown as ChatResponse
     },
 
@@ -97,7 +97,7 @@ export function createOpenClawClient (config: DaemonConfig): OpenClawClient {
         params.tools = tools
       }
 
-      const stream = await client.chat.completions.create(params, { signal: opts?.signal }) as any
+      const stream = await client.chat.completions.create(params as any, { signal: opts?.signal }) as any
 
       let role = 'assistant'
       let content = ''

@@ -75,9 +75,9 @@ describe('intentHash', () => {
     expect(hash1).not.toBe(hash2)
   })
 
-  test('value is normalized to string', () => {
-    const hash1 = intentHash({ chainId: CHAIN_IDS.ethereum, to: '0xabc', data: '0xdef', value: 0 })
-    const hash2 = intentHash({ chainId: CHAIN_IDS.ethereum, to: '0xabc', data: '0xdef', value: '0' })
+  test('value is passed through as-is (string required)', () => {
+    const hash1 = intentHash({ chainId: CHAIN_IDS.ethereum, to: '0xabc', data: '0xdef', value: '0', timestamp: 1000 })
+    const hash2 = intentHash({ chainId: CHAIN_IDS.ethereum, to: '0xabc', data: '0xdef', value: '0', timestamp: 1000 })
     expect(hash1).toBe(hash2)
   })
 })

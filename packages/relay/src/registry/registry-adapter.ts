@@ -4,7 +4,7 @@
 
 export interface UserRecord {
   id: string
-  passwordHash?: string
+  passwordHash: string | null
   createdAt: Date
 }
 
@@ -12,8 +12,8 @@ export interface DeviceRecord {
   id: string
   userId: string
   type: 'daemon' | 'app'
-  pushToken?: string | null
-  lastSeenAt?: Date | null
+  pushToken: string | null
+  lastSeenAt: Date | null
   createdAt: Date
 }
 
@@ -27,7 +27,7 @@ export interface DeviceListItem {
 export interface SessionRecord {
   id: string
   userId: string
-  metadata?: Record<string, unknown> | null
+  metadata: Record<string, unknown> | null
   createdAt: Date
 }
 
@@ -39,20 +39,20 @@ export interface SessionListItem {
 
 export interface CreateUserParams {
   id: string
-  passwordHash?: string | null  // null for OAuth users
+  passwordHash: string | null  // null for OAuth users
 }
 
 export interface CreateDeviceParams {
   id: string
   userId: string
   type: 'daemon' | 'app'
-  pushToken?: string
+  pushToken: string | null
 }
 
 export interface CreateSessionParams {
   id: string
   userId: string
-  metadata?: Record<string, unknown>
+  metadata: Record<string, unknown> | null
 }
 
 export interface DaemonRecord {

@@ -266,7 +266,7 @@ export class JsonApprovalStore extends ApprovalStore {
         targetHash: p.target_hash,
         accountIndex: p.account_index,
         content: p.content,
-        walletName: p.wallet_name ?? undefined,
+        walletName: p.wallet_name ?? null,
         createdAt: p.created_at
       }))
   }
@@ -282,7 +282,7 @@ export class JsonApprovalStore extends ApprovalStore {
       targetHash: row.target_hash,
       accountIndex: row.account_index,
       content: row.content,
-      walletName: row.wallet_name ?? undefined,
+      walletName: row.wallet_name ?? null,
       createdAt: row.created_at
     }
   }
@@ -315,12 +315,13 @@ export class JsonApprovalStore extends ApprovalStore {
     const history = await this._read<StoredHistoryEntry[]>('history.json') || []
     history.push({
       account_index: entry.accountIndex,
+      request_id: entry.requestId,
       type: entry.type,
       chain_id: entry.chainId ?? null,
       target_hash: entry.targetHash,
       approver: entry.approver,
       action: entry.action,
-      content: entry.content ?? null,
+      content: entry.content,
       signed_approval_json: entry.signedApproval ? JSON.stringify(entry.signedApproval) : null,
       timestamp: entry.timestamp
     })
@@ -344,20 +345,21 @@ export class JsonApprovalStore extends ApprovalStore {
     }
     return result.map(h => ({
       accountIndex: h.account_index,
+      requestId: h.request_id ?? '',
       type: h.type,
       chainId: h.chain_id,
       targetHash: h.target_hash,
       approver: h.approver,
       action: h.action,
-      content: h.content ?? undefined,
-      signedApproval: h.signed_approval_json ? JSON.parse(h.signed_approval_json) as SignedApproval : undefined,
+      content: h.content ?? '',
+      signedApproval: h.signed_approval_json ? JSON.parse(h.signed_approval_json) as SignedApproval : null,
       timestamp: h.timestamp
     }))
   }
 
   // --- Signers ---
 
-  override async saveSigner (publicKey: string, name?: string): Promise<void> {
+  override async saveSigner (publicKey: string, name: string | null): Promise<void> {
     const signers = await this._read<Record<string, SignerRow>>('signers.json') || {}
     signers[publicKey] = {
       public_key: publicKey,
@@ -503,12 +505,12 @@ export class JsonApprovalStore extends ApprovalStore {
     await this._write('journal.json', journal)
   }
 
-  override async updateJournalStatus (intentHash: string, status: JournalStatus, txHash?: string): Promise<void> {
+  override async updateJournalStatus (intentHash: string, status: JournalStatus, txHash: string | null): Promise<void> {
     const journal = await this._read<StoredJournalEntry[]>('journal.json') || []
     const entry = journal.find(j => j.intent_hash === intentHash)
     if (entry) {
       entry.status = status
-      if (txHash !== undefined) entry.tx_hash = txHash
+      if (txHash !== null) entry.tx_hash = txHash
       entry.updated_at = Date.now()
       await this._write('journal.json', journal)
     }

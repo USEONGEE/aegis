@@ -196,7 +196,7 @@ interface TransferArgs {
 
 interface ChainArgs {
   chain: string
-  accountIndex?: number
+  accountIndex: number
 }
 
 interface PolicyRequestArgs {
@@ -216,7 +216,7 @@ interface RegisterCronArgs {
 
 interface CronIdArgs {
   cronId: string
-  accountIndex?: number
+  accountIndex: number
 }
 
 interface RejectionListArgs {
@@ -265,7 +265,7 @@ export async function executeToolCall (name: string, args: ToolArgs, ctx: ToolEx
         const account: any = await wdk.getAccount(chain, acctIdx)
         const result = await account.sendTransaction({ to, data, value })
 
-        if (journal) journal.updateStatus(hash, 'settled', result?.hash)
+        if (journal) journal.updateStatus(hash, 'settled', result?.hash ?? null)
         return {
           status: 'executed',
           hash: result?.hash || null,
@@ -330,9 +330,9 @@ export async function executeToolCall (name: string, args: ToolArgs, ctx: ToolEx
     // 3. getBalance
     // -----------------------------------------------------------------------
     case 'getBalance': {
-      const { chain } = args as ChainArgs
+      const { chain, accountIndex } = args as ChainArgs
       try {
-        const account: any = await wdk.getAccount(chain, accountIndex ?? 0)
+        const account: any = await wdk.getAccount(chain, accountIndex)
         const balances = await account.getBalance()
         return { balances: balances || [] }
       } catch (err: any) {
@@ -345,10 +345,10 @@ export async function executeToolCall (name: string, args: ToolArgs, ctx: ToolEx
     // 4. policyList
     // -----------------------------------------------------------------------
     case 'policyList': {
-      const { chain } = args as ChainArgs
+      const { chain, accountIndex } = args as ChainArgs
       try {
         const chainId = resolveChainId(chain)
-        const policy = await store.loadPolicy(accountIndex ?? 0, chainId)
+        const policy = await store.loadPolicy(accountIndex, chainId)
         return { policies: policy ? policy.policies : [] }
       } catch (err: any) {
         logger.error({ err, name: 'policyList' }, 'Tool execution error')
@@ -381,10 +381,12 @@ export async function executeToolCall (name: string, args: ToolArgs, ctx: ToolEx
         const hash = policyHash(policies as any)
 
         await broker.createRequest('policy', {
+          requestId: randomUUID(),
           chainId,
           targetHash: hash,
           accountIndex: acctIdx,
-          content: description
+          content: description,
+          walletName: null
         })
 
         return { status: 'pending', policyHash: hash }

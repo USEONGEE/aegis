@@ -60,7 +60,7 @@ export class PgRegistry extends RegistryAdapter {
       `INSERT INTO users (id, password_hash)
        VALUES ($1, $2)
        RETURNING id, created_at AS "createdAt"`,
-      [id, passwordHash || null],
+      [id, passwordHash],
     )
     return rows[0]
   }
@@ -87,7 +87,7 @@ export class PgRegistry extends RegistryAdapter {
              type = EXCLUDED.type,
              push_token = COALESCE(EXCLUDED.push_token, devices.push_token)
        RETURNING id, user_id AS "userId", type, created_at AS "createdAt"`,
-      [id, userId, type, pushToken || null],
+      [id, userId, type, pushToken],
     )
     return rows[0]
   }

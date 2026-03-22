@@ -11,8 +11,8 @@ import {
 import type { SignedApproval, ApprovalStore } from './approval-store.js'
 
 export interface VerificationContext {
-  currentPolicyVersion?: number
-  expectedTargetHash?: string
+  currentPolicyVersion: number | null
+  expectedTargetHash: string | null
 }
 
 /**
@@ -33,7 +33,7 @@ export async function verifyApproval (
   signedApproval: SignedApproval,
   trustedApprovers: string[],
   store: ApprovalStore,
-  context: VerificationContext = {}
+  context: VerificationContext = { currentPolicyVersion: null, expectedTargetHash: null }
 ): Promise<void> {
   const { type, targetHash, approver, policyVersion, expiresAt, nonce, sig } = signedApproval
 
@@ -70,16 +70,16 @@ export async function verifyApproval (
   // Step 6: type-specific validation
   switch (type) {
     case 'tx':
-      if (context.expectedTargetHash && targetHash !== context.expectedTargetHash) {
+      if (context.expectedTargetHash !== null && targetHash !== context.expectedTargetHash) {
         throw new SignatureError(`targetHash mismatch: expected ${context.expectedTargetHash}, got ${targetHash}`)
       }
-      if (context.currentPolicyVersion !== undefined && policyVersion !== context.currentPolicyVersion) {
+      if (context.currentPolicyVersion !== null && policyVersion !== context.currentPolicyVersion) {
         throw new SignatureError(`policyVersion mismatch: expected ${context.currentPolicyVersion}, got ${policyVersion}`)
       }
       break
 
     case 'policy':
-      if (context.expectedTargetHash && targetHash !== context.expectedTargetHash) {
+      if (context.expectedTargetHash !== null && targetHash !== context.expectedTargetHash) {
         throw new SignatureError(`policyHash mismatch: expected ${context.expectedTargetHash}, got ${targetHash}`)
       }
       break
@@ -91,7 +91,7 @@ export async function verifyApproval (
     case 'device_revoke': {
       // targetHash should be SHA-256 of the publicKey being revoked.
       // context.expectedTargetHash is SHA-256(publicKey) computed by the caller.
-      if (context.expectedTargetHash && targetHash !== context.expectedTargetHash) {
+      if (context.expectedTargetHash !== null && targetHash !== context.expectedTargetHash) {
         throw new SignatureError(`device_revoke targetHash mismatch: expected ${context.expectedTargetHash}, got ${targetHash}`)
       }
       break

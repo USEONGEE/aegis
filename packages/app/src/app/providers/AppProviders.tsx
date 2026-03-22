@@ -3,6 +3,7 @@ import { NavigationContainer } from '@react-navigation/native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { TxApprovalProvider } from '../../shared/tx/TxApprovalContext';
 import { ToastProvider } from '../../shared/ui/ToastProvider';
+import type { ApprovalRequest } from '../../core/approval/types';
 import { SignedApprovalBuilder } from '../../core/approval/SignedApprovalBuilder';
 import { IdentityKeyManager } from '../../core/identity/IdentityKeyManager';
 import { RelayClient } from '../../core/relay/RelayClient';
@@ -16,16 +17,7 @@ import { RelayClient } from '../../core/relay/RelayClient';
  *  2. Send via RelayClient to daemon (control channel)
  *  3. Await daemon confirmation
  */
-async function approvalExecutor(request: {
-  type: string;
-  targetHash: string;
-  chainId: number;
-  requestId: string;
-  accountIndex: number;
-  content: string;
-  policyVersion?: number;
-  targetPublicKey?: string;
-}): Promise<{ txHash: `0x${string}` }> {
+async function approvalExecutor(request: ApprovalRequest): Promise<{ txHash: `0x${string}` }> {
   const identity = IdentityKeyManager.getInstance();
   const keyPair = await identity.load();
 
@@ -71,7 +63,7 @@ async function approvalExecutor(request: {
 
     case 'device_revoke':
       signedApproval = builder.forDeviceRevoke({
-        targetPublicKey: request.targetPublicKey ?? request.requestId,
+        targetPublicKey: request.targetPublicKey ?? request.requestId,  // fallback should never happen; targetPublicKey is required for device_revoke
         chainId: request.chainId,
         accountIndex: request.accountIndex,
         content: request.content,

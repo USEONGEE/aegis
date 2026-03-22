@@ -35,6 +35,7 @@ export function PolicyScreen() {
           policyVersion: 0,
           createdAt: pending.createdAt,
           expiresAt: pending.expiresAt,
+          targetPublicKey: null,
         });
         showToast('Policy approved', 'success');
       } catch {
@@ -57,6 +58,7 @@ export function PolicyScreen() {
           policyVersion: 0,
           createdAt: pending.createdAt,
           expiresAt: pending.expiresAt,
+          targetPublicKey: null,
         });
         showToast('Policy rejected', 'info');
       } catch {

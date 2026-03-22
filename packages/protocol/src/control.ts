@@ -46,15 +46,68 @@ export type ControlMessage =
 
 // --- daemon -> app: ControlResult ---
 
-export interface ControlResult {
-  ok: boolean
-  type?: string
-  requestId?: string
-  messageId?: string
-  error?: string
-  reason?: string
-  wasProcessing?: boolean
+export type ApprovalType = 'tx_approval' | 'policy_approval' | 'policy_reject' | 'device_revoke' | 'wallet_create' | 'wallet_delete'
+
+export interface ControlResultApprovalOk {
+  ok: true
+  type: ApprovalType
+  requestId: string
 }
+
+export interface ControlResultApprovalError {
+  ok: false
+  type: ApprovalType
+  requestId: string
+  error: string
+}
+
+export interface ControlResultCancelQueuedOk {
+  ok: true
+  type: 'cancel_queued'
+  messageId: string
+}
+
+export interface ControlResultCancelQueuedError {
+  ok: false
+  type: 'cancel_queued'
+  messageId: string
+  reason: 'not_found' | 'already_completed'
+}
+
+export interface ControlResultCancelActiveOk {
+  ok: true
+  type: 'cancel_active'
+  messageId: string
+  wasProcessing: boolean
+}
+
+export interface ControlResultCancelActiveError {
+  ok: false
+  type: 'cancel_active'
+  messageId: string
+  reason: 'not_found' | 'already_completed'
+}
+
+export interface ControlResultCancelError {
+  ok: false
+  type: 'cancel_queued' | 'cancel_active'
+  error: string
+}
+
+export interface ControlResultGenericError {
+  ok: false
+  error: string
+}
+
+export type ControlResult =
+  | ControlResultApprovalOk
+  | ControlResultApprovalError
+  | ControlResultCancelQueuedOk
+  | ControlResultCancelQueuedError
+  | ControlResultCancelActiveOk
+  | ControlResultCancelActiveError
+  | ControlResultCancelError
+  | ControlResultGenericError
 
 // --- daemon -> app: ControlEvent (async notifications) ---
 

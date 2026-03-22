@@ -118,7 +118,7 @@ export class SignedApprovalBuilder {
     requestId: string;
     accountIndex: number;
     content: string;
-    policyVersion?: number;
+    policyVersion: number;
     expiresInSeconds?: number;
   }): SignedApproval {
     return this.build({
@@ -222,7 +222,7 @@ export class SignedApprovalBuilder {
     requestId: string;
     accountIndex: number;
     content: string;
-    policyVersion?: number;
+    policyVersion: number;
     expiresInSeconds?: number;
   }): SignedApproval {
     const now = Math.floor(Date.now() / 1000);
@@ -239,7 +239,7 @@ export class SignedApprovalBuilder {
       approver,
       chainId: params.chainId,
       requestId: params.requestId,
-      policyVersion: params.policyVersion ?? 0,
+      policyVersion: params.policyVersion,
       accountIndex: params.accountIndex,
       content: params.content,
       expiresAt,

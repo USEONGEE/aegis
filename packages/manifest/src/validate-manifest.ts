@@ -25,7 +25,7 @@ export function validateManifest(manifest: Manifest | null | undefined): Validat
 
   if (!manifest.chains || typeof manifest.chains !== 'object' || Array.isArray(manifest.chains)) {
     errors.push('manifest.chains must be a non-null object')
-    return { valid: errors.length === 0, errors }
+    return { valid: false, errors }
   }
 
   for (const [chainId, chainConfig] of Object.entries(manifest.chains)) {

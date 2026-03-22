@@ -98,12 +98,13 @@ export class SqliteApprovalStore extends ApprovalStore {
       CREATE TABLE IF NOT EXISTS approval_history (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         account_index INTEGER NOT NULL,
+        request_id TEXT NOT NULL DEFAULT '',
         type TEXT NOT NULL,
         chain_id INTEGER,
         target_hash TEXT NOT NULL,
         approver TEXT NOT NULL,
         action TEXT NOT NULL,
-        content TEXT,
+        content TEXT NOT NULL DEFAULT '',
         signed_approval_json TEXT,
         timestamp INTEGER NOT NULL
       );
@@ -314,7 +315,7 @@ export class SqliteApprovalStore extends ApprovalStore {
       chainId: p.chain_id,
       targetHash: p.target_hash,
       content: p.content,
-      walletName: p.wallet_name ?? undefined,
+      walletName: p.wallet_name ?? null,
       createdAt: p.created_at
     }))
   }
@@ -331,7 +332,7 @@ export class SqliteApprovalStore extends ApprovalStore {
       chainId: row.chain_id,
       targetHash: row.target_hash,
       content: row.content,
-      walletName: row.wallet_name ?? undefined,
+      walletName: row.wallet_name ?? null,
       createdAt: row.created_at
     }
   }
@@ -361,16 +362,17 @@ export class SqliteApprovalStore extends ApprovalStore {
 
   override async appendHistory (entry: HistoryEntry): Promise<void> {
     this._db!.prepare(`
-      INSERT INTO approval_history (account_index, type, chain_id, target_hash, approver, action, content, signed_approval_json, timestamp)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO approval_history (account_index, request_id, type, chain_id, target_hash, approver, action, content, signed_approval_json, timestamp)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       entry.accountIndex,
+      entry.requestId,
       entry.type,
       entry.chainId ?? null,
       entry.targetHash,
       entry.approver,
       entry.action,
-      entry.content ?? null,
+      entry.content,
       entry.signedApproval ? JSON.stringify(entry.signedApproval) : null,
       entry.timestamp
     )
@@ -387,20 +389,21 @@ export class SqliteApprovalStore extends ApprovalStore {
     const rows = this._db!.prepare(sql).all(...params) as StoredHistoryEntry[]
     return rows.map(h => ({
       accountIndex: h.account_index,
+      requestId: h.request_id ?? '',
       type: h.type,
       chainId: h.chain_id,
       targetHash: h.target_hash,
       approver: h.approver,
       action: h.action,
-      content: h.content ?? undefined,
-      signedApproval: h.signed_approval_json ? JSON.parse(h.signed_approval_json) as SignedApproval : undefined,
+      content: h.content ?? '',
+      signedApproval: h.signed_approval_json ? JSON.parse(h.signed_approval_json) as SignedApproval : null,
       timestamp: h.timestamp
     }))
   }
 
   // --- Signers ---
 
-  override async saveSigner (publicKey: string, name?: string): Promise<void> {
+  override async saveSigner (publicKey: string, name: string | null): Promise<void> {
     this._db!.prepare(`
       INSERT INTO signers (public_key, name, registered_at)
       VALUES (?, ?, ?)
@@ -536,11 +539,11 @@ export class SqliteApprovalStore extends ApprovalStore {
     )
   }
 
-  override async updateJournalStatus (intentHash: string, status: JournalStatus, txHash?: string): Promise<void> {
+  override async updateJournalStatus (intentHash: string, status: JournalStatus, txHash: string | null): Promise<void> {
     this._db!.prepare(`
       UPDATE execution_journal SET status = ?, tx_hash = COALESCE(?, tx_hash), updated_at = ?
       WHERE intent_hash = ?
-    `).run(status, txHash !== undefined ? txHash : null, Date.now(), intentHash)
+    `).run(status, txHash, Date.now(), intentHash)
   }
 
   override async listJournal (opts: JournalQueryOpts = {}): Promise<StoredJournal[]> {

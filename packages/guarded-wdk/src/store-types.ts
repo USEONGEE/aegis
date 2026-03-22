@@ -20,12 +20,13 @@ export interface PendingApprovalRow {
 export interface StoredHistoryEntry {
   id?: number
   account_index: number
+  request_id: string
   type: ApprovalType
   chain_id: number | null
   target_hash: string
   approver: string
   action: HistoryAction
-  content: string | null
+  content: string
   signed_approval_json: string | null
   timestamp: number
 }

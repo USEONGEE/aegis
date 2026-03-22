@@ -24,19 +24,25 @@ interface AdminServerDeps {
   logger: Logger
 }
 
-interface AdminRequest {
-  command: string
-  status?: string
-  chainId?: number
-  limit?: number
-  [key: string]: unknown
+type AdminRequest =
+  | { command: 'status' }
+  | { command: 'journal_list'; status: string | null; chainId: number | null; limit: number | null }
+  | { command: 'signer_list' }
+  | { command: 'cron_list' }
+  | { command: 'wallet_list' }
+  | { command: string }
+
+interface AdminResponseOk {
+  ok: true
+  data: Record<string, unknown>
 }
 
-interface AdminResponse {
-  ok: boolean
-  data?: Record<string, unknown>
-  error?: string
+interface AdminResponseError {
+  ok: false
+  error: string
 }
+
+type AdminResponse = AdminResponseOk | AdminResponseError
 
 /**
  * Admin server -- listens on a Unix domain socket for local admin commands.
@@ -198,10 +204,11 @@ export class AdminServer {
           return { ok: true, data: { entries: [] } }
         }
 
+        const req = request as { command: 'journal_list'; status: string | null; chainId: number | null; limit: number | null }
         const entries = await this._journal.list({
-          status: request.status as JournalListOptions['status'],
-          chainId: request.chainId || undefined,
-          limit: request.limit || 50
+          status: (req.status ?? undefined) as JournalListOptions['status'],
+          chainId: req.chainId ?? undefined,
+          limit: req.limit ?? 50
         })
 
         return { ok: true, data: { entries } }

@@ -10,8 +10,8 @@ export interface JournalEntry {
   targetHash: string
   status: JournalStatus
   accountIndex: number
-  chainId?: number
-  txHash?: string | null
+  chainId: number
+  txHash: string | null
 }
 
 export interface TrackMeta {
@@ -36,7 +36,7 @@ interface ApprovalStore {
     targetHash: string
     status: JournalStatus
   }): Promise<void>
-  updateJournalStatus (intentHash: string, status: JournalStatus, txHash?: string): Promise<void>
+  updateJournalStatus (intentHash: string, status: JournalStatus, txHash: string | null): Promise<void>
 }
 
 /**
@@ -124,7 +124,7 @@ export class ExecutionJournal {
   /**
    * Update the status of a tracked intent.
    */
-  async updateStatus (intentHash: string, status: JournalStatus, txHash?: string): Promise<void> {
+  async updateStatus (intentHash: string, status: JournalStatus, txHash: string | null = null): Promise<void> {
     this._statusIndex.set(intentHash, status)
 
     // Remove from hash index if terminal

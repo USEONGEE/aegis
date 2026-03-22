@@ -37,10 +37,12 @@ export interface ToolStorePort {
 // ---------------------------------------------------------------------------
 
 interface CreateRequestOptions {
+  requestId: string
   chainId: number
   targetHash: string
   accountIndex: number
   content: string
+  walletName: string | null
 }
 
 /**

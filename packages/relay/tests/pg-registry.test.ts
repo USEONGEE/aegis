@@ -109,13 +109,14 @@ describe('PgRegistry', () => {
     )
   })
 
-  test('registerDevice passes null when pushToken is undefined', async () => {
+  test('registerDevice passes null when pushToken is null', async () => {
     mockPool.query.mockResolvedValue({ rows: [{ id: 'dev_2' }] })
 
     await registry.registerDevice({
       id: 'dev_2',
       userId: 'user_1',
-      type: 'app'
+      type: 'app',
+      pushToken: null
     })
 
     expect(mockPool.query).toHaveBeenCalledWith(

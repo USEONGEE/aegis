@@ -22,18 +22,24 @@ interface DaemonSocket {
   userPollerAborts: Map<string, AbortController>
 }
 
-/** Incoming message: RelayEnvelope with payload loosened to any for wire parsing */
-interface IncomingMessage extends Omit<RelayEnvelope, 'payload'> {
-  payload?: any
-  id?: string
-  message?: string
+/** Incoming message: wire JSON with required RelayEnvelope fields + extras */
+interface IncomingMessage {
+  type: string
+  payload: any
+  encrypted: boolean
+  sessionId: string | null
+  userId: string | null
+  daemonId: string | null
+  userIds: string[] | null
+  id: string | null
+  message: string | null
+  lastControlIds: Record<string, string> | null
 }
 
-/** Outgoing message: RelayEnvelope with payload loosened + stream entry id */
-interface OutgoingMessage extends Omit<RelayEnvelope, 'payload'> {
-  payload?: any
-  id?: string
-  message?: string
+/** Outgoing message: wire JSON response */
+interface OutgoingMessage {
+  type: string
+  [key: string]: unknown
 }
 
 /**
@@ -142,7 +148,7 @@ export default async function wsRoutes (fastify: FastifyInstance): Promise<void>
         fastify.log.info({ daemonId, userCount: userIds.length }, 'Daemon authenticated')
 
         // Start control stream polling (per user with individual abort)
-        const lastControlIds: Record<string, string> = msg.lastControlIds || msg.payload?.lastControlIds || {}
+        const lastControlIds: Record<string, string> = msg.lastControlIds ?? msg.payload?.lastControlIds ?? {}
         for (const uid of userIds) {
           const cursor = lastControlIds[uid] || '$'
           const userAc = new AbortController()

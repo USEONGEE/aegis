@@ -13,15 +13,15 @@ export type RelayChannel = 'control' | 'chat'
  */
 export interface RelayEnvelope {
   type: string
-  payload?: unknown
-  encrypted?: boolean
-  sessionId?: string
+  payload: unknown
+  encrypted: boolean
+  sessionId: string | null
   /** v0.3.0: target/source user for multiplex routing */
-  userId?: string
+  userId: string | null
   /** v0.3.0: daemon identity (set in authenticated response) */
-  daemonId?: string
+  daemonId: string | null
   /** v0.3.0: bound user list (set in authenticated response) */
-  userIds?: string[]
+  userIds: string[] | null
   /** v0.3.0: per-user control cursors for reconnect resume */
-  lastControlIds?: Record<string, string>
+  lastControlIds: Record<string, string> | null
 }

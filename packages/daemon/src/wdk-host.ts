@@ -69,6 +69,7 @@ export async function initWDK (config: DaemonConfig, logger: Logger): Promise<WD
       seed: mnemonic,
       wallets: {},
       protocols: {},
+      approvalBroker: null,
       approvalStore: store,
       trustedApprovers
     })
@@ -95,7 +96,7 @@ export async function switchSeed (config: DaemonConfig, logger: Logger): Promise
  */
 function createMockWDK (broker: SignedApprovalBroker, store: InstanceType<typeof SqliteApprovalStore>): WDKInstance {
   return {
-    async getAccount (_chain: string, _index: number = 0) {
+    async getAccount (_chain: string, _index: number) {
       return {
         chain: _chain,
         index: _index,

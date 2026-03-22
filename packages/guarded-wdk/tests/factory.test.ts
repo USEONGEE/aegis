@@ -77,6 +77,8 @@ function makeConfig (overrides: Record<string, unknown> = {}) {
   return {
     seed: 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about',
     wallets: { 1: { Manager: MockWalletManager, config: {} } },
+    protocols: {},
+    approvalBroker: null,
     approvalStore: new MockApprovalStore(),
     trustedApprovers: ['0x' + 'ab'.repeat(32)],
     ...overrides
@@ -127,10 +129,11 @@ describe('createGuardedWDK', () => {
 
   test('accepts external approvalBroker', async () => {
     const store = new MockApprovalStore()
-    const externalBroker = new SignedApprovalBroker(['0x' + 'ab'.repeat(32)], store)
+    const { EventEmitter } = await import('node:events')
+    const externalBroker = new SignedApprovalBroker(['0x' + 'ab'.repeat(32)], store, new EventEmitter())
     const facade = await createGuardedWDK(makeConfig({
       approvalBroker: externalBroker,
-      trustedApprovers: undefined
+      trustedApprovers: []
     }))
     expect(facade.getApprovalBroker()).toBe(externalBroker)
     expect(facade.getApprovalStore()).toBeInstanceOf(MockApprovalStore)
@@ -144,7 +147,7 @@ describe('createGuardedWDK', () => {
 
   test('throws if approvalStore without trustedApprovers and no external broker', async () => {
     await expect(createGuardedWDK(makeConfig({
-      trustedApprovers: undefined
+      trustedApprovers: []
     }))).rejects.toThrow('trustedApprovers must be a non-empty array')
   })
 

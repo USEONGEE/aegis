@@ -8,6 +8,8 @@ export type {
   Call,
   Approval,
   ValidationResult,
+  ValidationResultValid,
+  ValidationResultInvalid,
   UserConfig
 } from './types.js'
 

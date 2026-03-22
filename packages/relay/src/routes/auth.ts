@@ -75,7 +75,7 @@ interface LoginBody {
 interface PairBody {
   deviceId: string
   type: 'daemon' | 'app'
-  pushToken?: string
+  pushToken: string | null
 }
 
 interface DaemonRegisterBody {
@@ -103,7 +103,7 @@ interface UnbindBody {
 export interface JwtPayload {
   sub: string
   role: 'daemon' | 'app'
-  deviceId?: string
+  deviceId: string | null
 }
 
 // ---------------------------------------------------------------------------
@@ -132,9 +132,9 @@ export function verifyPassword (password: string, stored: string): boolean {
 // JWT utilities
 // ---------------------------------------------------------------------------
 
-function signAppToken (userId: string, deviceId?: string): string {
+function signAppToken (userId: string, deviceId: string | null): string {
   const payload: Record<string, unknown> = { sub: userId, role: 'app' }
-  if (deviceId) payload.deviceId = deviceId
+  if (deviceId !== null) payload.deviceId = deviceId
   return jwt.sign(payload, config.jwt.secret, {
     expiresIn: config.jwt.expiresIn as any,
   })
@@ -152,7 +152,7 @@ export function verifyToken (token: string): JwtPayload | null {
     return {
       sub: decoded.sub,
       role: decoded.role || 'app',
-      deviceId: decoded.deviceId,
+      deviceId: decoded.deviceId ?? null,
     }
   } catch {
     return null
@@ -244,7 +244,7 @@ export default async function authRoutes (fastify: FastifyInstance): Promise<voi
 
     const passwordHash = hashPassword(password)
     const user = await registry.createUser({ id: userId, passwordHash })
-    const token = signAppToken(userId)
+    const token = signAppToken(userId, null)
     const refreshToken = await issueRefreshToken(registry, userId, 'app')
 
     return reply.code(201).send({ userId: user.id, token, refreshToken })
@@ -276,7 +276,7 @@ export default async function authRoutes (fastify: FastifyInstance): Promise<voi
       return reply.code(401).send({ error: 'Invalid credentials' })
     }
 
-    const token = signAppToken(userId)
+    const token = signAppToken(userId, null)
     const refreshToken = await issueRefreshToken(registry, userId, 'app')
     return reply.send({ userId, token, refreshToken })
   })
@@ -307,7 +307,7 @@ export default async function authRoutes (fastify: FastifyInstance): Promise<voi
       id: deviceId,
       userId,
       type,
-      pushToken,
+      pushToken: pushToken ?? null,
     })
 
     return reply.code(201).send({
@@ -355,7 +355,7 @@ export default async function authRoutes (fastify: FastifyInstance): Promise<voi
     const newRefreshToken = await issueRefreshToken(registry, stored.subjectId, stored.role, stored.deviceId)
     const token = stored.role === 'daemon'
       ? signDaemonToken(stored.subjectId)
-      : signAppToken(stored.subjectId, stored.deviceId || undefined)
+      : signAppToken(stored.subjectId, stored.deviceId)
 
     return reply.send({ token, refreshToken: newRefreshToken })
   })
@@ -576,11 +576,11 @@ export default async function authRoutes (fastify: FastifyInstance): Promise<voi
     // Auto-create user if not exists
     const existing = await registry.getUser(userId)
     if (!existing) {
-      await registry.createUser({ id: userId })
+      await registry.createUser({ id: userId, passwordHash: null })
     }
 
-    const token = signAppToken(userId, deviceId)
-    const refreshToken = await issueRefreshToken(registry, userId, 'app', deviceId || null)
+    const token = signAppToken(userId, deviceId ?? null)
+    const refreshToken = await issueRefreshToken(registry, userId, 'app', deviceId ?? null)
 
     return reply.send({ userId, token, refreshToken })
   })

@@ -5,11 +5,17 @@ import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify'
 // Types
 // ---------------------------------------------------------------------------
 
-export interface PushResult {
-  ok: boolean
-  ticketId?: string
-  error?: string
+export interface PushResultOk {
+  ok: true
+  ticketId: string
 }
+
+export interface PushResultFailed {
+  ok: false
+  error: string
+}
+
+export type PushResult = PushResultOk | PushResultFailed
 
 interface PushBody {
   token: string

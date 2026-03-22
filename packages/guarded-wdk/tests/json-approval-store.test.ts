@@ -88,7 +88,7 @@ describe('JsonApprovalStore', () => {
       await store.savePolicy(0, 1, { policies: [], signature: {} })
       await store.savePendingApproval(0, { requestId: 'r1', type: 'tx', chainId: 1, targetHash: '0x1', accountIndex: 0, content: '', createdAt: Date.now() })
       await store.saveCron(0, { sessionId: 'sess', interval: '* * * * *', prompt: 'test', chainId: null })
-      await store.appendHistory({ accountIndex: 0, type: 'tx', chainId: 1, targetHash: '0x1', approver: 'a', action: 'approved', timestamp: Date.now() })
+      await store.appendHistory({ accountIndex: 0, requestId: 'r1', type: 'tx', chainId: 1, targetHash: '0x1', approver: 'a', action: 'approved', content: '', signedApproval: null, timestamp: Date.now() })
       await store.deleteWallet(0)
 
       const policy = await store.loadPolicy(0, 1)
@@ -223,11 +223,14 @@ describe('JsonApprovalStore', () => {
     test('appendHistory + getHistory round-trips', async () => {
       await store.appendHistory({
         accountIndex: 0,
+        requestId: 'req-1',
         type: 'tx',
         chainId: 1,
         targetHash: '0xabc',
         approver: '0xpub',
         action: 'approved',
+        content: '',
+        signedApproval: null,
         timestamp: 1000
       })
       const history = await store.getHistory({})
@@ -239,9 +242,9 @@ describe('JsonApprovalStore', () => {
     })
 
     test('getHistory filters by accountIndex, type, chain', async () => {
-      await store.appendHistory({ accountIndex: 0, type: 'tx', chainId: 1, targetHash: '0x1', approver: 'a', action: 'approved', timestamp: Date.now() })
-      await store.appendHistory({ accountIndex: 0, type: 'policy', chainId: 1, targetHash: '0x2', approver: 'a', action: 'approved', timestamp: Date.now() })
-      await store.appendHistory({ accountIndex: 1, type: 'tx', chainId: 900, targetHash: '0x3', approver: 'a', action: 'rejected', timestamp: Date.now() })
+      await store.appendHistory({ accountIndex: 0, requestId: 'r1', type: 'tx', chainId: 1, targetHash: '0x1', approver: 'a', action: 'approved', content: '', signedApproval: null, timestamp: Date.now() })
+      await store.appendHistory({ accountIndex: 0, requestId: 'r2', type: 'policy', chainId: 1, targetHash: '0x2', approver: 'a', action: 'approved', content: '', signedApproval: null, timestamp: Date.now() })
+      await store.appendHistory({ accountIndex: 1, requestId: 'r3', type: 'tx', chainId: 900, targetHash: '0x3', approver: 'a', action: 'rejected', content: '', signedApproval: null, timestamp: Date.now() })
 
       const a0Tx = await store.getHistory({ accountIndex: 0, type: 'tx' })
       expect(a0Tx).toHaveLength(1)
@@ -249,7 +252,7 @@ describe('JsonApprovalStore', () => {
 
     test('getHistory respects limit', async () => {
       for (let i = 0; i < 5; i++) {
-        await store.appendHistory({ accountIndex: 0, type: 'tx', chainId: 1, targetHash: `0x${i}`, approver: 'a', action: 'approved', timestamp: Date.now() })
+        await store.appendHistory({ accountIndex: 0, requestId: `r${i}`, type: 'tx', chainId: 1, targetHash: `0x${i}`, approver: 'a', action: 'approved', content: '', signedApproval: null, timestamp: Date.now() })
       }
       const limited = await store.getHistory({ limit: 2 })
       expect(limited).toHaveLength(2)
@@ -260,7 +263,7 @@ describe('JsonApprovalStore', () => {
 
   describe('signers', () => {
     test('saveSigner + getSigner round-trips', async () => {
-      await store.saveSigner('0xpubkey123')
+      await store.saveSigner('0xpubkey123', null)
       const dev = await store.getSigner('0xpubkey123')
       expect(dev!.publicKey).toBe('0xpubkey123')
       expect(dev!.revokedAt).toBeNull()
@@ -272,26 +275,26 @@ describe('JsonApprovalStore', () => {
     })
 
     test('listSigners returns all signers', async () => {
-      await store.saveSigner('pk1')
-      await store.saveSigner('pk2')
+      await store.saveSigner('pk1', null)
+      await store.saveSigner('pk2', null)
       const signers = await store.listSigners()
       expect(signers).toHaveLength(2)
     })
 
     test('revokeSigner sets revoked_at', async () => {
-      await store.saveSigner('pk1')
+      await store.saveSigner('pk1', null)
       await store.revokeSigner('pk1')
       const dev = await store.getSigner('pk1')
       expect(dev!.revokedAt).toBeTruthy()
     })
 
     test('isSignerRevoked returns false for active signer', async () => {
-      await store.saveSigner('pk1')
+      await store.saveSigner('pk1', null)
       expect(await store.isSignerRevoked('pk1')).toBe(false)
     })
 
     test('isSignerRevoked returns true for revoked signer', async () => {
-      await store.saveSigner('pk1')
+      await store.saveSigner('pk1', null)
       await store.revokeSigner('pk1')
       expect(await store.isSignerRevoked('pk1')).toBe(true)
     })

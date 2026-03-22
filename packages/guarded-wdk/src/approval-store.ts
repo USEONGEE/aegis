@@ -62,21 +62,21 @@ export interface StoredPolicy extends PolicyInput {
 }
 
 export interface PendingApprovalRequest extends ApprovalRequest {
-  walletName?: string
+  walletName: string | null
 }
 
 // PendingApprovalRow: see store-types.ts (@internal)
 
 export interface HistoryEntry {
   accountIndex: number
-  requestId?: string
+  requestId: string
   type: ApprovalType
-  chainId?: number | null
+  chainId: number | null
   targetHash: string
   approver: string
   action: HistoryAction
-  content?: string
-  signedApproval?: SignedApproval
+  content: string
+  signedApproval: SignedApproval | null
   timestamp: number
 }
 
@@ -200,7 +200,7 @@ export abstract class ApprovalStore {
 
   // --- Signers ---
 
-  async saveSigner (_publicKey: string, _name?: string): Promise<void> { throw new Error('Not implemented') }
+  async saveSigner (_publicKey: string, _name: string | null): Promise<void> { throw new Error('Not implemented') }
   async getSigner (_publicKey: string): Promise<StoredSigner | null> { throw new Error('Not implemented') }
   async listSigners (): Promise<StoredSigner[]> { throw new Error('Not implemented') }
   async revokeSigner (_publicKey: string): Promise<void> { throw new Error('Not implemented') }
@@ -222,7 +222,7 @@ export abstract class ApprovalStore {
 
   async getJournalEntry (_intentHash: string): Promise<StoredJournal | null> { throw new Error('Not implemented') }
   async saveJournalEntry (_entry: JournalInput): Promise<void> { throw new Error('Not implemented') }
-  async updateJournalStatus (_intentHash: string, _status: JournalStatus, _txHash?: string): Promise<void> { throw new Error('Not implemented') }
+  async updateJournalStatus (_intentHash: string, _status: JournalStatus, _txHash: string | null): Promise<void> { throw new Error('Not implemented') }
   async listJournal (_opts: JournalQueryOpts): Promise<StoredJournal[]> { throw new Error('Not implemented') }
 
   // --- Rejection History ---

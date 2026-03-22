@@ -68,6 +68,8 @@ export interface ApprovalRequest {
   policyVersion: number;
   createdAt: number;
   expiresAt: number;
+
+  targetPublicKey: string | null;  // device_revoke: public key of the signer being revoked
 }
 
 /**

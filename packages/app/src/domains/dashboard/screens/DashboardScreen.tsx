@@ -119,7 +119,7 @@ export function DashboardScreen() {
       });
 
       // Listen for the chat response with balance data
-      const responseHandler = (message: { channel: string; payload: unknown; sessionId?: string }) => {
+      const responseHandler = (message: { channel: string; payload: unknown; sessionId: string | null }) => {
         if (message.channel !== 'chat' || message.sessionId !== sessionId) return;
         const data = message.payload as {
           role?: string;

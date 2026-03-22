@@ -195,13 +195,14 @@ describe('validateManifest', () => {
   test('valid manifest passes validation', () => {
     const result = validateManifest(aaveV3Manifest)
     expect(result.valid).toBe(true)
-    expect(result.errors).toBeUndefined()
   })
 
   test('null manifest fails validation', () => {
     const result = validateManifest(null)
     expect(result.valid).toBe(false)
-    expect(result.errors!.length).toBeGreaterThan(0)
+    if (!result.valid) {
+      expect(result.errors.length).toBeGreaterThan(0)
+    }
   })
 
   test('missing protocol fails validation', () => {
@@ -210,7 +211,9 @@ describe('validateManifest', () => {
       protocol: ''
     })
     expect(result.valid).toBe(false)
-    expect(result.errors!.some((e: string) => e.includes('protocol'))).toBe(true)
+    if (!result.valid) {
+      expect(result.errors.some((e: string) => e.includes('protocol'))).toBe(true)
+    }
   })
 
   test('invalid selector fails validation', () => {
@@ -236,6 +239,8 @@ describe('validateManifest', () => {
     }
     const result = validateManifest(manifest)
     expect(result.valid).toBe(false)
-    expect(result.errors!.some((e: string) => e.includes('selector'))).toBe(true)
+    if (!result.valid) {
+      expect(result.errors.some((e: string) => e.includes('selector'))).toBe(true)
+    }
   })
 })

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import pino from 'pino'
+import { pino } from 'pino'
 import { loadConfig } from './config.js'
 import { initWDK } from './wdk-host.js'
 import { createOpenClawClient } from './openclaw-client.js'
@@ -90,11 +90,11 @@ async function main (): Promise<void> {
     switch (type) {
       case 'control':
         // TODO: v0.2.9+ — wire JSON parse/validate 후 ControlMessage로 변환. 현재는 as cast.
-        handleControlMessage(payload as ControlMessage, broker!, logger, relayClient, store, queueManager)
+        handleControlMessage(payload as ControlMessage, { broker: broker!, logger, approvalStore: store, queueManager })
           .then((result) => {
             // v0.3.0: Forward control result with userId from incoming message
             const incomingUserId = (payload as any)?.userId
-            relayClient.send('control', result, incomingUserId)
+            relayClient.send('control', result as unknown as Record<string, unknown>, incomingUserId)
           })
           .catch((err: Error) => logger.error({ err }, 'Unhandled error in control handler'))
         break
@@ -196,7 +196,7 @@ async function main (): Promise<void> {
       source: 'cron',
       userId,
       text: prompt,
-      chainId: chainId ?? undefined,
+      chainId: chainId ?? null,
       cronId
     })
   }

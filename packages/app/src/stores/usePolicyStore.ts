@@ -12,8 +12,8 @@ export interface Policy {
   target: string;
   selector: string;
   decision: 'AUTO' | 'REQUIRE_APPROVAL' | 'REJECT';
-  constraints?: Record<string, unknown>;
-  description?: string;
+  constraints: Record<string, unknown> | null;
+  description: string | null;
 }
 
 export interface PolicyGroup {

@@ -21,7 +21,6 @@ export interface E2EKeyPair {
 export interface EncryptedMessage {
   nonce: string;      // base64
   ciphertext: string; // base64
-  ephemeralPubKey?: string; // base64, for initial key exchange
 }
 
 export class E2ECrypto {

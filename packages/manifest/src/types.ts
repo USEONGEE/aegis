@@ -72,10 +72,16 @@ export interface Manifest {
 /**
  * Validation result returned by validateManifest.
  */
-export interface ValidationResult {
-  valid: boolean
-  errors?: string[]
+export interface ValidationResultValid {
+  valid: true
 }
+
+export interface ValidationResultInvalid {
+  valid: false
+  errors: string[]
+}
+
+export type ValidationResult = ValidationResultValid | ValidationResultInvalid
 
 /**
  * User configuration overrides for manifestToPolicy.

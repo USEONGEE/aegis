@@ -166,25 +166,29 @@ export class RelayClient extends EventEmitter {
       return false
     }
 
-    const envelope: RelayEnvelope = { type }
-
     // v0.3.0: include userId for multiplex routing (explicit arg or from payload)
-    const effectiveUserId = userId || (payload as any)?.userId
-    if (effectiveUserId) {
-      envelope.userId = effectiveUserId
-    }
+    const effectiveUserId = userId || (payload as any)?.userId || null
 
     // Encrypt payload if E2E session is established
-    if (this._sessionKey) {
-      envelope.payload = this._encrypt(JSON.stringify(payload))
-      envelope.encrypted = true
-    } else {
-      envelope.payload = payload
-    }
+    const encrypted = !!this._sessionKey
+    const envelopePayload = encrypted
+      ? this._encrypt(JSON.stringify(payload))
+      : payload
 
     // Include sessionId at top level for chat messages (relay needs it for routing)
-    if (type === 'chat' && payload.sessionId) {
-      envelope.sessionId = payload.sessionId as string
+    const sessionId = (type === 'chat' && payload.sessionId)
+      ? payload.sessionId as string
+      : null
+
+    const envelope: RelayEnvelope = {
+      type,
+      payload: envelopePayload,
+      encrypted,
+      sessionId,
+      userId: effectiveUserId,
+      daemonId: null,
+      userIds: null,
+      lastControlIds: null
     }
 
     const message = JSON.stringify(envelope)

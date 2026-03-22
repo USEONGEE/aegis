@@ -5,7 +5,6 @@ import { SqliteApprovalStore, SignedApprovalBroker } from '@wdk-app/guarded-wdk'
 import type {
   SignedApprovalFields, ControlMessage, ControlResult
 } from '@wdk-app/protocol'
-import type { RelayClient } from './relay-client.js'
 import type { MessageQueueManager } from './message-queue.js'
 
 // ---------------------------------------------------------------------------
@@ -36,6 +35,13 @@ function toSignedApproval (fields: SignedApprovalFields, type: SignedApproval['t
 // Handler
 // ---------------------------------------------------------------------------
 
+export interface ControlHandlerDeps {
+  broker: SignedApprovalBroker
+  logger: Logger
+  approvalStore: InstanceType<typeof SqliteApprovalStore>
+  queueManager: MessageQueueManager
+}
+
 /**
  * Handle control channel messages from the Relay.
  *
@@ -46,12 +52,9 @@ function toSignedApproval (fields: SignedApprovalFields, type: SignedApproval['t
  */
 export async function handleControlMessage (
   msg: ControlMessage,
-  broker: SignedApprovalBroker,
-  logger: Logger,
-  relayClient?: RelayClient,
-  approvalStore?: InstanceType<typeof SqliteApprovalStore> | null,
-  queueManager?: MessageQueueManager | null
+  deps: ControlHandlerDeps
 ): Promise<ControlResult> {
+  const { broker, logger, approvalStore, queueManager } = deps
   if (!msg.type || !msg.payload) {
     logger.warn({ msg }, 'Malformed control message: missing type or payload')
     return { ok: false, error: 'Malformed control message' }
@@ -67,7 +70,7 @@ export async function handleControlMessage (
       const payload = msg.payload
       try {
         const signedApproval = toSignedApproval(payload, 'tx')
-        const context: VerificationContext = { expectedTargetHash: payload.targetHash }
+        const context: VerificationContext = { currentPolicyVersion: null, expectedTargetHash: payload.targetHash }
         await broker.submitApproval(signedApproval, context)
 
         logger.info({ requestId: payload.requestId }, 'Tx approval submitted successfully')
@@ -87,9 +90,9 @@ export async function handleControlMessage (
         const signedApproval = toSignedApproval(payload, 'policy')
 
         // Build verification context + capture description BEFORE submitApproval
-        const context: VerificationContext = {}
+        const context: VerificationContext = { currentPolicyVersion: null, expectedTargetHash: null }
         let description = ''
-        if (approvalStore && payload.requestId) {
+        if (payload.requestId) {
           const pending = await approvalStore.loadPendingByRequestId(payload.requestId)
           if (pending) {
             context.expectedTargetHash = pending.targetHash
@@ -102,7 +105,7 @@ export async function handleControlMessage (
 
         await broker.submitApproval(signedApproval, context)
 
-        if (approvalStore && payload.policies) {
+        if (payload.policies) {
           await approvalStore.savePolicy(
             payload.accountIndex,
             payload.chainId,
@@ -148,23 +151,21 @@ export async function handleControlMessage (
         // The signed approval's targetHash = SHA-256(publicKey of signer being revoked)
         // Verifier Step 6 checks targetHash matches expectedTargetHash if provided.
         // App sends targetPublicKey (the public key of the signer to revoke).
-        const context: VerificationContext = {}
         const targetPubKey = payload.targetPublicKey || payload.signerId
-        if (targetPubKey) {
-          context.expectedTargetHash = '0x' + createHash('sha256').update(targetPubKey).digest('hex')
-        }
+        const expectedTargetHash = targetPubKey
+          ? '0x' + createHash('sha256').update(targetPubKey).digest('hex')
+          : null
+        const context: VerificationContext = { currentPolicyVersion: null, expectedTargetHash }
 
         await broker.submitApproval(signedApproval, context)
 
         // After revocation, update trusted approvers from store (source of truth)
-        if (approvalStore) {
-          const signers: StoredSigner[] = await approvalStore.listSigners()
-          const active: string[] = signers
-            .filter(d => d.revokedAt === null || d.revokedAt === undefined)
-            .map(d => d.publicKey)
-          broker.setTrustedApprovers(active)
-          logger.info({ activeSigners: active.length }, 'Trusted approvers updated after signer revocation')
-        }
+        const signers: StoredSigner[] = await approvalStore.listSigners()
+        const active: string[] = signers
+          .filter(d => d.revokedAt === null || d.revokedAt === undefined)
+          .map(d => d.publicKey)
+        broker.setTrustedApprovers(active)
+        logger.info({ activeSigners: active.length }, 'Trusted approvers updated after signer revocation')
 
         logger.info({ requestId: payload.requestId }, 'Signer revocation submitted successfully')
         return { ok: true, type: 'device_revoke', requestId: payload.requestId }
@@ -213,16 +214,14 @@ export async function handleControlMessage (
     // -----------------------------------------------------------------------
     case 'cancel_queued': {
       const payload = msg.payload
-      if (!payload.messageId || !queueManager) {
-        return { ok: false, type: 'cancel_queued', error: 'Missing messageId or queue' }
+      if (!payload.messageId) {
+        return { ok: false, type: 'cancel_queued', error: 'Missing messageId' }
       }
       const cancelResult = queueManager.cancelQueued(payload.messageId)
-      return {
-        ok: cancelResult.ok,
-        type: 'cancel_queued',
-        messageId: payload.messageId,
-        reason: cancelResult.reason
+      if (cancelResult.ok) {
+        return { ok: true, type: 'cancel_queued', messageId: payload.messageId }
       }
+      return { ok: false, type: 'cancel_queued', messageId: payload.messageId, reason: cancelResult.reason }
     }
 
     // -----------------------------------------------------------------------
@@ -230,17 +229,14 @@ export async function handleControlMessage (
     // -----------------------------------------------------------------------
     case 'cancel_active': {
       const payload = msg.payload
-      if (!payload.messageId || !queueManager) {
-        return { ok: false, type: 'cancel_active', error: 'Missing messageId or queue' }
+      if (!payload.messageId) {
+        return { ok: false, type: 'cancel_active', error: 'Missing messageId' }
       }
       const cancelResult = queueManager.cancelActive(payload.messageId)
-      return {
-        ok: cancelResult.ok,
-        type: 'cancel_active',
-        messageId: payload.messageId,
-        reason: cancelResult.reason,
-        wasProcessing: cancelResult.wasProcessing
+      if (cancelResult.ok) {
+        return { ok: true, type: 'cancel_active', messageId: payload.messageId, wasProcessing: cancelResult.wasProcessing }
       }
+      return { ok: false, type: 'cancel_active', messageId: payload.messageId, reason: cancelResult.reason }
     }
 
     // -----------------------------------------------------------------------

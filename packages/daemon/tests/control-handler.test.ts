@@ -42,6 +42,13 @@ function createMockStore (overrides: Record<string, any> = {}): any {
   }
 }
 
+function createMockQueueManager (): any {
+  return {
+    cancelQueued: jest.fn().mockReturnValue({ ok: true }),
+    cancelActive: jest.fn().mockReturnValue({ ok: true })
+  }
+}
+
 /**
  * Factory that returns default SignedApprovalFields. Tests override specific fields.
  */
@@ -70,11 +77,13 @@ describe('handleControlMessage', () => {
   let logger: MockLogger
   let broker: any
   let store: any
+  let queueManager: any
 
   beforeEach(() => {
     logger = createMockLogger()
     broker = createMockBroker()
     store = createMockStore()
+    queueManager = createMockQueueManager()
   })
 
   // -------------------------------------------------------------------------
@@ -83,19 +92,19 @@ describe('handleControlMessage', () => {
 
   test('returns error for message with missing type', async () => {
     const msg = { payload: { requestId: 'r1' } } as any
-    const result = await handleControlMessage(msg, broker, logger as any)
+    const result = await handleControlMessage(msg, { broker, logger: logger as any, approvalStore: store, queueManager })
 
     expect(result.ok).toBe(false)
-    expect(result.error).toBe('Malformed control message')
+    expect((result as any).error).toBe('Malformed control message')
     expect(logger.warn).toHaveBeenCalled()
   })
 
   test('returns error for message with missing payload', async () => {
     const msg = { type: 'policy_approval' } as any
-    const result = await handleControlMessage(msg, broker, logger as any)
+    const result = await handleControlMessage(msg, { broker, logger: logger as any, approvalStore: store, queueManager })
 
     expect(result.ok).toBe(false)
-    expect(result.error).toBe('Malformed control message')
+    expect((result as any).error).toBe('Malformed control message')
   })
 
   // -------------------------------------------------------------------------
@@ -114,11 +123,11 @@ describe('handleControlMessage', () => {
       }
     }
 
-    const result = await handleControlMessage(msg, broker, logger as any)
+    const result = await handleControlMessage(msg, { broker, logger: logger as any, approvalStore: store, queueManager })
 
     expect(result.ok).toBe(true)
-    expect(result.type).toBe('policy_approval')
-    expect(result.requestId).toBe('req_pol_1')
+    expect((result as any).type).toBe('policy_approval')
+    expect((result as any).requestId).toBe('req_pol_1')
     expect(broker.submitApproval).toHaveBeenCalledWith(expect.objectContaining({
       type: 'policy',
       requestId: 'req_pol_1'
@@ -138,7 +147,7 @@ describe('handleControlMessage', () => {
       }
     }
 
-    await handleControlMessage(msg, broker, logger as any, undefined, store)
+    await handleControlMessage(msg, { broker, logger: logger as any, approvalStore: store, queueManager })
 
     expect(store.savePolicy).toHaveBeenCalledWith(0, 1, {
       policies: [{ type: 'auto', maxUsd: 500 }],
@@ -169,7 +178,7 @@ describe('handleControlMessage', () => {
       }
     }
 
-    await handleControlMessage(msg, broker, logger as any, undefined, store)
+    await handleControlMessage(msg, { broker, logger: logger as any, approvalStore: store, queueManager })
 
     expect(store.savePolicy).toHaveBeenCalledWith(0, 1, {
       policies: [{ type: 'auto', maxUsd: 500 }],
@@ -192,7 +201,7 @@ describe('handleControlMessage', () => {
       }
     }
 
-    const result = await handleControlMessage(msg, broker, logger as any, undefined, store)
+    const result = await handleControlMessage(msg, { broker, logger: logger as any, approvalStore: store, queueManager })
 
     expect(result.ok).toBe(false)
     expect(store.savePolicy).not.toHaveBeenCalled()
@@ -209,10 +218,10 @@ describe('handleControlMessage', () => {
       }
     }
 
-    const result = await handleControlMessage(msg, broker, logger as any)
+    const result = await handleControlMessage(msg, { broker, logger: logger as any, approvalStore: store, queueManager })
 
     expect(result.ok).toBe(false)
-    expect(result.error).toBe('Policy verification failed')
+    expect((result as any).error).toBe('Policy verification failed')
   })
 
   // -------------------------------------------------------------------------
@@ -228,10 +237,10 @@ describe('handleControlMessage', () => {
       })
     }
 
-    const result = await handleControlMessage(msg, broker, logger as any)
+    const result = await handleControlMessage(msg, { broker, logger: logger as any, approvalStore: store, queueManager })
 
     expect(result.ok).toBe(true)
-    expect(result.type).toBe('policy_reject')
+    expect((result as any).type).toBe('policy_reject')
     expect(broker.submitApproval).toHaveBeenCalledWith(expect.objectContaining({
       type: 'policy_reject',
       requestId: 'req_rej_1'
@@ -259,15 +268,15 @@ describe('handleControlMessage', () => {
       }), targetPublicKey: signerToRevoke }
     }
 
-    const result = await handleControlMessage(msg, broker, logger as any, undefined, store)
+    const result = await handleControlMessage(msg, { broker, logger: logger as any, approvalStore: store, queueManager })
 
     expect(result.ok).toBe(true)
-    expect(result.type).toBe('device_revoke')
+    expect((result as any).type).toBe('device_revoke')
     expect(broker.submitApproval).toHaveBeenCalledWith(
       expect.objectContaining({
         type: 'device_revoke'
       }),
-      { expectedTargetHash: expectedHash }
+      { currentPolicyVersion: null, expectedTargetHash: expectedHash }
     )
   })
 
@@ -286,7 +295,7 @@ describe('handleControlMessage', () => {
       }), targetPublicKey: '0xdev_x' }
     }
 
-    await handleControlMessage(msg, broker, logger as any, undefined, store)
+    await handleControlMessage(msg, { broker, logger: logger as any, approvalStore: store, queueManager })
 
     expect(broker.setTrustedApprovers).toHaveBeenCalledWith(['0xactive1', '0xactive2'])
   })
@@ -302,10 +311,10 @@ describe('handleControlMessage', () => {
       }), targetPublicKey: '0xdev_y' }
     }
 
-    const result = await handleControlMessage(msg, broker, logger as any)
+    const result = await handleControlMessage(msg, { broker, logger: logger as any, approvalStore: store, queueManager })
 
     expect(result.ok).toBe(false)
-    expect(result.error).toBe('Revocation denied')
+    expect((result as any).error).toBe('Revocation denied')
   })
 
   // -------------------------------------------------------------------------
@@ -313,67 +322,44 @@ describe('handleControlMessage', () => {
   // -------------------------------------------------------------------------
 
   test('cancel_queued: returns error when messageId is missing', async () => {
-    const mockQueueManager = {
-      cancelQueued: jest.fn(),
-      cancelActive: jest.fn()
-    }
     const msg: ControlMessage = {
       type: 'cancel_queued',
       payload: { messageId: '' }
     }
 
-    const result = await handleControlMessage(msg, broker, logger as any, undefined, undefined, mockQueueManager as any)
+    const result = await handleControlMessage(msg, { broker, logger: logger as any, approvalStore: store, queueManager })
 
     expect(result.ok).toBe(false)
-    expect(result.type).toBe('cancel_queued')
-    expect(result.error).toBe('Missing messageId or queue')
-  })
-
-  test('cancel_queued: returns error when queueManager is missing', async () => {
-    const msg: ControlMessage = {
-      type: 'cancel_queued',
-      payload: { messageId: 'msg-123' }
-    }
-
-    const result = await handleControlMessage(msg, broker, logger as any)
-
-    expect(result.ok).toBe(false)
-    expect(result.type).toBe('cancel_queued')
-    expect(result.error).toBe('Missing messageId or queue')
+    expect((result as any).type).toBe('cancel_queued')
+    expect((result as any).error).toBe('Missing messageId')
   })
 
   test('cancel_queued: successfully cancels queued message', async () => {
-    const mockQueueManager = {
-      cancelQueued: jest.fn().mockReturnValue({ ok: true, wasProcessing: false }),
-      cancelActive: jest.fn()
-    }
+    queueManager.cancelQueued.mockReturnValue({ ok: true, wasProcessing: false })
     const msg: ControlMessage = {
       type: 'cancel_queued',
       payload: { messageId: 'msg-123' }
     }
 
-    const result = await handleControlMessage(msg, broker, logger as any, undefined, undefined, mockQueueManager as any)
+    const result = await handleControlMessage(msg, { broker, logger: logger as any, approvalStore: store, queueManager })
 
     expect(result.ok).toBe(true)
-    expect(result.type).toBe('cancel_queued')
-    expect(result.messageId).toBe('msg-123')
-    expect(mockQueueManager.cancelQueued).toHaveBeenCalledWith('msg-123')
+    expect((result as any).type).toBe('cancel_queued')
+    expect((result as any).messageId).toBe('msg-123')
+    expect(queueManager.cancelQueued).toHaveBeenCalledWith('msg-123')
   })
 
   test('E2: cancel_queued for already-processing message returns not_found', async () => {
-    const mockQueueManager = {
-      cancelQueued: jest.fn().mockReturnValue({ ok: false, reason: 'not_found' }),
-      cancelActive: jest.fn()
-    }
+    queueManager.cancelQueued.mockReturnValue({ ok: false, reason: 'not_found' })
     const msg: ControlMessage = {
       type: 'cancel_queued',
       payload: { messageId: 'msg-active' }
     }
 
-    const result = await handleControlMessage(msg, broker, logger as any, undefined, undefined, mockQueueManager as any)
+    const result = await handleControlMessage(msg, { broker, logger: logger as any, approvalStore: store, queueManager })
 
     expect(result.ok).toBe(false)
-    expect(result.reason).toBe('not_found')
+    expect((result as any).reason).toBe('not_found')
   })
 
   // -------------------------------------------------------------------------
@@ -381,68 +367,45 @@ describe('handleControlMessage', () => {
   // -------------------------------------------------------------------------
 
   test('cancel_active: returns error when messageId is missing', async () => {
-    const mockQueueManager = {
-      cancelQueued: jest.fn(),
-      cancelActive: jest.fn()
-    }
     const msg: ControlMessage = {
       type: 'cancel_active',
       payload: { messageId: '' }
     }
 
-    const result = await handleControlMessage(msg, broker, logger as any, undefined, undefined, mockQueueManager as any)
+    const result = await handleControlMessage(msg, { broker, logger: logger as any, approvalStore: store, queueManager })
 
     expect(result.ok).toBe(false)
-    expect(result.type).toBe('cancel_active')
-    expect(result.error).toBe('Missing messageId or queue')
-  })
-
-  test('cancel_active: returns error when queueManager is missing', async () => {
-    const msg: ControlMessage = {
-      type: 'cancel_active',
-      payload: { messageId: 'msg-123' }
-    }
-
-    const result = await handleControlMessage(msg, broker, logger as any)
-
-    expect(result.ok).toBe(false)
-    expect(result.type).toBe('cancel_active')
-    expect(result.error).toBe('Missing messageId or queue')
+    expect((result as any).type).toBe('cancel_active')
+    expect((result as any).error).toBe('Missing messageId')
   })
 
   test('cancel_active: successfully cancels active message', async () => {
-    const mockQueueManager = {
-      cancelQueued: jest.fn(),
-      cancelActive: jest.fn().mockReturnValue({ ok: true, wasProcessing: true })
-    }
+    queueManager.cancelActive.mockReturnValue({ ok: true, wasProcessing: true })
     const msg: ControlMessage = {
       type: 'cancel_active',
       payload: { messageId: 'msg-456' }
     }
 
-    const result = await handleControlMessage(msg, broker, logger as any, undefined, undefined, mockQueueManager as any)
+    const result = await handleControlMessage(msg, { broker, logger: logger as any, approvalStore: store, queueManager })
 
     expect(result.ok).toBe(true)
-    expect(result.type).toBe('cancel_active')
-    expect(result.messageId).toBe('msg-456')
-    expect(result.wasProcessing).toBe(true)
-    expect(mockQueueManager.cancelActive).toHaveBeenCalledWith('msg-456')
+    expect((result as any).type).toBe('cancel_active')
+    expect((result as any).messageId).toBe('msg-456')
+    expect((result as any).wasProcessing).toBe(true)
+    expect(queueManager.cancelActive).toHaveBeenCalledWith('msg-456')
   })
 
   test('E3: cancel_active for queued (not yet processing) message returns not_found', async () => {
-    const mockQueueManager = {
-      cancelQueued: jest.fn(),
-      cancelActive: jest.fn().mockReturnValue({ ok: false, reason: 'not_found' })
-    }
+    queueManager.cancelActive.mockReturnValue({ ok: false, reason: 'not_found' })
     const msg: ControlMessage = {
       type: 'cancel_active',
       payload: { messageId: 'msg-queued' }
     }
 
-    const result = await handleControlMessage(msg, broker, logger as any, undefined, undefined, mockQueueManager as any)
+    const result = await handleControlMessage(msg, { broker, logger: logger as any, approvalStore: store, queueManager })
 
     expect(result.ok).toBe(false)
-    expect(result.reason).toBe('not_found')
+    expect((result as any).reason).toBe('not_found')
   })
 
   // -------------------------------------------------------------------------
@@ -455,10 +418,10 @@ describe('handleControlMessage', () => {
       payload: { requestId: 'r1' }
     } as any
 
-    const result = await handleControlMessage(msg, broker, logger as any)
+    const result = await handleControlMessage(msg, { broker, logger: logger as any, approvalStore: store, queueManager })
 
     expect(result.ok).toBe(false)
-    expect(result.error).toBe('Unknown control type: banana')
+    expect((result as any).error).toBe('Unknown control type: banana')
     expect(logger.warn).toHaveBeenCalled()
   })
 })

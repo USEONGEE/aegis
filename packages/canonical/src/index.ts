@@ -19,7 +19,7 @@ export interface IntentInput {
   chainId: number
   to: string
   data: string
-  value?: string | number | null
+  value: string
   timestamp: number
 }
 
@@ -62,9 +62,8 @@ function normalizeAddress(addr: string): string {
 /**
  * Normalize a value to decimal string.
  */
-function normalizeValue(val: string | number | null | undefined): string {
-  if (val === undefined || val === null) return '0'
-  return String(val)
+function normalizeValue(val: string): string {
+  return val
 }
 
 /**

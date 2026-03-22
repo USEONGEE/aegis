@@ -23,7 +23,7 @@ import { useToast } from '../../../shared/ui/ToastProvider';
 
 interface PairedSigner {
   publicKey: string;
-  name?: string;
+  name: string | null;
   type: 'app' | 'daemon';
   registeredAt: number;
   isRevoked: boolean;

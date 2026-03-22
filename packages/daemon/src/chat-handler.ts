@@ -43,7 +43,9 @@ export async function handleChatMessage (
     sessionId,
     source: 'user',
     userId,
-    text
+    text,
+    chainId: null,
+    cronId: null
   })
 
   // Notify the app that the message was queued (via control channel)

@@ -28,7 +28,7 @@ class MockApprovalStore extends ApprovalStore {
   override async removePendingApproval (requestId: string) { this._pending = this._pending.filter(p => p.requestId !== requestId) }
   override async appendHistory (entry: HistoryEntry) { this._history.push(entry) }
   override async getHistory (_opts?: HistoryQueryOpts) { return this._history as HistoryEntry[] }
-  override async saveSigner (publicKey: string) { this._signers[publicKey] = { revoked: false, publicKey } }
+  override async saveSigner (publicKey: string, _name: string | null) { this._signers[publicKey] = { revoked: false, publicKey } }
   override async listSigners () { return Object.values(this._signers).map(s => ({ publicKey: s.publicKey, name: null, registeredAt: Date.now(), revokedAt: s.revoked ? Date.now() : null })) }
   override async isSignerRevoked (publicKey: string) { return this._signers[publicKey]?.revoked === true }
   override async revokeSigner (publicKey: string) { if (this._signers[publicKey]) { this._signers[publicKey].revoked = true } }
@@ -80,7 +80,8 @@ describe('SignedApprovalBroker', () => {
       chainId: 1,
       targetHash: '0xabc123',
       accountIndex: 0,
-      content: 'test'
+      content: 'test',
+      walletName: null
     })
     expect(request.requestId).toBe('req-1')
     expect(request.type).toBe('policy')
@@ -94,20 +95,23 @@ describe('SignedApprovalBroker', () => {
       chainId: 1,
       targetHash: '0xabc123',
       accountIndex: 0,
-      content: 'test'
+      content: 'test',
+      walletName: null
     })
     expect(request.requestId).toBe('req-1')
     expect(store._pending.length).toBe(0)
   })
 
-  test('createRequest generates requestId if not provided', async () => {
+  test('createRequest uses provided requestId', async () => {
     const request = await broker.createRequest('policy', {
+      requestId: 'explicit-id',
       chainId: 1,
       targetHash: '0xabc123',
       accountIndex: 0,
-      content: 'test'
+      content: 'test',
+      walletName: null
     })
-    expect(request.requestId).toBeTruthy()
+    expect(request.requestId).toBe('explicit-id')
     expect(typeof request.requestId).toBe('string')
   })
 
@@ -117,7 +121,8 @@ describe('SignedApprovalBroker', () => {
       chainId: 1,
       targetHash: '0xabc123',
       accountIndex: 0,
-      content: 'test'
+      content: 'test',
+      walletName: null
     })
     const approval = makeSignedApproval(keyPair)
     await broker.submitApproval(approval as never)
@@ -148,7 +153,8 @@ describe('SignedApprovalBroker', () => {
       chainId: 1,
       targetHash: '0xabc123',
       accountIndex: 0,
-      content: 'test'
+      content: 'test',
+      walletName: null
     })
     const approval1 = makeSignedApproval(keyPair, { nonce: 1 })
     await broker.submitApproval(approval1 as never)
@@ -163,7 +169,8 @@ describe('SignedApprovalBroker', () => {
       chainId: 1,
       targetHash: '0xpolicyhash',
       accountIndex: 0,
-      content: 'test'
+      content: 'test',
+      walletName: null
     })
 
     expect(store._pending.length).toBe(1)
@@ -191,7 +198,8 @@ describe('SignedApprovalBroker', () => {
       chainId: 1,
       targetHash: '0xabc123',
       accountIndex: 0,
-      content: 'test'
+      content: 'test',
+      walletName: null
     })
     const approval2 = makeSignedApproval(newKeyPair, { requestId: 'req-2' })
     await broker.submitApproval(approval2 as never)
@@ -211,7 +219,8 @@ describe('SignedApprovalBroker', () => {
       chainId: 1,
       targetHash: '0xabc123',
       accountIndex: 0,
-      content: 'test'
+      content: 'test',
+      walletName: null
     })
     const approval = makeSignedApproval(keyPair)
     await broker.submitApproval(approval as never)
@@ -230,7 +239,8 @@ describe('SignedApprovalBroker', () => {
       chainId: 1,
       targetHash: '0xpolicyhash',
       accountIndex: 0,
-      content: 'test'
+      content: 'test',
+      walletName: null
     })
 
     const approval = makeSignedApproval(keyPair, {

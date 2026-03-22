@@ -6,17 +6,23 @@ export interface QueuedMessage {
   source: 'user' | 'cron'
   userId: string
   text: string
-  chainId?: number
+  chainId: number | null
   createdAt: number
-  cronId?: string
+  cronId: string | null
   abortController: AbortController
 }
 
-export interface CancelResult {
-  ok: boolean
-  reason?: 'not_found' | 'already_completed'
-  wasProcessing?: boolean
+export interface CancelResultOk {
+  ok: true
+  wasProcessing: boolean
 }
+
+export interface CancelResultFailed {
+  ok: false
+  reason: 'not_found' | 'already_completed'
+}
+
+export type CancelResult = CancelResultOk | CancelResultFailed
 
 export type MessageProcessor = (msg: QueuedMessage, signal: AbortSignal) => Promise<void>
 

@@ -23,14 +23,14 @@ export interface RelayMessage {
   messageId: string;
   timestamp: number;
   payload: unknown;
-  sessionId?: string;
+  sessionId: string | null;
 }
 
 export interface ControlEnvelope {
   type: string;
   payload: unknown;
-  messageId?: string;
-  timestamp?: number;
+  messageId: string;
+  timestamp: number;
 }
 
 export interface EncryptedPayload {
@@ -151,10 +151,10 @@ export class RelayClient {
   /**
    * Connect to Relay via WebSocket.
    */
-  async connect(relayUrl: string, userId: string, authToken?: string): Promise<void> {
+  async connect(relayUrl: string, userId: string, authToken: string): Promise<void> {
     this.relayUrl = relayUrl;
     this.userId = userId;
-    if (authToken) this.authToken = authToken;
+    this.authToken = authToken;
     this.intentionalClose = false;
 
     return this.doConnect();
@@ -243,7 +243,7 @@ export class RelayClient {
             messageId: data.messageId ?? data.id ?? '',
             timestamp: data.timestamp ?? Date.now(),
             payload,
-            sessionId: data.sessionId,
+            sessionId: data.sessionId ?? null,
           };
 
           this.messageHandlers.forEach(handler => {
@@ -353,10 +353,10 @@ export class RelayClient {
     extras: Record<string, unknown> = {},
   ): string {
     const envelope: Record<string, unknown> = {
+      ...extras,
       type,
       messageId: `msg_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
       timestamp: Date.now(),
-      ...extras,
     };
 
     if (this.sessionKey) {
@@ -375,10 +375,7 @@ export class RelayClient {
   async sendControl(envelope: ControlEnvelope): Promise<void> {
     this.ensureConnected();
     const innerPayload = { type: envelope.type, ...((envelope.payload ?? {}) as Record<string, unknown>) };
-    this.ws!.send(this.buildEnvelope('control', innerPayload, {
-      messageId: envelope.messageId,
-      timestamp: envelope.timestamp,
-    }));
+    this.ws!.send(this.buildEnvelope('control', innerPayload));
   }
 
   /**
@@ -439,6 +436,8 @@ export class RelayClient {
       this.sendControl({
         type: controlType,
         payload: signedApproval,
+        messageId: `msg_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+        timestamp: Date.now(),
       }).catch(reject);
 
       // Timeout after 60s
@@ -469,6 +468,8 @@ export class RelayClient {
     await this.sendControl({
       type: 'cancel_queued',
       payload: { messageId },
+      messageId: `msg_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      timestamp: Date.now(),
     });
   }
 
@@ -479,6 +480,8 @@ export class RelayClient {
     await this.sendControl({
       type: 'cancel_active',
       payload: { messageId },
+      messageId: `msg_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      timestamp: Date.now(),
     });
   }
 

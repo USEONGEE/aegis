@@ -8,10 +8,10 @@ import type { EventEmitter } from 'node:events'
 interface CreateRequestOptions {
   chainId: number
   targetHash: string
-  requestId?: string
+  requestId: string
   accountIndex: number
   content: string
-  walletName?: string
+  walletName: string | null
 }
 
 interface Waiter {
@@ -28,10 +28,10 @@ type PendableApprovalType = 'policy' | 'wallet_create' | 'wallet_delete'
 export class SignedApprovalBroker {
   private _trustedApprovers: string[]
   private _store: ApprovalStore
-  private _emitter: EventEmitter | undefined
+  private _emitter: EventEmitter
   private _waiters: Map<string, Waiter>
 
-  constructor (trustedApprovers: string[], store: ApprovalStore, emitter?: EventEmitter) {
+  constructor (trustedApprovers: string[], store: ApprovalStore, emitter: EventEmitter) {
     this._trustedApprovers = trustedApprovers
     this._store = store
     this._emitter = emitter
@@ -43,9 +43,8 @@ export class SignedApprovalBroker {
    * Stores as pending for tx, policy, wallet_create, wallet_delete.
    */
   async createRequest (type: ApprovalType, { chainId, targetHash, requestId, accountIndex, content, walletName }: CreateRequestOptions): Promise<ApprovalRequest> {
-    const id = requestId || randomUUID()
     const request: ApprovalRequest = {
-      requestId: id,
+      requestId,
       type,
       chainId,
       targetHash,
@@ -56,21 +55,17 @@ export class SignedApprovalBroker {
 
     // Store pending for actionable requests (tx path removed — Decision simplified to ALLOW/REJECT)
     if (type === 'policy' || type === 'wallet_create' || type === 'wallet_delete') {
-      const pending: PendingApprovalRequest = walletName
-        ? { ...request, walletName }
-        : request
+      const pending: PendingApprovalRequest = { ...request, walletName }
       await this._store.savePendingApproval(accountIndex, pending)
     }
 
-    if (this._emitter) {
-      if (type === 'policy') {
-        this._emitter.emit('PendingPolicyRequested', {
-          type: 'PendingPolicyRequested',
-          requestId: id,
-          chainId,
-          timestamp: Date.now()
-        })
-      }
+    if (type === 'policy') {
+      this._emitter.emit('PendingPolicyRequested', {
+        type: 'PendingPolicyRequested',
+        requestId,
+        chainId,
+        timestamp: Date.now()
+      })
     }
 
     return request
@@ -79,22 +74,20 @@ export class SignedApprovalBroker {
   /**
    * Submit a signed approval. Verifies the signature and resolves the waiting promise.
    */
-  async submitApproval (signedApproval: SignedApproval, context: VerificationContext = {}): Promise<void> {
+  async submitApproval (signedApproval: SignedApproval, context: VerificationContext = { currentPolicyVersion: null, expectedTargetHash: null }): Promise<void> {
     // Verify using 6-step logic (throws on failure)
     await verifyApproval(signedApproval, this._trustedApprovers, this._store, context)
 
     const { type, requestId } = signedApproval
 
     // Emit verification success
-    if (this._emitter) {
-      this._emitter.emit('ApprovalVerified', {
-        type: 'ApprovalVerified',
-        requestId,
-        approvalType: type,
-        approver: signedApproval.approver,
-        timestamp: Date.now()
-      })
-    }
+    this._emitter.emit('ApprovalVerified', {
+      type: 'ApprovalVerified',
+      requestId,
+      approvalType: type,
+      approver: signedApproval.approver,
+      timestamp: Date.now()
+    })
 
     // Type-specific post-processing
     // NOTE: domain operations (createWallet, deleteWallet, revokeSigner) are
@@ -105,14 +98,12 @@ export class SignedApprovalBroker {
       case 'policy': {
         // Remove from pending, apply policy
         await this._store.removePendingApproval(requestId)
-        if (this._emitter) {
-          this._emitter.emit('PolicyApplied', {
-            type: 'PolicyApplied',
-            requestId,
-            chainId: signedApproval.chainId,
-            timestamp: Date.now()
-          })
-        }
+        this._emitter.emit('PolicyApplied', {
+          type: 'PolicyApplied',
+          requestId,
+          chainId: signedApproval.chainId,
+          timestamp: Date.now()
+        })
         // Resolve waiting policy promise if any
         const waiter = this._waiters.get(requestId)
         if (waiter) {
@@ -125,13 +116,11 @@ export class SignedApprovalBroker {
 
       case 'policy_reject': {
         await this._store.removePendingApproval(requestId)
-        if (this._emitter) {
-          this._emitter.emit('ApprovalRejected', {
-            type: 'ApprovalRejected',
-            requestId,
-            timestamp: Date.now()
-          })
-        }
+        this._emitter.emit('ApprovalRejected', {
+          type: 'ApprovalRejected',
+          requestId,
+          timestamp: Date.now()
+        })
         const waiter = this._waiters.get(requestId)
         if (waiter) {
           clearTimeout(waiter.timer)
@@ -156,13 +145,11 @@ export class SignedApprovalBroker {
           throw new Error('device_revoke target signer not found')
         }
         await this._store.revokeSigner(target.publicKey)
-        if (this._emitter) {
-          this._emitter.emit('SignerRevoked', {
-            type: 'SignerRevoked',
-            publicKey: target.publicKey,
-            timestamp: Date.now()
-          })
-        }
+        this._emitter.emit('SignerRevoked', {
+          type: 'SignerRevoked',
+          publicKey: target.publicKey,
+          timestamp: Date.now()
+        })
         break
       }
 
@@ -170,19 +157,17 @@ export class SignedApprovalBroker {
         const accountIndex = signedApproval.accountIndex
         // Read wallet name from pending request (single source of truth)
         const pending = await this._store.loadPendingByRequestId(requestId)
-        const name = (pending as PendingApprovalRequest | null)?.walletName || `Wallet ${accountIndex}`
+        const name = (pending as PendingApprovalRequest | null)?.walletName ?? `Wallet ${accountIndex}`
         // Address should be derived externally and passed via control flow
         // For now, use a placeholder that the daemon will replace
         await this._store.createWallet(accountIndex, name, '')
         await this._store.removePendingApproval(requestId)
-        if (this._emitter) {
-          this._emitter.emit('WalletCreated', {
-            type: 'WalletCreated',
-            accountIndex,
-            name,
-            timestamp: Date.now()
-          })
-        }
+        this._emitter.emit('WalletCreated', {
+          type: 'WalletCreated',
+          accountIndex,
+          name,
+          timestamp: Date.now()
+        })
         break
       }
 
@@ -190,13 +175,11 @@ export class SignedApprovalBroker {
         const accountIndex = signedApproval.accountIndex
         await this._store.removePendingApproval(requestId)
         await this._store.deleteWallet(accountIndex)
-        if (this._emitter) {
-          this._emitter.emit('WalletDeleted', {
-            type: 'WalletDeleted',
-            accountIndex,
-            timestamp: Date.now()
-          })
-        }
+        this._emitter.emit('WalletDeleted', {
+          type: 'WalletDeleted',
+          accountIndex,
+          timestamp: Date.now()
+        })
         break
       }
     }
@@ -211,6 +194,7 @@ export class SignedApprovalBroker {
       approver: signedApproval.approver,
       action: type === 'policy_reject' ? 'rejected' : 'approved',
       content: signedApproval.content,
+      signedApproval,
       timestamp: Date.now()
     })
   }

@@ -23,15 +23,15 @@ interface ProtocolEntry {
 
 interface GuardedWDKConfig {
   seed: string
-  wallets?: Record<string, WalletEntry>
-  protocols?: Record<string, ProtocolEntry[]>
-  approvalBroker?: SignedApprovalBroker
+  wallets: Record<string, WalletEntry>
+  protocols: Record<string, ProtocolEntry[]>
+  approvalBroker: SignedApprovalBroker | null
   approvalStore: ApprovalStore
-  trustedApprovers?: string[]
+  trustedApprovers: string[]
 }
 
 interface GuardedWDKFacade {
-  getAccount (chain: string, index?: number): Promise<IWalletAccountWithProtocols>
+  getAccount (chain: string, index: number): Promise<IWalletAccountWithProtocols>
   getAccountByPath (chain: string, path: string): Promise<IWalletAccountWithProtocols>
   getFeeRates (chain: string): Promise<FeeRates>
   getApprovalBroker (): SignedApprovalBroker
@@ -61,10 +61,10 @@ export async function createGuardedWDK (config: GuardedWDKConfig): Promise<Guard
   await approvalStore.init()
 
   let approvalBroker: SignedApprovalBroker
-  if (externalBroker) {
+  if (externalBroker !== null) {
     approvalBroker = externalBroker
   } else {
-    if (!trustedApprovers || !Array.isArray(trustedApprovers) || trustedApprovers.length === 0) {
+    if (!Array.isArray(trustedApprovers) || trustedApprovers.length === 0) {
       throw new Error('trustedApprovers must be a non-empty array when approvalStore is provided.')
     }
     approvalBroker = new SignedApprovalBroker(trustedApprovers, approvalStore, emitter)
@@ -72,17 +72,17 @@ export async function createGuardedWDK (config: GuardedWDKConfig): Promise<Guard
 
   let currentAccountIndex = 0
 
-  for (const [chainKey, wallet] of Object.entries(wallets || {})) {
+  for (const [chainKey, wallet] of Object.entries(wallets)) {
     wdk.registerWallet(chainKey, wallet.Manager, wallet.config)
   }
 
-  for (const [chainKey, protos] of Object.entries(protocols || {})) {
+  for (const [chainKey, protos] of Object.entries(protocols)) {
     for (const { label, Protocol, config: protoConfig } of protos) {
       wdk.registerProtocol(chainKey, label, Protocol, protoConfig)
     }
   }
 
-  for (const chainKey of Object.keys(wallets || {})) {
+  for (const chainKey of Object.keys(wallets)) {
     wdk.registerMiddleware(chainKey, createGuardedMiddleware({
       policyResolver: async (chainId: number) => {
         const stored = await approvalStore.loadPolicy(currentAccountIndex, chainId)
@@ -97,7 +97,7 @@ export async function createGuardedWDK (config: GuardedWDKConfig): Promise<Guard
   }
 
   return {
-    async getAccount (chain: string, index: number = 0) {
+    async getAccount (chain: string, index: number) {
       currentAccountIndex = index
       const account = await wdk.getAccount(chain, index)
       Object.freeze(account)
