@@ -19,7 +19,7 @@
 
 **User**:
 ```
-Hey, send 0.1 USDT to 0x11f13aDDA33AC58E45cbfC35bE2E65BdA004dF92 — I owe them money.
+Hey, send 0.02 USDT to 0x11f13aDDA33AC58E45cbfC35bE2E65BdA004dF92. I borrowed from my friend.
 ```
 
 → AI가 transfer 시도 → Policy Engine: 매칭 정책 없음 → **REJECT**
@@ -46,7 +46,7 @@ Actually send 0.01 USDT more to the same address as interest.
 
 **User**:
 ```
-Wait, I didn't approve that one. How did it go through without my approval?
+I didn't approve that one. How did it go through without my approval? Can you explain me that process?
 ```
 
 → AI가 설명: Step 1에서 승인한 정책이 이 주소 + 금액 범위를 이미 허용하고 있었기 때문에 자동 실행되었다고 답변.
@@ -59,7 +59,7 @@ Wait, I didn't approve that one. How did it go through without my approval?
 
 **User**:
 ```
-Now send 0.1 USDT to 0x3E189BB1492A4F39C2f7c4d5e9533577f06c6C0a
+Now send 0.02 USDT to 0x3E189BB1492A4F39C2f7c4d5e9533577f06c6C0a
 ```
 
 → AI가 transfer 시도 → Policy Engine: 이 주소는 정책에 없음 → **REJECT**
