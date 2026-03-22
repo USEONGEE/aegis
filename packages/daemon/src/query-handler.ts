@@ -31,7 +31,7 @@ export async function handleQueryMessage (
       }
 
       case 'pendingApprovals': {
-        const approvals = await facade.getPendingApprovals(msg.params.accountIndex, null, null)
+        const approvals = await facade.getPendingApprovals({ accountIndex: msg.params.accountIndex })
         return { requestId: msg.requestId, status: 'ok', data: approvals }
       }
 

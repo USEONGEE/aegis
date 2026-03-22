@@ -12,8 +12,8 @@ describe('SessionMessageQueue (via MessageQueueManager)', () => {
     }
 
     const manager = new MessageQueueManager(processor)
-    manager.enqueue('sess-1', { sessionId: 'sess-1', source: 'user', userId: 'u1', chainId: null, cronId: null, text: 'first' })
-    manager.enqueue('sess-1', { sessionId: 'sess-1', source: 'user', userId: 'u1', chainId: null, cronId: null, text: 'second' })
+    manager.enqueue('sess-1', { sessionId: 'sess-1', source: 'user', userId: 'u1', chain: { kind: 'all' }, cronId: null, text: 'first' })
+    manager.enqueue('sess-1', { sessionId: 'sess-1', source: 'user', userId: 'u1', chain: { kind: 'all' }, cronId: null, text: 'second' })
 
     // Wait for drain to complete
     await new Promise(resolve => setTimeout(resolve, 50))
@@ -30,13 +30,13 @@ describe('SessionMessageQueue (via MessageQueueManager)', () => {
     }
 
     const manager = new MessageQueueManager(processor)
-    manager.enqueue('sess-1', { sessionId: 'sess-1', source: 'user', userId: 'u1', chainId: null, cronId: null, text: 'first' })
+    manager.enqueue('sess-1', { sessionId: 'sess-1', source: 'user', userId: 'u1', chain: { kind: 'all' }, cronId: null, text: 'first' })
 
     // Wait for first message to start processing
     await new Promise(resolve => setTimeout(resolve, 10))
 
     // Enqueue a second message (it will be queued, not processing)
-    const msgId = manager.enqueue('sess-1', { sessionId: 'sess-1', source: 'user', userId: 'u1', chainId: null, cronId: null, text: 'second' })
+    const msgId = manager.enqueue('sess-1', { sessionId: 'sess-1', source: 'user', userId: 'u1', chain: { kind: 'all' }, cronId: null, text: 'second' })
 
     // Cancel the pending message
     const result = manager.cancelQueued(msgId)
@@ -65,7 +65,7 @@ describe('SessionMessageQueue (via MessageQueueManager)', () => {
     const processor: MessageProcessor = async () => ({ ok: true })
 
     const manager = new MessageQueueManager(processor)
-    const msgId = manager.enqueue('sess-1', { sessionId: 'sess-1', source: 'user', userId: 'u1', chainId: null, cronId: null, text: 'msg' })
+    const msgId = manager.enqueue('sess-1', { sessionId: 'sess-1', source: 'user', userId: 'u1', chain: { kind: 'all' }, cronId: null, text: 'msg' })
 
     // Wait for processing to complete
     await new Promise(resolve => setTimeout(resolve, 50))
@@ -89,7 +89,7 @@ describe('SessionMessageQueue (via MessageQueueManager)', () => {
     }
 
     const manager = new MessageQueueManager(processor)
-    const msgId = manager.enqueue('sess-1', { sessionId: 'sess-1', source: 'user', userId: 'u1', chainId: null, cronId: null, text: 'long-running' })
+    const msgId = manager.enqueue('sess-1', { sessionId: 'sess-1', source: 'user', userId: 'u1', chain: { kind: 'all' }, cronId: null, text: 'long-running' })
 
     // Wait for processing to start
     await new Promise(resolve => setTimeout(resolve, 10))
@@ -119,7 +119,7 @@ describe('SessionMessageQueue (via MessageQueueManager)', () => {
     const processor: MessageProcessor = async () => ({ ok: true })
     const manager = new MessageQueueManager(processor)
 
-    const msgId = manager.enqueue('sess-1', { sessionId: 'sess-1', source: 'user', userId: 'u1', chainId: null, cronId: null, text: 'test' })
+    const msgId = manager.enqueue('sess-1', { sessionId: 'sess-1', source: 'user', userId: 'u1', chain: { kind: 'all' }, cronId: null, text: 'test' })
     expect(typeof msgId).toBe('string')
     expect(msgId.length).toBeGreaterThan(0)
     manager.dispose()
@@ -134,8 +134,8 @@ describe('SessionMessageQueue (via MessageQueueManager)', () => {
     }
 
     const manager = new MessageQueueManager(processor)
-    manager.enqueue('sess-1', { sessionId: 'sess-1', source: 'user', userId: 'u1', chainId: null, cronId: null, text: 'fail' })
-    manager.enqueue('sess-1', { sessionId: 'sess-1', source: 'user', userId: 'u1', chainId: null, cronId: null, text: 'succeed' })
+    manager.enqueue('sess-1', { sessionId: 'sess-1', source: 'user', userId: 'u1', chain: { kind: 'all' }, cronId: null, text: 'fail' })
+    manager.enqueue('sess-1', { sessionId: 'sess-1', source: 'user', userId: 'u1', chain: { kind: 'all' }, cronId: null, text: 'succeed' })
 
     await new Promise(resolve => setTimeout(resolve, 50))
 
@@ -154,8 +154,8 @@ describe('MessageQueueManager', () => {
 
     const manager = new MessageQueueManager(processor)
 
-    manager.enqueue('sess-1', { sessionId: 'sess-1', source: 'user', userId: 'u1', chainId: null, cronId: null, text: 'a' })
-    manager.enqueue('sess-2', { sessionId: 'sess-2', source: 'user', userId: 'u2', chainId: null, cronId: null, text: 'b' })
+    manager.enqueue('sess-1', { sessionId: 'sess-1', source: 'user', userId: 'u1', chain: { kind: 'all' }, cronId: null, text: 'a' })
+    manager.enqueue('sess-2', { sessionId: 'sess-2', source: 'user', userId: 'u2', chain: { kind: 'all' }, cronId: null, text: 'b' })
 
     await new Promise(resolve => setTimeout(resolve, 50))
 
@@ -174,10 +174,10 @@ describe('MessageQueueManager', () => {
 
     const manager = new MessageQueueManager(processor)
 
-    manager.enqueue('sess-1', { sessionId: 'sess-1', source: 'user', userId: 'u1', chainId: null, cronId: null, text: 'first' })
+    manager.enqueue('sess-1', { sessionId: 'sess-1', source: 'user', userId: 'u1', chain: { kind: 'all' }, cronId: null, text: 'first' })
     await new Promise(resolve => setTimeout(resolve, 10))
 
-    const msgId = manager.enqueue('sess-1', { sessionId: 'sess-1', source: 'user', userId: 'u1', chainId: null, cronId: null, text: 'second' })
+    const msgId = manager.enqueue('sess-1', { sessionId: 'sess-1', source: 'user', userId: 'u1', chain: { kind: 'all' }, cronId: null, text: 'second' })
 
     const result = manager.cancelQueued(msgId)
     expect(result.ok).toBe(true)
@@ -207,7 +207,7 @@ describe('MessageQueueManager', () => {
 
     const manager = new MessageQueueManager(processor)
 
-    const msgId = manager.enqueue('sess-1', { sessionId: 'sess-1', source: 'user', userId: 'u1', chainId: null, cronId: null, text: 'long-running' })
+    const msgId = manager.enqueue('sess-1', { sessionId: 'sess-1', source: 'user', userId: 'u1', chain: { kind: 'all' }, cronId: null, text: 'long-running' })
     await new Promise(resolve => setTimeout(resolve, 10))
 
     const result = manager.cancelActive(msgId)
@@ -233,8 +233,8 @@ describe('MessageQueueManager', () => {
     }
 
     const manager = new MessageQueueManager(processor)
-    manager.enqueue('sess-1', { sessionId: 'sess-1', source: 'user', userId: 'u1', chainId: null, cronId: null, text: 'msg' })
-    manager.enqueue('sess-2', { sessionId: 'sess-2', source: 'user', userId: 'u2', chainId: null, cronId: null, text: 'msg' })
+    manager.enqueue('sess-1', { sessionId: 'sess-1', source: 'user', userId: 'u1', chain: { kind: 'all' }, cronId: null, text: 'msg' })
+    manager.enqueue('sess-2', { sessionId: 'sess-2', source: 'user', userId: 'u2', chain: { kind: 'all' }, cronId: null, text: 'msg' })
 
     manager.dispose()
     // After dispose, no errors should occur

@@ -21,6 +21,7 @@ import {
   type SignedApproval,
   type RejectionEntry,
   type RejectionQueryOpts,
+  type PendingApprovalFilter,
   type PolicyVersionEntry,
   type PolicyDiff
 } from './wdk-store.js'
@@ -288,12 +289,13 @@ export class SqliteWdkStore extends WdkStore {
 
   // --- Pending Requests ---
 
-  override async loadPendingApprovals (accountIndex: number | null, type: string | null, chainId: number | null): Promise<PendingApprovalRequest[]> {
+  override async loadPendingApprovals (filter: PendingApprovalFilter): Promise<PendingApprovalRequest[]> {
+    const { accountIndex, type, chainId } = filter
     let sql = 'SELECT * FROM pending_requests WHERE 1=1'
     const params: (string | number | null)[] = []
-    if (accountIndex !== null && accountIndex !== undefined) { sql += ' AND account_index = ?'; params.push(accountIndex) }
-    if (type) { sql += ' AND type = ?'; params.push(type) }
-    if (chainId !== null && chainId !== undefined) { sql += ' AND chain_id = ?'; params.push(chainId) }
+    if (accountIndex !== undefined) { sql += ' AND account_index = ?'; params.push(accountIndex) }
+    if (type !== undefined) { sql += ' AND type = ?'; params.push(type) }
+    if (chainId !== undefined) { sql += ' AND chain_id = ?'; params.push(chainId) }
     const rows = this._db!.prepare(sql).all(...params) as PendingApprovalRow[]
     return rows.map(p => ({
       requestId: p.request_id,
@@ -302,7 +304,7 @@ export class SqliteWdkStore extends WdkStore {
       chainId: p.chain_id,
       targetHash: p.target_hash,
       content: p.content,
-      walletName: p.wallet_name ?? null,
+      walletName: p.wallet_name ?? `Wallet ${p.account_index}`,
       createdAt: p.created_at
     }))
   }
@@ -319,13 +321,13 @@ export class SqliteWdkStore extends WdkStore {
       chainId: row.chain_id,
       targetHash: row.target_hash,
       content: row.content,
-      walletName: row.wallet_name ?? null,
+      walletName: row.wallet_name ?? `Wallet ${row.account_index}`,
       createdAt: row.created_at
     }
   }
 
   override async savePendingApproval (accountIndex: number, request: ApprovalRequest): Promise<void> {
-    const walletName = (request as PendingApprovalRequest).walletName ?? null
+    const walletName = (request as PendingApprovalRequest).walletName ?? `Wallet ${accountIndex}`
     this._db!.prepare(`
       INSERT INTO pending_requests (request_id, account_index, type, chain_id, target_hash, content, wallet_name, created_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
@@ -355,12 +357,12 @@ export class SqliteWdkStore extends WdkStore {
       entry.accountIndex,
       entry.requestId,
       entry.type,
-      entry.chainId ?? null,
+      entry.chainId,
       entry.targetHash,
       entry.approver,
       entry.action,
       entry.content,
-      entry.signedApproval ? JSON.stringify(entry.signedApproval) : null,
+      JSON.stringify(entry.signedApproval),
       entry.timestamp
     )
   }
@@ -374,23 +376,33 @@ export class SqliteWdkStore extends WdkStore {
     sql += ' ORDER BY id ASC'
     if (opts.limit) { sql += ' LIMIT ?'; params.push(opts.limit) }
     const rows = this._db!.prepare(sql).all(...params) as StoredHistoryEntry[]
-    return rows.map(h => ({
-      accountIndex: h.account_index,
-      requestId: h.request_id ?? '',
-      type: h.type,
-      chainId: h.chain_id,
-      targetHash: h.target_hash,
-      approver: h.approver,
-      action: h.action,
-      content: h.content ?? '',
-      signedApproval: h.signed_approval_json ? JSON.parse(h.signed_approval_json) as SignedApproval : null,
-      timestamp: h.timestamp
-    }))
+    const result: HistoryEntry[] = []
+    for (const h of rows) {
+      // Legacy: skip rows with null signed_approval_json
+      if (h.signed_approval_json === null) continue
+      const signedApproval = JSON.parse(h.signed_approval_json) as SignedApproval
+      // Legacy: skip rows with null chain_id (try to recover from signedApproval)
+      const chainId = h.chain_id ?? signedApproval.chainId
+      if (chainId === undefined || chainId === null) continue
+      result.push({
+        accountIndex: h.account_index,
+        requestId: h.request_id ?? '',
+        type: h.type,
+        chainId,
+        targetHash: h.target_hash,
+        approver: h.approver,
+        action: h.action,
+        content: h.content ?? '',
+        signedApproval,
+        timestamp: h.timestamp
+      })
+    }
+    return result
   }
 
   // --- Signers ---
 
-  override async saveSigner (publicKey: string, name: string | null): Promise<void> {
+  override async saveSigner (publicKey: string, name: string): Promise<void> {
     this._db!.prepare(`
       INSERT INTO signers (public_key, name, registered_at)
       VALUES (?, ?, ?)
@@ -405,9 +417,9 @@ export class SqliteWdkStore extends WdkStore {
     if (!row) return null
     return {
       publicKey: row.public_key,
-      name: row.name,
+      name: row.name ?? row.public_key.slice(0, 8),
       registeredAt: row.registered_at,
-      revokedAt: row.revoked_at
+      status: row.revoked_at !== null ? { kind: 'revoked', revokedAt: row.revoked_at } : { kind: 'active' }
     }
   }
 
@@ -415,9 +427,9 @@ export class SqliteWdkStore extends WdkStore {
     const rows = this._db!.prepare('SELECT * FROM signers').all() as SignerRow[]
     return rows.map(row => ({
       publicKey: row.public_key,
-      name: row.name,
+      name: row.name ?? row.public_key.slice(0, 8),
       registeredAt: row.registered_at,
-      revokedAt: row.revoked_at
+      status: row.revoked_at !== null ? { kind: 'revoked', revokedAt: row.revoked_at } : { kind: 'active' }
     }))
   }
 

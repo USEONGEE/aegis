@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { chmodSync } from 'node:fs'
 import Database from 'better-sqlite3'
 import type BetterSqlite3 from 'better-sqlite3'
-import type { CronInput, StoredCron, DaemonStore } from './daemon-store.js'
+import type { CronInput, StoredCron, DaemonStore, CronFilter, ChainScope } from './daemon-store.js'
 
 interface CronRow {
   id: string
@@ -48,8 +48,9 @@ export class SqliteDaemonStore implements DaemonStore {
     if (this._db) { this._db.close(); this._db = null }
   }
 
-  async listCrons (accountIndex: number | null): Promise<StoredCron[]> {
-    const rows = accountIndex !== null
+  async listCrons (filter: CronFilter): Promise<StoredCron[]> {
+    const { accountIndex } = filter
+    const rows = accountIndex !== undefined
       ? this._db!.prepare('SELECT * FROM crons WHERE account_index = ?').all(accountIndex) as CronRow[]
       : this._db!.prepare('SELECT * FROM crons').all() as CronRow[]
     return rows.map(c => ({
@@ -58,7 +59,7 @@ export class SqliteDaemonStore implements DaemonStore {
       sessionId: c.session_id,
       interval: c.interval,
       prompt: c.prompt,
-      chainId: c.chain_id,
+      chain: toChainScope(c.chain_id),
       createdAt: c.created_at,
       lastRunAt: c.last_run_at,
       isActive: c.is_active === 1
@@ -76,7 +77,7 @@ export class SqliteDaemonStore implements DaemonStore {
       cron.sessionId,
       cron.interval,
       cron.prompt,
-      cron.chainId,
+      fromChainScope(cron.chain),
       Date.now()
     )
     return id
@@ -89,4 +90,16 @@ export class SqliteDaemonStore implements DaemonStore {
   async updateCronLastRun (cronId: string, timestamp: number): Promise<void> {
     this._db!.prepare('UPDATE crons SET last_run_at = ? WHERE id = ?').run(timestamp, cronId)
   }
+}
+
+// ---------------------------------------------------------------------------
+// ChainScope ↔ DB conversion
+// ---------------------------------------------------------------------------
+
+function toChainScope (chainId: number | null): ChainScope {
+  return chainId === null ? { kind: 'all' } : { kind: 'specific', chainId }
+}
+
+function fromChainScope (scope: ChainScope): number | null {
+  return scope.kind === 'specific' ? scope.chainId : null
 }

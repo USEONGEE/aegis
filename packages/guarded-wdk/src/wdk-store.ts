@@ -10,6 +10,12 @@ export type JournalStatus = 'received' | 'settled' | 'signed' | 'failed' | 'reje
 
 export type HistoryAction = 'approved' | 'rejected'
 
+// --- Signer Status ---
+
+export type SignerStatus =
+  | { kind: 'active' }
+  | { kind: 'revoked'; revokedAt: number }
+
 // --- Master Seed & Wallet ---
 
 export interface MasterSeed {
@@ -63,7 +69,7 @@ export interface StoredPolicy extends PolicyInput {
 }
 
 export interface PendingApprovalRequest extends ApprovalRequest {
-  walletName: string | null
+  walletName: string
 }
 
 // PendingApprovalRow: see store-types.ts (@internal)
@@ -72,12 +78,12 @@ export interface HistoryEntry {
   accountIndex: number
   requestId: string
   type: ApprovalType
-  chainId: number | null
+  chainId: number
   targetHash: string
   approver: string
   action: HistoryAction
   content: string
-  signedApproval: SignedApproval | null
+  signedApproval: SignedApproval
   timestamp: number
 }
 
@@ -85,9 +91,9 @@ export interface HistoryEntry {
 
 export interface StoredSigner {
   publicKey: string
-  name: string | null
+  name: string
   registeredAt: number
-  revokedAt: number | null
+  status: SignerStatus
 }
 
 export interface JournalInput {
@@ -152,6 +158,12 @@ export interface RejectionQueryOpts {
   limit?: number
 }
 
+export interface PendingApprovalFilter {
+  accountIndex?: number
+  type?: string
+  chainId?: number
+}
+
 /**
  * Abstract interface for WDK persistence (wallet, policy, approval, journal, rejection).
  * Cron persistence is handled by DaemonStore in the daemon package.
@@ -179,7 +191,7 @@ export abstract class WdkStore {
 
   // --- Pending Requests ---
 
-  abstract loadPendingApprovals (accountIndex: number | null, type: string | null, chainId: number | null): Promise<PendingApprovalRequest[]>
+  abstract loadPendingApprovals (filter: PendingApprovalFilter): Promise<PendingApprovalRequest[]>
   abstract loadPendingByRequestId (requestId: string): Promise<PendingApprovalRequest | null>
   abstract savePendingApproval (accountIndex: number, request: ApprovalRequest): Promise<void>
   abstract removePendingApproval (requestId: string): Promise<void>
@@ -191,7 +203,7 @@ export abstract class WdkStore {
 
   // --- Signers ---
 
-  abstract saveSigner (publicKey: string, name: string | null): Promise<void>
+  abstract saveSigner (publicKey: string, name: string): Promise<void>
   abstract getSigner (publicKey: string): Promise<StoredSigner | null>
   abstract listSigners (): Promise<StoredSigner[]>
   abstract revokeSigner (publicKey: string): Promise<void>

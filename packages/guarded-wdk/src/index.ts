@@ -31,6 +31,7 @@ export type {
   PendingApprovalRequest,
   HistoryEntry,
   StoredSigner,
+  SignerStatus,
   MasterSeed,
   StoredWallet,
   JournalInput,
@@ -40,8 +41,9 @@ export type {
   RejectionEntry,
   PolicyVersionEntry,
   RejectionQueryOpts,
+  PendingApprovalFilter,
   PolicyDiff
 } from './wdk-store.js'
-export type { VerificationContext } from './approval-verifier.js'
-export type { EvaluationContext, Rule, PermissionDict, ArgCondition, Decision, Policy } from './guarded-middleware.js'
+export type { VerificationTarget } from './approval-verifier.js'
+export type { EvaluationContext, EvaluationResult, AllowResult, SimpleRejectResult, DetailedRejectResult, Rule, PermissionDict, ArgCondition, Decision, Policy } from './guarded-middleware.js'
 export { validatePolicies } from './guarded-middleware.js'

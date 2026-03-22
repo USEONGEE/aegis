@@ -13,6 +13,7 @@ import type {
   SignedApproval,
   StoredPolicy,
   PendingApprovalRequest,
+  PendingApprovalFilter,
   RejectionEntry,
   RejectionQueryOpts,
   PolicyVersionEntry,
@@ -52,7 +53,7 @@ interface CreateRequestOptions {
   targetHash: string
   accountIndex: number
   content: string
-  walletName: string | null
+  walletName: string
 }
 
 interface GuardedWDKFacade {
@@ -62,7 +63,7 @@ interface GuardedWDKFacade {
 
   // --- Store read methods ---
   loadPolicy (accountIndex: number, chainId: number): Promise<StoredPolicy | null>
-  getPendingApprovals (accountIndex: number | null, type: string | null, chainId: number | null): Promise<PendingApprovalRequest[]>
+  getPendingApprovals (filter: PendingApprovalFilter): Promise<PendingApprovalRequest[]>
   listRejections (opts: RejectionQueryOpts): Promise<RejectionEntry[]>
   listPolicyVersions (accountIndex: number, chainId: number): Promise<PolicyVersionEntry[]>
   listSigners (): Promise<StoredSigner[]>
@@ -171,8 +172,8 @@ export async function createGuardedWDK (config: GuardedWDKConfig): Promise<Guard
       return approvalStore.loadPolicy(accountIndex, chainId)
     },
 
-    getPendingApprovals (accountIndex: number | null, type: string | null, chainId: number | null) {
-      return approvalStore.loadPendingApprovals(accountIndex, type, chainId)
+    getPendingApprovals (filter: PendingApprovalFilter) {
+      return approvalStore.loadPendingApprovals(filter)
     },
 
     listRejections (opts: RejectionQueryOpts) {

@@ -2,6 +2,24 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { JsonWdkStore } from '../src/json-wdk-store.js'
+import type { SignedApproval } from '../src/wdk-store.js'
+
+function mockApproval (overrides: Partial<SignedApproval> = {}): SignedApproval {
+  return {
+    type: 'tx',
+    requestId: 'r0',
+    chainId: 1,
+    targetHash: '0x0',
+    approver: 'a',
+    accountIndex: 0,
+    policyVersion: 1,
+    expiresAt: Date.now() + 60000,
+    nonce: 1,
+    sig: '0xsig',
+    content: '',
+    ...overrides
+  }
+}
 
 describe('JsonWdkStore', () => {
   let store: JsonWdkStore
@@ -87,12 +105,12 @@ describe('JsonWdkStore', () => {
       await store.createWallet(0, 'test', '0xaddr0')
       await store.savePolicy(0, 1, { policies: [], signature: {} })
       await store.savePendingApproval(0, { requestId: 'r1', type: 'tx', chainId: 1, targetHash: '0x1', accountIndex: 0, content: '', createdAt: Date.now() })
-      await store.appendHistory({ accountIndex: 0, requestId: 'r1', type: 'tx', chainId: 1, targetHash: '0x1', approver: 'a', action: 'approved', content: '', signedApproval: null, timestamp: Date.now() })
+      await store.appendHistory({ accountIndex: 0, requestId: 'r1', type: 'tx', chainId: 1, targetHash: '0x1', approver: 'a', action: 'approved', content: '', signedApproval: mockApproval({ requestId: 'r1', targetHash: '0x1' }), timestamp: Date.now() })
       await store.deleteWallet(0)
 
       const policy = await store.loadPolicy(0, 1)
       expect(policy).toBeNull()
-      const pending = await store.loadPendingApprovals(0, null, null)
+      const pending = await store.loadPendingApprovals({ accountIndex: 0 })
       expect(pending).toHaveLength(0)
       // history is preserved
       const history = await store.getHistory({ accountIndex: 0 })
@@ -174,7 +192,7 @@ describe('JsonWdkStore', () => {
         content: JSON.stringify({ amount: '100' }),
         createdAt: 1000
       })
-      const pending = await store.loadPendingApprovals(accountIndex, 'tx', 1)
+      const pending = await store.loadPendingApprovals({ accountIndex, type: 'tx', chainId: 1 })
       expect(pending).toHaveLength(1)
       expect(pending[0].requestId).toBe('req-1')
       expect(pending[0].targetHash).toBe('0xabc')
@@ -185,18 +203,18 @@ describe('JsonWdkStore', () => {
       await store.savePendingApproval(accountIndex, { requestId: 'r2', type: 'policy', chainId: 1, targetHash: '0x2', accountIndex, content: '', createdAt: Date.now() })
       await store.savePendingApproval(accountIndex, { requestId: 'r3', type: 'tx', chainId: 900, targetHash: '0x3', accountIndex, content: '', createdAt: Date.now() })
 
-      const ethTx = await store.loadPendingApprovals(accountIndex, 'tx', 1)
+      const ethTx = await store.loadPendingApprovals({ accountIndex, type: 'tx', chainId: 1 })
       expect(ethTx).toHaveLength(1)
       expect(ethTx[0].requestId).toBe('r1')
 
-      const allForAccount = await store.loadPendingApprovals(accountIndex, null, null)
+      const allForAccount = await store.loadPendingApprovals({ accountIndex })
       expect(allForAccount).toHaveLength(3)
     })
 
     test('removePendingApproval deletes the request', async () => {
       await store.savePendingApproval(accountIndex, { requestId: 'req-1', type: 'tx', chainId: 1, targetHash: '0x1', accountIndex, content: '', createdAt: Date.now() })
       await store.removePendingApproval('req-1')
-      const pending = await store.loadPendingApprovals(accountIndex, null, null)
+      const pending = await store.loadPendingApprovals({ accountIndex })
       expect(pending).toHaveLength(0)
     })
 
@@ -227,7 +245,7 @@ describe('JsonWdkStore', () => {
         approver: '0xpub',
         action: 'approved',
         content: '',
-        signedApproval: null,
+        signedApproval: mockApproval({ requestId: 'req-1', chainId: 1, targetHash: '0xabc', approver: '0xpub' }),
         timestamp: 1000
       })
       const history = await store.getHistory({})
@@ -239,9 +257,9 @@ describe('JsonWdkStore', () => {
     })
 
     test('getHistory filters by accountIndex, type, chain', async () => {
-      await store.appendHistory({ accountIndex: 0, requestId: 'r1', type: 'tx', chainId: 1, targetHash: '0x1', approver: 'a', action: 'approved', content: '', signedApproval: null, timestamp: Date.now() })
-      await store.appendHistory({ accountIndex: 0, requestId: 'r2', type: 'policy', chainId: 1, targetHash: '0x2', approver: 'a', action: 'approved', content: '', signedApproval: null, timestamp: Date.now() })
-      await store.appendHistory({ accountIndex: 1, requestId: 'r3', type: 'tx', chainId: 900, targetHash: '0x3', approver: 'a', action: 'rejected', content: '', signedApproval: null, timestamp: Date.now() })
+      await store.appendHistory({ accountIndex: 0, requestId: 'r1', type: 'tx', chainId: 1, targetHash: '0x1', approver: 'a', action: 'approved', content: '', signedApproval: mockApproval({ requestId: 'r1', targetHash: '0x1' }), timestamp: Date.now() })
+      await store.appendHistory({ accountIndex: 0, requestId: 'r2', type: 'policy', chainId: 1, targetHash: '0x2', approver: 'a', action: 'approved', content: '', signedApproval: mockApproval({ type: 'policy', requestId: 'r2', targetHash: '0x2' }), timestamp: Date.now() })
+      await store.appendHistory({ accountIndex: 1, requestId: 'r3', type: 'tx', chainId: 900, targetHash: '0x3', approver: 'a', action: 'rejected', content: '', signedApproval: mockApproval({ requestId: 'r3', chainId: 900, targetHash: '0x3', accountIndex: 1 }), timestamp: Date.now() })
 
       const a0Tx = await store.getHistory({ accountIndex: 0, type: 'tx' })
       expect(a0Tx).toHaveLength(1)
@@ -249,7 +267,7 @@ describe('JsonWdkStore', () => {
 
     test('getHistory respects limit', async () => {
       for (let i = 0; i < 5; i++) {
-        await store.appendHistory({ accountIndex: 0, requestId: `r${i}`, type: 'tx', chainId: 1, targetHash: `0x${i}`, approver: 'a', action: 'approved', content: '', signedApproval: null, timestamp: Date.now() })
+        await store.appendHistory({ accountIndex: 0, requestId: `r${i}`, type: 'tx', chainId: 1, targetHash: `0x${i}`, approver: 'a', action: 'approved', content: '', signedApproval: mockApproval({ requestId: `r${i}`, targetHash: `0x${i}` }), timestamp: Date.now() })
       }
       const limited = await store.getHistory({ limit: 2 })
       expect(limited).toHaveLength(2)
@@ -263,7 +281,7 @@ describe('JsonWdkStore', () => {
       await store.saveSigner('0xpubkey123', null)
       const dev = await store.getSigner('0xpubkey123')
       expect(dev!.publicKey).toBe('0xpubkey123')
-      expect(dev!.revokedAt).toBeNull()
+      expect(dev!.status).toEqual({ kind: 'active' })
     })
 
     test('getSigner returns null for unknown signer', async () => {
@@ -282,7 +300,7 @@ describe('JsonWdkStore', () => {
       await store.saveSigner('pk1', null)
       await store.revokeSigner('pk1')
       const dev = await store.getSigner('pk1')
-      expect(dev!.revokedAt).toBeTruthy()
+      expect(dev!.status.kind).toBe('revoked')
     })
 
     test('isSignerRevoked returns false for active signer', async () => {

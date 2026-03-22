@@ -60,14 +60,26 @@ interface IntentProposedEvent extends WDKEventBase {
   chainId: number
 }
 
-interface PolicyEvaluatedEvent extends WDKEventBase {
-  type: 'PolicyEvaluated'
-  requestId: string
-  decision: 'ALLOW' | 'REJECT'
-  matchedPermission: PolicyRuleWire | null
-  reason: string | null
-  context: PolicyEvaluationContextWire | null
-}
+type PolicyEvaluatedEvent =
+  | (WDKEventBase & {
+      type: 'PolicyEvaluated'
+      requestId: string
+      decision: 'ALLOW'
+      matchedPermission: PolicyRuleWire
+    })
+  | (WDKEventBase & {
+      type: 'PolicyEvaluated'
+      requestId: string
+      decision: 'REJECT'
+      reason: string
+    })
+  | (WDKEventBase & {
+      type: 'PolicyEvaluated'
+      requestId: string
+      decision: 'REJECT'
+      reason: string
+      context: PolicyEvaluationContextWire
+    })
 
 interface ExecutionBroadcastedEvent extends WDKEventBase {
   type: 'ExecutionBroadcasted'

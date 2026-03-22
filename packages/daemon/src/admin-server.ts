@@ -197,12 +197,12 @@ export class AdminServer {
         return {
           ok: true,
           data: {
-            signers: signers.map((d: { publicKey: string; name: string | null; registeredAt: number; revokedAt: number | null }) => ({
+            signers: signers.map((d) => ({
               publicKey: d.publicKey,
               name: d.name,
               registeredAt: d.registeredAt,
-              revokedAt: d.revokedAt,
-              active: d.revokedAt === null || d.revokedAt === undefined
+              revokedAt: d.status.kind === 'revoked' ? d.status.revokedAt : null,
+              active: d.status.kind === 'active'
             }))
           }
         }

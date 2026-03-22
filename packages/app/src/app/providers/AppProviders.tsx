@@ -63,7 +63,7 @@ async function approvalExecutor(request: ApprovalRequest): Promise<{ txHash: `0x
 
     case 'device_revoke':
       signedApproval = builder.forDeviceRevoke({
-        targetPublicKey: request.targetPublicKey ?? request.requestId,  // fallback should never happen; targetPublicKey is required for device_revoke
+        targetPublicKey: request.targetPublicKey,
         chainId: request.chainId,
         accountIndex: request.accountIndex,
         content: request.content,
@@ -82,8 +82,10 @@ async function approvalExecutor(request: ApprovalRequest): Promise<{ txHash: `0x
       });
       break;
 
-    default:
-      throw new Error(`Unknown approval type: ${request.type}`);
+    default: {
+      const _exhaustive: never = request;
+      throw new Error(`Unknown approval type: ${(_exhaustive as ApprovalRequest).type}`);
+    }
   }
 
   const relay = RelayClient.getInstance();

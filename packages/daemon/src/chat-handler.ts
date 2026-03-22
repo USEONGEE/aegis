@@ -44,7 +44,7 @@ export async function handleChatMessage (
     source: 'user',
     userId,
     text,
-    chainId: null,
+    chain: { kind: 'all' },
     cronId: null
   })
 

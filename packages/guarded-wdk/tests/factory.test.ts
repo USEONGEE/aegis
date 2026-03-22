@@ -61,7 +61,7 @@ class MockWdkStore extends WdkStore {
   override async saveRejection (_entry: any) {}
   override async listRejections () { return [] }
   override async getPolicyVersion (_accountIndex: number, _chainId: number) { return 0 }
-  override async loadPendingApprovals (_accountIndex: number | null, _type: string | null, _chainId: number | null) { return this._pending as unknown as PendingApprovalRequest[] }
+  override async loadPendingApprovals (_filter: import('../src/wdk-store.js').PendingApprovalFilter) { return this._pending as unknown as PendingApprovalRequest[] }
   override async savePendingApproval (_accountIndex: number, request: ApprovalRequest) { this._pending.push(request as ApprovalRequest & Record<string, unknown>) }
   override async removePendingApproval (requestId: string) { this._pending = this._pending.filter(p => p.requestId !== requestId) }
   override async appendHistory (entry: HistoryEntry) { this._history.push(entry) }

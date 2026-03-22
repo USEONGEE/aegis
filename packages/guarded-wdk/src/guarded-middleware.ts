@@ -99,12 +99,23 @@ export interface EvaluationContext {
   ruleFailures: RuleFailure[]
 }
 
-interface EvaluationResult {
-  decision: Decision
-  matchedPermission: Rule | null
-  reason: string
-  context: EvaluationContext | null
+export interface AllowResult {
+  kind: 'allow'
+  matchedPermission: Rule
 }
+
+export interface SimpleRejectResult {
+  kind: 'reject'
+  reason: string
+}
+
+export interface DetailedRejectResult {
+  kind: 'reject_with_context'
+  reason: string
+  context: EvaluationContext
+}
+
+export type EvaluationResult = AllowResult | SimpleRejectResult | DetailedRejectResult
 
 interface MiddlewareConfig {
   policyResolver: (chainId: number) => Promise<Policy[]>
@@ -166,7 +177,7 @@ export function validatePolicies (policies: Policy[]): void {
   }
 }
 
-function permissionsToDict (permissions: Array<{ target?: string; selector?: string; args?: Record<string, ArgCondition>; valueLimit?: string | number; decision: Decision }>): PermissionDict {
+export function permissionsToDict (permissions: Array<{ target?: string; selector?: string; args?: Record<string, ArgCondition>; valueLimit?: string | number; decision: Decision }>): PermissionDict {
   const dict: PermissionDict = {}
   permissions.forEach((perm, i) => {
     const target = perm.target?.toLowerCase() ?? '*'
@@ -222,37 +233,49 @@ function matchArgs (data: string, argConditions: Record<string, ArgCondition>): 
   return failures
 }
 
-function evaluatePolicy (policies: Policy[], chainId: number, tx: Transaction): EvaluationResult {
+function buildPolicyEvaluatedPayload (requestId: string, result: EvaluationResult): Record<string, unknown> {
+  const base = { type: 'PolicyEvaluated', requestId, timestamp: Date.now() }
+  switch (result.kind) {
+    case 'allow':
+      return { ...base, decision: 'ALLOW' as const, matchedPermission: result.matchedPermission }
+    case 'reject':
+      return { ...base, decision: 'REJECT' as const, reason: result.reason }
+    case 'reject_with_context':
+      return { ...base, decision: 'REJECT' as const, reason: result.reason, context: result.context }
+  }
+}
+
+export function evaluatePolicy (policies: Policy[], chainId: number, tx: Transaction): EvaluationResult {
   if (!policies || policies.length === 0) {
-    return { decision: 'REJECT', matchedPermission: null, reason: 'no policies for chain', context: null }
+    return { kind: 'reject', reason: 'no policies for chain' }
   }
 
   for (const policy of policies) {
     if (policy.type === 'timestamp') {
       const now = Date.now() / 1000
       if (policy.validAfter && now < policy.validAfter) {
-        return { decision: 'REJECT', matchedPermission: null, reason: 'too early', context: null }
+        return { kind: 'reject', reason: 'too early' }
       }
       if (policy.validUntil && now > policy.validUntil) {
-        return { decision: 'REJECT', matchedPermission: null, reason: 'expired', context: null }
+        return { kind: 'reject', reason: 'expired' }
       }
     }
   }
 
   const callPolicy = policies.find((p): p is CallPolicy => p.type === 'call')
   if (!callPolicy) {
-    return { decision: 'REJECT', matchedPermission: null, reason: 'no call policy', context: null }
+    return { kind: 'reject', reason: 'no call policy' }
   }
 
   const txTo = tx.to?.toLowerCase?.()
   const txSelector = tx.data?.slice?.(0, 10)
 
   if (!txTo) {
-    return { decision: 'REJECT', matchedPermission: null, reason: 'missing tx.to', context: null }
+    return { kind: 'reject', reason: 'missing tx.to' }
   }
 
   if (!tx.data || tx.data.length < 10) {
-    return { decision: 'REJECT', matchedPermission: null, reason: 'missing or invalid tx.data', context: null }
+    return { kind: 'reject', reason: 'missing or invalid tx.data' }
   }
 
   // Collect candidates from matching buckets
@@ -288,22 +311,20 @@ function evaluatePolicy (policies: Policy[], chainId: number, tx: Transaction): 
       ruleFailures.push({ rule, failedArgs: [] })
       continue
     }
-    return {
-      decision: rule.decision,
-      matchedPermission: rule,
-      reason: 'matched',
-      context: null
+    if (rule.decision === 'ALLOW') {
+      return { kind: 'allow', matchedPermission: rule }
     }
+    return { kind: 'reject', reason: 'matched REJECT rule' }
   }
 
-  return {
-    decision: 'REJECT',
-    matchedPermission: null,
-    reason: 'no matching permission',
-    context: candidates.length > 0
-      ? { target: txTo, selector: txSelector!, effectiveRules: candidates, ruleFailures }
-      : null
+  if (candidates.length > 0) {
+    return {
+      kind: 'reject_with_context',
+      reason: 'no matching permission',
+      context: { target: txTo, selector: txSelector!, effectiveRules: candidates, ruleFailures }
+    }
   }
+  return { kind: 'reject', reason: 'no matching permission' }
 }
 
 async function pollReceipt (account: GuardedAccount, hash: string, emitter: EventEmitter, requestId: string): Promise<void> {
@@ -369,26 +390,19 @@ export function createGuardedMiddleware ({ policyResolver, emitter, chainId, get
         timestamp: Date.now()
       })
 
-      const { decision, matchedPermission, reason, context } = evaluatePolicy(policyArr, chainId, tx)
+      const evalResult = evaluatePolicy(policyArr, chainId, tx)
 
-      emitter.emit('PolicyEvaluated', {
-        type: 'PolicyEvaluated',
-        requestId,
-        decision,
-        matchedPermission,
-        reason,
-        context,
-        timestamp: Date.now()
-      })
+      emitter.emit('PolicyEvaluated', buildPolicyEvaluatedPayload(requestId, evalResult))
 
-      if (decision === 'REJECT') {
+      if (evalResult.kind !== 'allow') {
         if (journal) await journal.updateStatus(iHash, 'rejected')
         const pv = await getPolicyVersion(acctIdx, chainId)
+        const rejectionContext = evalResult.kind === 'reject_with_context' ? evalResult.context : null
         await onRejection({
           intentHash: iHash, accountIndex: acctIdx, chainId, dedupKey: dkey,
-          reason, context, policyVersion: pv, rejectedAt: Date.now()
+          reason: evalResult.reason, context: rejectionContext, policyVersion: pv, rejectedAt: Date.now()
         }).catch(() => {})
-        throw new PolicyRejectionError(reason, context, iHash)
+        throw new PolicyRejectionError(evalResult.reason, rejectionContext, iHash)
       }
 
       let result: TransactionResult
@@ -453,26 +467,19 @@ export function createGuardedMiddleware ({ policyResolver, emitter, chainId, get
         timestamp: Date.now()
       })
 
-      const { decision, matchedPermission, reason, context } = evaluatePolicy(policyArr, chainId, mockTx)
+      const evalResult = evaluatePolicy(policyArr, chainId, mockTx)
 
-      emitter.emit('PolicyEvaluated', {
-        type: 'PolicyEvaluated',
-        requestId,
-        decision,
-        matchedPermission,
-        reason,
-        context,
-        timestamp: Date.now()
-      })
+      emitter.emit('PolicyEvaluated', buildPolicyEvaluatedPayload(requestId, evalResult))
 
-      if (decision === 'REJECT') {
+      if (evalResult.kind !== 'allow') {
         if (journal) await journal.updateStatus(iHash, 'rejected')
         const pv = await getPolicyVersion(acctIdx, chainId)
+        const rejectionContext = evalResult.kind === 'reject_with_context' ? evalResult.context : null
         await onRejection({
           intentHash: iHash, accountIndex: acctIdx, chainId, dedupKey: dkey,
-          reason, context, policyVersion: pv, rejectedAt: Date.now()
+          reason: evalResult.reason, context: rejectionContext, policyVersion: pv, rejectedAt: Date.now()
         }).catch(() => {})
-        throw new PolicyRejectionError(reason, context, iHash)
+        throw new PolicyRejectionError(evalResult.reason, rejectionContext, iHash)
       }
 
       let result: TransactionResult
@@ -524,26 +531,19 @@ export function createGuardedMiddleware ({ policyResolver, emitter, chainId, get
         timestamp: Date.now()
       })
 
-      const { decision, matchedPermission, reason, context } = evaluatePolicy(policyArr, chainId, tx)
+      const evalResult = evaluatePolicy(policyArr, chainId, tx)
 
-      emitter.emit('PolicyEvaluated', {
-        type: 'PolicyEvaluated',
-        requestId,
-        decision,
-        matchedPermission,
-        reason,
-        context,
-        timestamp: Date.now()
-      })
+      emitter.emit('PolicyEvaluated', buildPolicyEvaluatedPayload(requestId, evalResult))
 
-      if (decision === 'REJECT') {
+      if (evalResult.kind !== 'allow') {
         if (journal) await journal.updateStatus(iHash, 'rejected')
         const pv = await getPolicyVersion(acctIdx, chainId)
+        const rejectionContext = evalResult.kind === 'reject_with_context' ? evalResult.context : null
         await onRejection({
           intentHash: iHash, accountIndex: acctIdx, chainId, dedupKey: dkey,
-          reason, context, policyVersion: pv, rejectedAt: Date.now()
+          reason: evalResult.reason, context: rejectionContext, policyVersion: pv, rejectedAt: Date.now()
         }).catch(() => {})
-        throw new PolicyRejectionError(reason, context, iHash)
+        throw new PolicyRejectionError(evalResult.reason, rejectionContext, iHash)
       }
 
       if (journal) await journal.updateStatus(iHash, 'signed')

@@ -16,7 +16,7 @@ import { useActivityStore } from '../stores/useActivityStore';
 import { LoginScreen } from '../domains/auth/screens/LoginScreen';
 import { EnrollmentScreen } from '../domains/auth/screens/EnrollmentScreen';
 import { RelayClient } from '../core/relay/RelayClient';
-import type { ControlEvent, ChatEvent } from '@wdk-app/protocol';
+import type { AnyStreamEvent, ChatEvent } from '@wdk-app/protocol';
 import { useEffect, useState, useRef } from 'react';
 import { ActivityIndicator, View } from 'react-native';
 
@@ -71,7 +71,7 @@ function ChatNavigator() {
 
     // App-level handler: cursor tracking + cron session discovery + non-current chat ingestion
     const syncHandler = (message: { channel: string; payload: unknown; timestamp: number; messageId?: string; id?: string }) => {
-      const data = message.payload as (ControlEvent & { sessionId?: string }) | (ChatEvent & { sessionId?: string });
+      const data = message.payload as (AnyStreamEvent & { sessionId?: string }) | (ChatEvent & { sessionId?: string });
       const entryId = message.messageId || message.id;
       const { addMessage } = useChatStore.getState();
 

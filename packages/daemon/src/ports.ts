@@ -1,6 +1,7 @@
 import type {
   StoredPolicy,
   PendingApprovalRequest,
+  PendingApprovalFilter,
   RejectionQueryOpts,
   RejectionEntry,
   PolicyVersionEntry,
@@ -22,7 +23,7 @@ interface CreateRequestOptions {
   targetHash: string
   accountIndex: number
   content: string
-  walletName: string | null
+  walletName: string
 }
 
 /**
@@ -31,7 +32,7 @@ interface CreateRequestOptions {
  */
 export interface ToolFacadePort {
   loadPolicy (accountIndex: number, chainId: number): Promise<StoredPolicy | null>
-  getPendingApprovals (accountIndex: number | null, type: string | null, chainId: number | null): Promise<PendingApprovalRequest[]>
+  getPendingApprovals (filter: PendingApprovalFilter): Promise<PendingApprovalRequest[]>
   listRejections (opts: RejectionQueryOpts): Promise<RejectionEntry[]>
   listPolicyVersions (accountIndex: number, chainId: number): Promise<PolicyVersionEntry[]>
   createApprovalRequest (type: ApprovalType, opts: CreateRequestOptions): Promise<ApprovalRequest>
@@ -72,7 +73,7 @@ export interface ControlFacadePort {
  */
 export interface QueryFacadePort {
   loadPolicy (accountIndex: number, chainId: number): Promise<StoredPolicy | null>
-  getPendingApprovals (accountIndex: number | null, type: string | null, chainId: number | null): Promise<PendingApprovalRequest[]>
+  getPendingApprovals (filter: PendingApprovalFilter): Promise<PendingApprovalRequest[]>
   listSigners (): Promise<StoredSigner[]>
   listWallets (): Promise<StoredWallet[]>
 }

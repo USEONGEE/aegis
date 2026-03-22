@@ -10,10 +10,9 @@ import {
 } from './errors.js'
 import type { SignedApproval, WdkStore } from './wdk-store.js'
 
-export interface VerificationContext {
-  currentPolicyVersion: number | null
-  expectedTargetHash: string | null
-}
+export type VerificationTarget =
+  | { kind: 'verify_hash'; expectedTargetHash: string }
+  | { kind: 'skip_hash' }
 
 /**
  * Compute canonical hash of all SignedApproval fields except `sig`.
@@ -33,7 +32,7 @@ export async function verifyApproval (
   signedApproval: SignedApproval,
   trustedApprovers: string[],
   store: WdkStore,
-  context: VerificationContext = { currentPolicyVersion: null, expectedTargetHash: null }
+  target: VerificationTarget = { kind: 'skip_hash' }
 ): Promise<void> {
   const { type, targetHash, approver, policyVersion, expiresAt, nonce, sig } = signedApproval
 
@@ -68,19 +67,18 @@ export async function verifyApproval (
   }
 
   // Step 6: type-specific validation
+  const expectedHash = target.kind === 'verify_hash' ? target.expectedTargetHash : null
+
   switch (type) {
     case 'tx':
-      if (context.expectedTargetHash !== null && targetHash !== context.expectedTargetHash) {
-        throw new SignatureError(`targetHash mismatch: expected ${context.expectedTargetHash}, got ${targetHash}`)
-      }
-      if (context.currentPolicyVersion !== null && policyVersion !== context.currentPolicyVersion) {
-        throw new SignatureError(`policyVersion mismatch: expected ${context.currentPolicyVersion}, got ${policyVersion}`)
+      if (expectedHash !== null && targetHash !== expectedHash) {
+        throw new SignatureError(`targetHash mismatch: expected ${expectedHash}, got ${targetHash}`)
       }
       break
 
     case 'policy':
-      if (context.expectedTargetHash !== null && targetHash !== context.expectedTargetHash) {
-        throw new SignatureError(`policyHash mismatch: expected ${context.expectedTargetHash}, got ${targetHash}`)
+      if (expectedHash !== null && targetHash !== expectedHash) {
+        throw new SignatureError(`policyHash mismatch: expected ${expectedHash}, got ${targetHash}`)
       }
       break
 
@@ -90,9 +88,8 @@ export async function verifyApproval (
 
     case 'device_revoke': {
       // targetHash should be SHA-256 of the publicKey being revoked.
-      // context.expectedTargetHash is SHA-256(publicKey) computed by the caller.
-      if (context.expectedTargetHash !== null && targetHash !== context.expectedTargetHash) {
-        throw new SignatureError(`device_revoke targetHash mismatch: expected ${context.expectedTargetHash}, got ${targetHash}`)
+      if (expectedHash !== null && targetHash !== expectedHash) {
+        throw new SignatureError(`device_revoke targetHash mismatch: expected ${expectedHash}, got ${targetHash}`)
       }
       break
     }

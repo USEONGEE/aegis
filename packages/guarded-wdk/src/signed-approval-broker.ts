@@ -1,8 +1,8 @@
 import { randomUUID, createHash } from 'node:crypto'
 import { verifyApproval } from './approval-verifier.js'
-import type { VerificationContext } from './approval-verifier.js'
+import type { VerificationTarget } from './approval-verifier.js'
 import { ApprovalTimeoutError } from './errors.js'
-import type { SignedApproval, WdkStore, ApprovalType, ApprovalRequest, PendingApprovalRequest, PolicyInput } from './wdk-store.js'
+import type { SignedApproval, WdkStore, ApprovalType, ApprovalRequest, PendingApprovalRequest, PendingApprovalFilter, PolicyInput } from './wdk-store.js'
 import type { Policy } from './guarded-middleware.js'
 import type { EventEmitter } from 'node:events'
 
@@ -12,7 +12,7 @@ interface CreateRequestOptions {
   requestId: string
   accountIndex: number
   content: string
-  walletName: string | null
+  walletName: string
 }
 
 interface Waiter {
@@ -97,16 +97,15 @@ export class SignedApprovalBroker {
     const { type, requestId } = signedApproval
     const pendingEvents: Array<{ name: string; payload: Record<string, unknown> }> = []
 
-    // Build VerificationContext from ApprovalSubmitContext
-    const verificationContext: VerificationContext = {
-      currentPolicyVersion: null,
-      expectedTargetHash: 'expectedTargetHash' in context ? context.expectedTargetHash : null
-    }
+    // Build VerificationTarget from ApprovalSubmitContext
+    const verificationTarget: VerificationTarget = 'expectedTargetHash' in context
+      ? { kind: 'verify_hash', expectedTargetHash: context.expectedTargetHash }
+      : { kind: 'skip_hash' }
 
     // ── 원자성 경계 시작 (도메인 처리) ──
     try {
       // Step 1: Verify using 6-step logic (throws on failure)
-      await verifyApproval(signedApproval, this._trustedApprovers, this._store, verificationContext)
+      await verifyApproval(signedApproval, this._trustedApprovers, this._store, verificationTarget)
 
       // Step 2: Type-specific domain operations (buffer events, don't emit yet)
       switch (type) {
@@ -167,7 +166,7 @@ export class SignedApprovalBroker {
           }
           await this._store.revokeSigner(target.publicKey)
           // v0.4.2: setTrustedApprovers를 broker 내부에서 수행
-          const activeSigs = signers.filter(s => s.publicKey !== target.publicKey && (s.revokedAt === null || s.revokedAt === undefined))
+          const activeSigs = signers.filter(s => s.publicKey !== target.publicKey && s.status.kind === 'active')
           this._trustedApprovers = activeSigs.map(s => s.publicKey)
           pendingEvents.push({
             name: 'SignerRevoked',
@@ -247,8 +246,8 @@ export class SignedApprovalBroker {
   /**
    * Get pending approval requests.
    */
-  async getPendingApprovals (accountIndex: number | null, type: string | null, chainId: number | null): Promise<PendingApprovalRequest[]> {
-    return this._store.loadPendingApprovals(accountIndex, type, chainId)
+  async getPendingApprovals (filter: PendingApprovalFilter): Promise<PendingApprovalRequest[]> {
+    return this._store.loadPendingApprovals(filter)
   }
 
   /**

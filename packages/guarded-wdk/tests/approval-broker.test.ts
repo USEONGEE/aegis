@@ -23,13 +23,13 @@ class MockWdkStore extends WdkStore {
   override async loadPolicy (seedId: string, chain: string) { return (this._policies[`${seedId}:${chain}`] || null) as never }
   override async savePolicy (seedId: string, chain: string, policy: unknown, _description: string = '') { this._policies[`${seedId}:${chain}`] = policy }
   override async getPolicyVersion (_seedId: string, _chain: string) { return 0 }
-  override async loadPendingApprovals (_seedId: string | null, type: string | null, chain: string | null) { return this._pending.filter(p => (!type || p.type === type) && (!chain || (p as any).chain === chain)) as never }
+  override async loadPendingApprovals (filter: import('../src/wdk-store.js').PendingApprovalFilter) { return this._pending.filter(p => (!filter.type || p.type === filter.type) && (!filter.chainId || (p as any).chain === filter.chainId)) as never }
   override async savePendingApproval (_seedId: string, request: ApprovalRequest) { this._pending.push(request as ApprovalRequest & Record<string, unknown>) }
   override async removePendingApproval (requestId: string) { this._pending = this._pending.filter(p => p.requestId !== requestId) }
   override async appendHistory (entry: HistoryEntry) { this._history.push(entry) }
   override async getHistory (_opts?: HistoryQueryOpts) { return this._history as HistoryEntry[] }
   override async saveSigner (publicKey: string, _name: string | null) { this._signers[publicKey] = { revoked: false, publicKey } }
-  override async listSigners () { return Object.values(this._signers).map(s => ({ publicKey: s.publicKey, name: null, registeredAt: Date.now(), revokedAt: s.revoked ? Date.now() : null })) }
+  override async listSigners () { return Object.values(this._signers).map(s => ({ publicKey: s.publicKey, name: null, registeredAt: Date.now(), status: s.revoked ? { kind: 'revoked' as const, revokedAt: Date.now() } : { kind: 'active' as const } })) }
   override async isSignerRevoked (publicKey: string) { return this._signers[publicKey]?.revoked === true }
   override async revokeSigner (publicKey: string) { if (this._signers[publicKey]) { this._signers[publicKey].revoked = true } }
   override async getLastNonce (approver: string) { return this._nonces[approver] || 0 }

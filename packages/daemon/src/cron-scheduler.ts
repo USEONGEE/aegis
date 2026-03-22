@@ -1,5 +1,5 @@
 import type { Logger } from 'pino'
-import type { DaemonStore } from './daemon-store.js'
+import type { DaemonStore, ChainScope } from './daemon-store.js'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -10,7 +10,7 @@ interface CronBase {
   sessionId: string
   interval: string
   prompt: string
-  chainId: number | null
+  chain: ChainScope
   accountIndex: number
 }
 
@@ -30,7 +30,7 @@ export type CronDispatch = (
   sessionId: string,
   userId: string,
   prompt: string,
-  chainId: number | null
+  chain: ChainScope
 ) => Promise<void>
 
 // Local CronStore interface removed — using DaemonStore (imported above)
@@ -82,7 +82,7 @@ export class CronScheduler {
     if (this._running) return
 
     // Load existing crons from store
-    const crons = await this._store.listCrons(null)
+    const crons = await this._store.listCrons({})
     for (const cron of crons) {
       if (cron.isActive) {
         this._crons.set(cron.id, {
@@ -91,7 +91,7 @@ export class CronScheduler {
           interval: cron.interval,
           intervalMs: parseInterval(cron.interval),
           prompt: cron.prompt,
-          chainId: cron.chainId,
+          chain: cron.chain,
           accountIndex: cron.accountIndex,
           lastRunAt: cron.lastRunAt || 0
         })
@@ -125,7 +125,7 @@ export class CronScheduler {
       interval: cron.interval,
       intervalMs: parseInterval(cron.interval),
       prompt: cron.prompt,
-      chainId: cron.chainId,
+      chain: cron.chain,
       accountIndex: cron.accountIndex,
       lastRunAt: 0
     }
@@ -165,7 +165,7 @@ export class CronScheduler {
 
         const userId = `cron:${cronId}`
 
-        await this._dispatch(cronId, cron.sessionId, userId, cron.prompt, cron.chainId)
+        await this._dispatch(cronId, cron.sessionId, userId, cron.prompt, cron.chain)
         this._logger.info({ cronId }, 'Cron dispatched')
       } catch (err) {
         this._logger.error({ err, cronId }, 'Cron execution failed')
@@ -184,7 +184,7 @@ export class CronScheduler {
         sessionId: cron.sessionId,
         interval: cron.interval,
         prompt: cron.prompt,
-        chainId: cron.chainId,
+        chain: cron.chain,
         accountIndex: cron.accountIndex,
         lastRunAt: cron.lastRunAt
       })

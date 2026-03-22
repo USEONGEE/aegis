@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import type { ChainScope } from './daemon-store.js'
 
 export interface QueuedMessage {
   messageId: string
@@ -6,7 +7,7 @@ export interface QueuedMessage {
   source: 'user' | 'cron'
   userId: string
   text: string
-  chainId: number | null
+  chain: ChainScope
   createdAt: number
   cronId: string | null
   abortController: AbortController

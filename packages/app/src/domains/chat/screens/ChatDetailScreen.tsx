@@ -13,7 +13,7 @@ import { useChatStore, type ChatMessage } from '../../../stores/useChatStore';
 import { RelayClient } from '../../../core/relay/RelayClient';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { ChatStackParamList } from '../../../app/RootNavigator';
-import type { ChatEvent, ControlEvent } from '@wdk-app/protocol';
+import type { ChatEvent, AnyStreamEvent } from '@wdk-app/protocol';
 
 type Props = NativeStackScreenProps<ChatStackParamList, 'ChatDetail'>;
 
@@ -30,6 +30,7 @@ interface RelayPayloadData {
   error?: string;
   content?: string;
   role?: string;
+  event?: RelayPayloadData;
 }
 
 /**

@@ -30,8 +30,8 @@ function errObj (err: unknown): { name?: string; message?: string; context?: Eva
 // ---------------------------------------------------------------------------
 
 interface ToolAccount {
-  sendTransaction (tx: { to: string; data: string; value: string }): Promise<{ hash?: string | null; fee?: bigint | null }>
-  signTransaction (tx: { to: string; data: string; value: string }): Promise<{ signedTx?: string | null; intentHash?: string | null; requestId?: string | null }>
+  sendTransaction (tx: { to: string; data: string; value: string }): Promise<{ hash: string; fee: bigint }>
+  signTransaction (tx: { to: string; data: string; value: string }): Promise<{ signedTx: string; intentHash: string; requestId: string }>
   getBalance (): Promise<unknown>
 }
 
@@ -77,8 +77,8 @@ interface TransferRejectedResult {
 // 1. sendTransaction
 interface SendTransactionExecuted {
   status: 'executed'
-  hash: string | null
-  fee: string | null
+  hash: string
+  fee: string
   intentHash: string
 }
 
@@ -96,8 +96,8 @@ export type SendTransactionResult =
 // 2. transfer
 interface TransferExecuted {
   status: 'executed'
-  hash: string | null
-  fee: string | null
+  hash: string
+  fee: string
   token: string
   amount: string
 }
@@ -161,7 +161,7 @@ export type RemoveCronResult = RemoveCronRemoved | ToolErrorResult
 // 10. signTransaction
 interface SignTransactionSigned {
   status: 'signed'
-  signedTx: string | null
+  signedTx: string
   intentHash: string
   requestId: string
 }
@@ -286,8 +286,8 @@ export async function executeToolCall (name: string, args: ToolArgs, ctx: ToolEx
 
         return {
           status: 'executed',
-          hash: result?.hash || null,
-          fee: result?.fee != null ? String(result.fee) : null,
+          hash: result.hash,
+          fee: String(result.fee),
           intentHash: hash
         }
       } catch (err: unknown) {
@@ -313,8 +313,8 @@ export async function executeToolCall (name: string, args: ToolArgs, ctx: ToolEx
 
         return {
           status: 'executed',
-          hash: result?.hash || null,
-          fee: result?.fee != null ? String(result.fee) : null,
+          hash: result.hash,
+          fee: String(result.fee),
           token,
           amount
         }
@@ -365,7 +365,7 @@ export async function executeToolCall (name: string, args: ToolArgs, ctx: ToolEx
       const { chain } = args as ChainArgs
       try {
         const chainId = resolveChainId(chain)
-        const pending = await facade.getPendingApprovals(accountIndex ?? null, 'policy', chainId)
+        const pending = await facade.getPendingApprovals({ accountIndex, type: 'policy', chainId })
         return { pending: pending || [] }
       } catch (err: unknown) {
         logger.error({ err, name: 'policyPending' }, 'Tool execution error')
@@ -388,7 +388,7 @@ export async function executeToolCall (name: string, args: ToolArgs, ctx: ToolEx
           targetHash: hash,
           accountIndex: acctIdx,
           content: description,
-          walletName: null
+          walletName: 'Policy Request'
         })
 
         return { status: 'pending', policyHash: hash }
@@ -409,7 +409,7 @@ export async function executeToolCall (name: string, args: ToolArgs, ctx: ToolEx
           sessionId,
           interval,
           prompt,
-          chainId
+          chain: { kind: 'specific', chainId }
         })
         return { cronId, status: 'registered' }
       } catch (err: unknown) {
@@ -423,7 +423,7 @@ export async function executeToolCall (name: string, args: ToolArgs, ctx: ToolEx
     // -----------------------------------------------------------------------
     case 'listCrons': {
       try {
-        const crons = await daemonStore.listCrons(accountIndex ?? null)
+        const crons = await daemonStore.listCrons({ accountIndex })
         return { crons }
       } catch (err: unknown) {
         logger.error({ err, name: 'listCrons' }, 'Tool execution error')
@@ -459,9 +459,9 @@ export async function executeToolCall (name: string, args: ToolArgs, ctx: ToolEx
 
         return {
           status: 'signed',
-          signedTx: result?.signedTx || null,
-          intentHash: result?.intentHash || hash,
-          requestId: result?.requestId || hash
+          signedTx: result.signedTx,
+          intentHash: result.intentHash,
+          requestId: result.requestId
         }
       } catch (err: unknown) {
         const e = errObj(err)

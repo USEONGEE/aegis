@@ -31,7 +31,7 @@ class MockWdkStore extends WdkStore {
   override async loadPolicy (accountIndex: number, chainId: number) { return (this._policies[`${accountIndex}:${chainId}`] || null) as never }
   override async savePolicy (accountIndex: number, chainId: number, input: PolicyInput, _description: string = '') { this._policies[`${accountIndex}:${chainId}`] = { ...input, accountIndex, chainId, policyVersion: 0, updatedAt: Date.now() } }
   override async getPolicyVersion (_accountIndex: number, _chainId: number) { return 0 }
-  override async loadPendingApprovals (_accountIndex: number | null, _type: string | null, _chainId: number | null) { return this._pending as unknown as PendingApprovalRequest[] }
+  override async loadPendingApprovals (_filter: import('../src/wdk-store.js').PendingApprovalFilter) { return this._pending as unknown as PendingApprovalRequest[] }
   override async savePendingApproval (_accountIndex: number, request: ApprovalRequest) { this._pending.push(request as ApprovalRequest & Record<string, unknown>) }
   override async removePendingApproval (requestId: string) { this._pending = this._pending.filter(p => p.requestId !== requestId) }
   override async appendHistory (entry: HistoryEntry) { this._history.push(entry) }
@@ -171,9 +171,9 @@ describe('Integration: Guarded Middleware', () => {
   test('ALLOW repay: small amount executes immediately', async () => {
     await applyMiddleware()
     const events: string[] = []
-    let policyContext: unknown = undefined
+    let policyDecision: unknown = undefined
     emitter.on('IntentProposed', (e: { type: string }) => events.push(e.type))
-    emitter.on('PolicyEvaluated', (e: { type: string; context: unknown }) => { events.push(e.type); policyContext = e.context })
+    emitter.on('PolicyEvaluated', (e: { type: string; decision: unknown }) => { events.push(e.type); policyDecision = e.decision })
     emitter.on('ExecutionBroadcasted', (e: { type: string }) => events.push(e.type))
     emitter.on('ExecutionSettled', (e: { type: string }) => events.push(e.type))
 
@@ -184,7 +184,7 @@ describe('Integration: Guarded Middleware', () => {
     expect(events).toContain('IntentProposed')
     expect(events).toContain('PolicyEvaluated')
     expect(events).toContain('ExecutionBroadcasted')
-    expect(policyContext).toBeNull()
+    expect(policyDecision).toBe('ALLOW')
 
     await new Promise(resolve => setTimeout(resolve, 100))
     expect(events).toContain('ExecutionSettled')

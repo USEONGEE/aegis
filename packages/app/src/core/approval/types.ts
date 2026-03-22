@@ -44,22 +44,26 @@ export interface SignedApproval {
 
 /**
  * ApprovalRequest — what the daemon sends to the app when approval is needed.
+ * Discriminated union by `type`. Only `device_revoke` carries `targetPublicKey`.
  */
-export interface ApprovalRequest {
+interface ApprovalRequestBase {
   requestId: string;
-  type: ApprovalType;
   chainId: number;
   targetHash: string;
-
-  accountIndex: number;         // BIP-44 account index
-  content: string;              // approval reason / description
-
+  accountIndex: number;
+  content: string;
   policyVersion: number;
   createdAt: number;
   expiresAt: number;
-
-  targetPublicKey: string | null;  // device_revoke: public key of the signer being revoked
 }
+
+export type ApprovalRequest =
+  | (ApprovalRequestBase & { type: 'tx' })
+  | (ApprovalRequestBase & { type: 'policy' })
+  | (ApprovalRequestBase & { type: 'policy_reject' })
+  | (ApprovalRequestBase & { type: 'device_revoke'; targetPublicKey: string })
+  | (ApprovalRequestBase & { type: 'wallet_create' })
+  | (ApprovalRequestBase & { type: 'wallet_delete' });
 
 /**
  * Fields that go into the signed payload (everything except `sig`).

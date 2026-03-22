@@ -21,6 +21,7 @@ import {
   type SignedApproval,
   type RejectionEntry,
   type RejectionQueryOpts,
+  type PendingApprovalFilter,
   type PolicyVersionEntry,
   type PolicyDiff
 } from './wdk-store.js'
@@ -243,13 +244,14 @@ export class JsonWdkStore extends WdkStore {
 
   // --- Pending Requests ---
 
-  override async loadPendingApprovals (accountIndex: number | null, type: string | null, chainId: number | null): Promise<PendingApprovalRequest[]> {
+  override async loadPendingApprovals (filter: PendingApprovalFilter): Promise<PendingApprovalRequest[]> {
+    const { accountIndex, type, chainId } = filter
     const pending = await this._read<PendingApprovalRow[]>('pending.json') || []
     return pending
       .filter(p => {
-        if (accountIndex !== null && accountIndex !== undefined && p.account_index !== accountIndex) return false
-        if (type && p.type !== type) return false
-        if (chainId !== null && chainId !== undefined && p.chain_id !== chainId) return false
+        if (accountIndex !== undefined && p.account_index !== accountIndex) return false
+        if (type !== undefined && p.type !== type) return false
+        if (chainId !== undefined && p.chain_id !== chainId) return false
         return true
       })
       .map(p => ({
@@ -259,7 +261,7 @@ export class JsonWdkStore extends WdkStore {
         targetHash: p.target_hash,
         accountIndex: p.account_index,
         content: p.content,
-        walletName: p.wallet_name ?? null,
+        walletName: p.wallet_name ?? `Wallet ${p.account_index}`,
         createdAt: p.created_at
       }))
   }
@@ -275,14 +277,14 @@ export class JsonWdkStore extends WdkStore {
       targetHash: row.target_hash,
       accountIndex: row.account_index,
       content: row.content,
-      walletName: row.wallet_name ?? null,
+      walletName: row.wallet_name ?? `Wallet ${row.account_index}`,
       createdAt: row.created_at
     }
   }
 
   override async savePendingApproval (accountIndex: number, request: ApprovalRequest): Promise<void> {
     const pending = await this._read<PendingApprovalRow[]>('pending.json') || []
-    const walletName = (request as PendingApprovalRequest).walletName ?? null
+    const walletName = (request as PendingApprovalRequest).walletName ?? `Wallet ${accountIndex}`
     pending.push({
       request_id: request.requestId,
       account_index: accountIndex,
@@ -310,12 +312,12 @@ export class JsonWdkStore extends WdkStore {
       account_index: entry.accountIndex,
       request_id: entry.requestId,
       type: entry.type,
-      chain_id: entry.chainId ?? null,
+      chain_id: entry.chainId,
       target_hash: entry.targetHash,
       approver: entry.approver,
       action: entry.action,
       content: entry.content,
-      signed_approval_json: entry.signedApproval ? JSON.stringify(entry.signedApproval) : null,
+      signed_approval_json: JSON.stringify(entry.signedApproval),
       timestamp: entry.timestamp
     })
     await this._write('history.json', history)
@@ -323,36 +325,46 @@ export class JsonWdkStore extends WdkStore {
 
   override async getHistory (opts: HistoryQueryOpts = {}): Promise<HistoryEntry[]> {
     const history = await this._read<StoredHistoryEntry[]>('history.json') || []
-    let result = history
+    let filtered = history
     if (opts.accountIndex !== undefined) {
-      result = result.filter(h => h.account_index === opts.accountIndex)
+      filtered = filtered.filter(h => h.account_index === opts.accountIndex)
     }
     if (opts.type) {
-      result = result.filter(h => h.type === opts.type)
+      filtered = filtered.filter(h => h.type === opts.type)
     }
     if (opts.chainId !== undefined) {
-      result = result.filter(h => h.chain_id === opts.chainId)
+      filtered = filtered.filter(h => h.chain_id === opts.chainId)
     }
     if (opts.limit) {
-      result = result.slice(-opts.limit)
+      filtered = filtered.slice(-opts.limit)
     }
-    return result.map(h => ({
-      accountIndex: h.account_index,
-      requestId: h.request_id ?? '',
-      type: h.type,
-      chainId: h.chain_id,
-      targetHash: h.target_hash,
-      approver: h.approver,
-      action: h.action,
-      content: h.content ?? '',
-      signedApproval: h.signed_approval_json ? JSON.parse(h.signed_approval_json) as SignedApproval : null,
-      timestamp: h.timestamp
-    }))
+    const result: HistoryEntry[] = []
+    for (const h of filtered) {
+      // Legacy: skip rows with null signed_approval_json
+      if (h.signed_approval_json === null) continue
+      const signedApproval = JSON.parse(h.signed_approval_json) as SignedApproval
+      // Legacy: skip rows with null chain_id (try to recover from signedApproval)
+      const chainId = h.chain_id ?? signedApproval.chainId
+      if (chainId === undefined || chainId === null) continue
+      result.push({
+        accountIndex: h.account_index,
+        requestId: h.request_id ?? '',
+        type: h.type,
+        chainId,
+        targetHash: h.target_hash,
+        approver: h.approver,
+        action: h.action,
+        content: h.content ?? '',
+        signedApproval,
+        timestamp: h.timestamp
+      })
+    }
+    return result
   }
 
   // --- Signers ---
 
-  override async saveSigner (publicKey: string, name: string | null): Promise<void> {
+  override async saveSigner (publicKey: string, name: string): Promise<void> {
     const signers = await this._read<Record<string, SignerRow>>('signers.json') || {}
     signers[publicKey] = {
       public_key: publicKey,
@@ -369,9 +381,9 @@ export class JsonWdkStore extends WdkStore {
     if (!row) return null
     return {
       publicKey: row.public_key,
-      name: row.name,
+      name: row.name ?? row.public_key.slice(0, 8),
       registeredAt: row.registered_at,
-      revokedAt: row.revoked_at
+      status: row.revoked_at !== null ? { kind: 'revoked', revokedAt: row.revoked_at } : { kind: 'active' }
     }
   }
 
@@ -379,9 +391,9 @@ export class JsonWdkStore extends WdkStore {
     const signers = await this._read<Record<string, SignerRow>>('signers.json') || {}
     return Object.values(signers).map(row => ({
       publicKey: row.public_key,
-      name: row.name,
+      name: row.name ?? row.public_key.slice(0, 8),
       registeredAt: row.registered_at,
-      revokedAt: row.revoked_at
+      status: row.revoked_at !== null ? { kind: 'revoked', revokedAt: row.revoked_at } : { kind: 'active' }
     }))
   }
 

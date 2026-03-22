@@ -269,7 +269,7 @@ describe('executeToolCall', () => {
     expect(ctx.daemonStore.saveCron).toHaveBeenCalledWith(0, expect.objectContaining({
       interval: '5m',
       prompt: 'check ETH balance',
-      chainId: 1,
+      chain: { kind: 'specific', chainId: 1 },
       sessionId: 'session_001'
     }))
   })

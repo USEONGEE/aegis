@@ -1,4 +1,5 @@
 import { evaluatePolicy, validatePolicies, permissionsToDict } from '../src/guarded-middleware.js'
+import type { DetailedRejectResult } from '../src/guarded-middleware.js'
 
 describe('evaluatePolicy', () => {
   const aavePool = '0x1234567890abcdef1234567890abcdef12345678'
@@ -47,8 +48,7 @@ describe('evaluatePolicy', () => {
     const tx = makeTx(aavePool, repaySelector, arg0 + amount)
 
     const result = evaluatePolicy(policies, 1, tx)
-    expect(result.decision).toBe('ALLOW')
-    expect(result.context).toBeNull()
+    expect(result.kind).toBe('allow')
   })
 
   test('falls through to second permission: repay large amount -> REJECT', () => {
@@ -57,44 +57,38 @@ describe('evaluatePolicy', () => {
     const tx = makeTx(aavePool, repaySelector, arg0 + amount)
 
     const result = evaluatePolicy(policies, 1, tx)
-    expect(result.decision).toBe('REJECT')
-    expect(result.context).toBeNull()
+    expect(result.kind).toBe('reject')
   })
 
   test('no matching permission -> REJECT', () => {
     const tx = makeTx('0x0000000000000000000000000000000000000000', '0xdeadbeef', '00'.repeat(32))
     const result = evaluatePolicy(policies, 1, tx)
-    expect(result.decision).toBe('REJECT')
-    expect(result.context).toBeNull()
+    expect(result.kind).toBe('reject')
   })
 
   test('no policies (empty array) -> REJECT', () => {
     const tx = makeTx(aavePool, repaySelector, '00'.repeat(64))
     const result = evaluatePolicy([], 1, tx)
-    expect(result.decision).toBe('REJECT')
-    expect(result.reason).toBe('no policies for chain')
-    expect(result.context).toBeNull()
+    expect(result.kind).toBe('reject')
+    expect((result as { reason: string }).reason).toBe('no policies for chain')
   })
 
   test('empty permissions -> REJECT', () => {
     const emptyPolicies = [{ type: 'call' as const, permissions: {} }]
     const tx = makeTx(aavePool, repaySelector, '00'.repeat(64))
     const result = evaluatePolicy(emptyPolicies, 1, tx)
-    expect(result.decision).toBe('REJECT')
-    expect(result.context).toBeNull()
+    expect(result.kind).toBe('reject')
   })
 
   test('missing tx.to -> REJECT', () => {
     const result = evaluatePolicy(policies, 1, { data: '0xdeadbeef' })
-    expect(result.decision).toBe('REJECT')
-    expect(result.reason).toBe('missing tx.to')
-    expect(result.context).toBeNull()
+    expect(result.kind).toBe('reject')
+    expect((result as { reason: string }).reason).toBe('missing tx.to')
   })
 
   test('missing tx.data (< 4 bytes) -> REJECT', () => {
     const result = evaluatePolicy(policies, 1, { to: aavePool, data: '0x12' })
-    expect(result.decision).toBe('REJECT')
-    expect(result.context).toBeNull()
+    expect(result.kind).toBe('reject')
   })
 
   test('approve with correct spender + bounded amount -> ALLOW', () => {
@@ -103,8 +97,7 @@ describe('evaluatePolicy', () => {
     const tx = makeTx(usdcAddr, approveSelector, spender + amount)
 
     const result = evaluatePolicy(policies, 1, tx)
-    expect(result.decision).toBe('ALLOW')
-    expect(result.context).toBeNull()
+    expect(result.kind).toBe('allow')
   })
 
   test('approve with wrong spender -> REJECT with context', () => {
@@ -113,12 +106,12 @@ describe('evaluatePolicy', () => {
     const tx = makeTx(usdcAddr, approveSelector, wrongSpender + amount)
 
     const result = evaluatePolicy(policies, 1, tx)
-    expect(result.decision).toBe('REJECT')
-    expect(result.context).not.toBeNull()
-    expect(result.context!.effectiveRules.length).toBe(1)
-    expect(result.context!.ruleFailures.length).toBe(1)
-    expect(result.context!.ruleFailures[0].failedArgs[0].argIndex).toBe('0')
-    expect(result.context!.ruleFailures[0].failedArgs[0].condition).toBe('EQ')
+    expect(result.kind).toBe('reject_with_context')
+    const detailed = result as DetailedRejectResult
+    expect(detailed.context.effectiveRules.length).toBe(1)
+    expect(detailed.context.ruleFailures.length).toBe(1)
+    expect(detailed.context.ruleFailures[0].failedArgs[0].argIndex).toBe('0')
+    expect(detailed.context.ruleFailures[0].failedArgs[0].condition).toBe('EQ')
   })
 
   test('approve with excessive amount -> REJECT with context (args fail)', () => {
@@ -127,11 +120,11 @@ describe('evaluatePolicy', () => {
     const tx = makeTx(usdcAddr, approveSelector, spender + amount)
 
     const result = evaluatePolicy(policies, 1, tx)
-    expect(result.decision).toBe('REJECT')
-    expect(result.context).not.toBeNull()
-    expect(result.context!.ruleFailures.length).toBe(1)
-    expect(result.context!.ruleFailures[0].failedArgs[0].argIndex).toBe('1')
-    expect(result.context!.ruleFailures[0].failedArgs[0].condition).toBe('LTE')
+    expect(result.kind).toBe('reject_with_context')
+    const detailed = result as DetailedRejectResult
+    expect(detailed.context.ruleFailures.length).toBe(1)
+    expect(detailed.context.ruleFailures[0].failedArgs[0].argIndex).toBe('1')
+    expect(detailed.context.ruleFailures[0].failedArgs[0].condition).toBe('LTE')
   })
 })
 
@@ -142,9 +135,8 @@ describe('evaluatePolicy timestamp gate', () => {
       { type: 'call' as const, permissions: permissionsToDict([{ target: '0x01', decision: 'ALLOW' as const }]) }
     ]
     const result = evaluatePolicy(futurePolicy, 1, { to: '0x01', data: '0xdeadbeef' + '00'.repeat(32) })
-    expect(result.decision).toBe('REJECT')
-    expect(result.reason).toBe('too early')
-    expect(result.context).toBeNull()
+    expect(result.kind).toBe('reject')
+    expect((result as { reason: string }).reason).toBe('too early')
   })
 
   test('validUntil in past -> REJECT expired', () => {
@@ -153,17 +145,15 @@ describe('evaluatePolicy timestamp gate', () => {
       { type: 'call' as const, permissions: permissionsToDict([{ target: '0x01', decision: 'ALLOW' as const }]) }
     ]
     const result = evaluatePolicy(expiredPolicy, 1, { to: '0x01', data: '0xdeadbeef' + '00'.repeat(32) })
-    expect(result.decision).toBe('REJECT')
-    expect(result.reason).toBe('expired')
-    expect(result.context).toBeNull()
+    expect(result.kind).toBe('reject')
+    expect((result as { reason: string }).reason).toBe('expired')
   })
 
   test('no call policy -> REJECT', () => {
     const noPolicyConfig = [{ type: 'timestamp' as const }]
     const result = evaluatePolicy(noPolicyConfig, 1, { to: '0x01', data: '0xdeadbeef' + '00'.repeat(32) })
-    expect(result.decision).toBe('REJECT')
-    expect(result.reason).toBe('no call policy')
-    expect(result.context).toBeNull()
+    expect(result.kind).toBe('reject')
+    expect((result as { reason: string }).reason).toBe('no call policy')
   })
 })
 
@@ -185,8 +175,7 @@ describe('evaluatePolicy wildcard order preservation', () => {
     const policies = [{ type: 'call' as const, permissions: perms }]
     const tx = makeTx(aavePool, repaySelector, '00'.repeat(64))
     const result = evaluatePolicy(policies, 1, tx)
-    expect(result.decision).toBe('REJECT')  // wildcard has lower order, matches first
-    expect(result.context).toBeNull()  // REJECT via matched rule -> context null (not "no matching permission")
+    expect(result.kind).toBe('reject')  // wildcard has lower order, matches first (matched REJECT rule)
   })
 
   test('specific-first: specific rule with lower order takes priority over wildcard', () => {
@@ -197,8 +186,7 @@ describe('evaluatePolicy wildcard order preservation', () => {
     const policies = [{ type: 'call' as const, permissions: perms }]
     const tx = makeTx(aavePool, repaySelector, '00'.repeat(64))
     const result = evaluatePolicy(policies, 1, tx)
-    expect(result.decision).toBe('ALLOW')  // specific has lower order, matches first
-    expect(result.context).toBeNull()
+    expect(result.kind).toBe('allow')  // specific has lower order, matches first
   })
 
   test('wildcard rules included in effectiveRules', () => {
@@ -209,8 +197,7 @@ describe('evaluatePolicy wildcard order preservation', () => {
     const policies = [{ type: 'call' as const, permissions: perms }]
     const tx = makeTx(aavePool, repaySelector, '00'.repeat(64))
     const result = evaluatePolicy(policies, 1, tx)
-    expect(result.decision).toBe('REJECT')
-    expect(result.context).toBeNull()
+    expect(result.kind).toBe('reject')  // matched REJECT rule (wildcard matches after args-fail)
   })
 })
 
@@ -223,16 +210,15 @@ describe('evaluatePolicy edge cases', () => {
     data: sel + args
   })
 
-  test('E1: candidates empty + no matching permission -> context null', () => {
+  test('E1: candidates empty + no matching permission -> simple reject', () => {
     const perms = permissionsToDict([
       { target: '0x9999999999999999999999999999999999999999', selector: '0x11111111', decision: 'ALLOW' as const }
     ])
     const policies = [{ type: 'call' as const, permissions: perms }]
     const tx = makeTx(target, selector, '00'.repeat(32))
     const result = evaluatePolicy(policies, 1, tx)
-    expect(result.decision).toBe('REJECT')
-    expect(result.reason).toBe('no matching permission')
-    expect(result.context).toBeNull()
+    expect(result.kind).toBe('reject')
+    expect((result as { reason: string }).reason).toBe('no matching permission')
   })
 
   test('E2: all candidates args-fail -> ruleFailures covers all', () => {
@@ -243,11 +229,11 @@ describe('evaluatePolicy edge cases', () => {
     const policies = [{ type: 'call' as const, permissions: perms }]
     const tx = makeTx(target, selector, '00'.repeat(32))
     const result = evaluatePolicy(policies, 1, tx)
-    expect(result.decision).toBe('REJECT')
-    expect(result.context).not.toBeNull()
-    expect(result.context!.ruleFailures.length).toBe(2)
-    expect(result.context!.ruleFailures[0].failedArgs.length).toBeGreaterThan(0)
-    expect(result.context!.ruleFailures[1].failedArgs.length).toBeGreaterThan(0)
+    expect(result.kind).toBe('reject_with_context')
+    const detailed = result as DetailedRejectResult
+    expect(detailed.context.ruleFailures.length).toBe(2)
+    expect(detailed.context.ruleFailures[0].failedArgs.length).toBeGreaterThan(0)
+    expect(detailed.context.ruleFailures[1].failedArgs.length).toBeGreaterThan(0)
   })
 
   test('E3: mix of args-fail and valueLimit-exceed', () => {
@@ -259,11 +245,11 @@ describe('evaluatePolicy edge cases', () => {
     const tx = makeTx(target, selector, '00'.repeat(32))
     tx.value = 100
     const result = evaluatePolicy(policies, 1, tx)
-    expect(result.decision).toBe('REJECT')
-    expect(result.context).not.toBeNull()
-    expect(result.context!.ruleFailures.length).toBe(2)
-    expect(result.context!.ruleFailures[0].failedArgs.length).toBeGreaterThan(0)
-    expect(result.context!.ruleFailures[1].failedArgs.length).toBe(0)
+    expect(result.kind).toBe('reject_with_context')
+    const detailed = result as DetailedRejectResult
+    expect(detailed.context.ruleFailures.length).toBe(2)
+    expect(detailed.context.ruleFailures[0].failedArgs.length).toBeGreaterThan(0)
+    expect(detailed.context.ruleFailures[1].failedArgs.length).toBe(0)
   })
 
   test('E4: REJECT after ALLOW args-fail -> matched REJECT rule', () => {
@@ -274,8 +260,7 @@ describe('evaluatePolicy edge cases', () => {
     const policies = [{ type: 'call' as const, permissions: perms }]
     const tx = makeTx(target, selector, '00'.repeat(32))
     const result = evaluatePolicy(policies, 1, tx)
-    expect(result.decision).toBe('REJECT')
-    expect(result.context).toBeNull()
+    expect(result.kind).toBe('reject')
   })
 
   test('E5: extractArg null (calldata too short) -> actual is sentinel "null"', () => {
@@ -285,9 +270,9 @@ describe('evaluatePolicy edge cases', () => {
     const policies = [{ type: 'call' as const, permissions: perms }]
     const tx = makeTx(target, selector, '00'.repeat(32))
     const result = evaluatePolicy(policies, 1, tx)
-    expect(result.decision).toBe('REJECT')
-    expect(result.context).not.toBeNull()
-    expect(result.context!.ruleFailures[0].failedArgs[0].actual).toBe('null')
+    expect(result.kind).toBe('reject_with_context')
+    const detailed = result as DetailedRejectResult
+    expect(detailed.context.ruleFailures[0].failedArgs[0].actual).toBe('null')
   })
 })
 

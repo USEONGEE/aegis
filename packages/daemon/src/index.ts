@@ -191,7 +191,7 @@ async function main (): Promise<void> {
   }
 
   // 7. Start cron scheduler
-  const cronDispatch: CronDispatch = async (cronId, sessionId, userId, prompt, chainId) => {
+  const cronDispatch: CronDispatch = async (cronId, sessionId, userId, prompt, chain) => {
     // Notify app that a cron session was created (for offline recovery)
     relayClient.send('control', {
       type: 'cron_session_created',
@@ -205,7 +205,7 @@ async function main (): Promise<void> {
       source: 'cron',
       userId,
       text: prompt,
-      chainId: chainId ?? null,
+      chain,
       cronId
     })
   }

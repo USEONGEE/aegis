@@ -52,7 +52,7 @@ export async function initWDK (config: DaemonConfig, logger: Logger): Promise<WD
   // Load trusted approvers (public keys) from paired signers
   const signers = await store.listSigners()
   const trustedApprovers: string[] = signers
-    .filter(d => d.revokedAt === null || d.revokedAt === undefined)
+    .filter(d => d.status.kind === 'active')
     .map(d => d.publicKey)
 
   // Factory가 emitter + broker를 소유. daemon은 facade 메서드만 사용.

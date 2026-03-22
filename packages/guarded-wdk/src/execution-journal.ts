@@ -9,6 +9,11 @@ interface JournalLogger {
   error (obj: Record<string, unknown>, msg: string): void
 }
 
+const NULL_LOGGER: JournalLogger = {
+  info () {},
+  error () {}
+}
+
 // ---------------------------------------------------------------------------
 // Store interface (subset of WdkStore used by journal)
 // ---------------------------------------------------------------------------
@@ -43,7 +48,7 @@ interface TrackMeta {
  */
 export class ExecutionJournal {
   private _store: JournalStore
-  private _logger: JournalLogger | null
+  private _logger: JournalLogger
 
   // In-memory index: dedupKey -> intentHash (for fast dedup)
   private _dedupIndex: Map<string, string>
@@ -51,7 +56,7 @@ export class ExecutionJournal {
   // In-memory index: intentHash -> status
   private _statusIndex: Map<string, JournalStatus>
 
-  constructor (store: JournalStore, logger: JournalLogger | null = null) {
+  constructor (store: JournalStore, logger: JournalLogger = NULL_LOGGER) {
     this._store = store
     this._logger = logger
 
@@ -82,9 +87,9 @@ export class ExecutionJournal {
         }
       }
 
-      this._logger?.info({ total: entries.length, active: recovered }, 'Journal recovered from store')
+      this._logger.info({ total: entries.length, active: recovered }, 'Journal recovered from store')
     } catch (err) {
-      this._logger?.error({ err }, 'Failed to recover journal from store')
+      this._logger.error({ err }, 'Failed to recover journal from store')
     }
   }
 
@@ -106,7 +111,7 @@ export class ExecutionJournal {
         status: 'received'
       })
     } catch (err) {
-      this._logger?.error({ err, intentHash }, 'Failed to persist journal entry')
+      this._logger.error({ err, intentHash }, 'Failed to persist journal entry')
     }
   }
 
@@ -129,7 +134,7 @@ export class ExecutionJournal {
     try {
       await this._store.updateJournalStatus(intentHash, status, txHash)
     } catch (err) {
-      this._logger?.error({ err, intentHash, status }, 'Failed to update journal status')
+      this._logger.error({ err, intentHash, status }, 'Failed to update journal status')
     }
   }
 
@@ -138,13 +143,6 @@ export class ExecutionJournal {
    */
   isDuplicate (dedupKey: string): boolean {
     return this._dedupIndex.has(dedupKey)
-  }
-
-  /**
-   * Get the status of an intent.
-   */
-  getStatus (intentHash: string): JournalStatus | null {
-    return this._statusIndex.get(intentHash) || null
   }
 
   /**
