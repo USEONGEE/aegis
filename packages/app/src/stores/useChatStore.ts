@@ -53,6 +53,22 @@ export interface ChatSession {
   messageCount: number;
 }
 
+// --- SessionTransientState ---
+
+interface SessionTransientState {
+  isLoading: boolean;
+  isTyping: boolean;
+  queuedMessageId: string | null;
+  messageState: 'idle' | 'queued' | 'active';
+}
+
+const DEFAULT_SESSION_TRANSIENT: SessionTransientState = {
+  isLoading: false,
+  isTyping: false,
+  queuedMessageId: null,
+  messageState: 'idle',
+};
+
 // --- ChatState ---
 
 interface ChatState {
@@ -63,21 +79,18 @@ interface ChatState {
   streamCursors: Record<string, string>;
   controlCursor: string;
 
-  // Transient (not persisted)
-  isLoading: boolean;
-  isTyping: boolean;
-  queuedMessageId: string | null;
-  messageState: 'idle' | 'queued' | 'active';
+  // Transient (not persisted) — per-session
+  sessionTransient: Record<string, SessionTransientState>;
 
   // Actions
   addMessage: (message: ChatMessage) => void;
   createSession: (source: 'user' | 'cron') => string;
   registerSession: (id: string, source: 'user' | 'cron') => void;
   switchSession: (sessionId: string) => void;
-  setLoading: (loading: boolean) => void;
-  setTyping: (typing: boolean) => void;
-  setQueuedMessageId: (id: string | null) => void;
-  setMessageState: (state: 'idle' | 'queued' | 'active') => void;
+  getSessionTransient: (sessionId: string) => SessionTransientState;
+  setSessionTransient: (sessionId: string, patch: Partial<SessionTransientState>) => void;
+  resetSessionTransient: (sessionId: string) => void;
+  deleteSessions: (sessionIds: string[]) => void;
   updateCursor: (sessionId: string, entryId: string) => void;
   updateControlCursor: (entryId: string) => void;
 }
@@ -90,10 +103,7 @@ export const useChatStore = create(
       currentSessionId: null,
       streamCursors: {},
       controlCursor: '0',
-      isLoading: false,
-      isTyping: false,
-      queuedMessageId: null,
-      messageState: 'idle' as const,
+      sessionTransient: {},
 
       addMessage: (message) =>
         set((state) => {
@@ -148,10 +158,12 @@ export const useChatStore = create(
             const removedIds = new Set(removed.map((s) => s.id));
             sessionList = sorted.slice(0, MAX_SESSIONS);
             const sessions = { ...state.sessions, [sid]: updated };
+            const sessionTransient = { ...state.sessionTransient };
             for (const rid of removedIds) {
               delete sessions[rid];
+              delete sessionTransient[rid];
             }
-            return { sessions, sessionList };
+            return { sessions, sessionList, sessionTransient };
           }
 
           return {
@@ -202,10 +214,49 @@ export const useChatStore = create(
 
       switchSession: (sessionId) => set({ currentSessionId: sessionId }),
 
-      setLoading: (isLoading) => set({ isLoading }),
-      setTyping: (isTyping) => set({ isTyping }),
-      setQueuedMessageId: (queuedMessageId) => set({ queuedMessageId }),
-      setMessageState: (messageState) => set({ messageState }),
+      getSessionTransient: (sessionId) =>
+        get().sessionTransient[sessionId] ?? DEFAULT_SESSION_TRANSIENT,
+
+      setSessionTransient: (sessionId, patch) =>
+        set((state) => ({
+          sessionTransient: {
+            ...state.sessionTransient,
+            [sessionId]: {
+              ...(state.sessionTransient[sessionId] ?? DEFAULT_SESSION_TRANSIENT),
+              ...patch,
+            },
+          },
+        })),
+
+      resetSessionTransient: (sessionId) =>
+        set((state) => ({
+          sessionTransient: {
+            ...state.sessionTransient,
+            [sessionId]: DEFAULT_SESSION_TRANSIENT,
+          },
+        })),
+
+      deleteSessions: (sessionIds) =>
+        set((state) => {
+          const idsToDelete = new Set(sessionIds);
+          const sessions = { ...state.sessions };
+          const streamCursors = { ...state.streamCursors };
+          const sessionTransient = { ...state.sessionTransient };
+          for (const id of idsToDelete) {
+            delete sessions[id];
+            delete streamCursors[id];
+            delete sessionTransient[id];
+          }
+          return {
+            sessions,
+            sessionList: state.sessionList.filter((s) => !idsToDelete.has(s.id)),
+            streamCursors,
+            sessionTransient,
+            currentSessionId: state.currentSessionId && idsToDelete.has(state.currentSessionId)
+              ? null
+              : state.currentSessionId,
+          };
+        }),
 
       updateCursor: (sessionId, entryId) =>
         set((state) => ({

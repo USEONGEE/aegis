@@ -45,10 +45,10 @@ interface RelayPayloadData {
 export function ChatDetailScreen({ route }: Props) {
   const sessionId = route.params.sessionId;
   const {
-    sessions, addMessage, isLoading, setLoading, isTyping, setTyping,
-    switchSession, queuedMessageId, setQueuedMessageId,
-    messageState, setMessageState,
+    sessions, addMessage, switchSession,
+    getSessionTransient, setSessionTransient, resetSessionTransient,
   } = useChatStore();
+  const { isLoading, isTyping, queuedMessageId, messageState } = getSessionTransient(sessionId);
   const [inputText, setInputText] = useState('');
   const [streamError, setStreamError] = useState<string | null>(null);
   const [relayConnected, setRelayConnected] = useState(true);
@@ -87,26 +87,24 @@ export function ChatDetailScreen({ route }: Props) {
         const eventData = (data.event ?? data) as RelayPayloadData;
         switch (eventData.type) {
           case 'message_queued': {
-            if (eventData.sessionId === currentSessionId && eventData.messageId) {
-              setQueuedMessageId(eventData.messageId);
-              setMessageState('queued');
+            if (eventData.sessionId && eventData.messageId) {
+              setSessionTransient(eventData.sessionId, {
+                queuedMessageId: eventData.messageId,
+                messageState: 'queued',
+              });
             }
             return;
           }
           case 'message_started': {
-            if (eventData.sessionId === currentSessionId) {
-              setMessageState('active');
+            if (eventData.sessionId) {
+              setSessionTransient(eventData.sessionId, { messageState: 'active' });
             }
             return;
           }
           case 'CancelCompleted':
           case 'CancelFailed': {
-            setQueuedMessageId(null);
-            setMessageState('idle');
-            setTyping(false);
-            setLoading(false);
-            streamBufferRef.current = '';
-            streamMsgIdRef.current = null;
+            // Optimistic reset already done in cancelPendingMessage().
+            // No sessionId available — do nothing to avoid corrupting other sessions.
             return;
           }
         }
@@ -126,7 +124,7 @@ export function ChatDetailScreen({ route }: Props) {
       switch (data.type) {
         case 'tool_start': {
           if (isCurrentSession) {
-            setTyping(false);
+            setSessionTransient(currentSessionId, { isTyping: false });
           }
           addMessage({
             kind: 'tool',
@@ -161,10 +159,7 @@ export function ChatDetailScreen({ route }: Props) {
 
         case 'cancelled': {
           if (isCurrentSession) {
-            setTyping(false);
-            setLoading(false);
-            setQueuedMessageId(null);
-            setMessageState('idle');
+            resetSessionTransient(currentSessionId);
             streamBufferRef.current = '';
             streamMsgIdRef.current = null;
           }
@@ -183,7 +178,7 @@ export function ChatDetailScreen({ route }: Props) {
 
         case 'typing': {
           if (isCurrentSession) {
-            setTyping(true);
+            setSessionTransient(currentSessionId, { isTyping: true });
             setStreamError(null);
           }
           return;
@@ -191,7 +186,7 @@ export function ChatDetailScreen({ route }: Props) {
 
         case 'stream': {
           if (isCurrentSession) {
-            setTyping(false);
+            setSessionTransient(currentSessionId, { isTyping: false });
           }
           if (data.delta) {
             // Always save stream messages (all sessions, not just current)
@@ -219,10 +214,7 @@ export function ChatDetailScreen({ route }: Props) {
 
         case 'error': {
           if (isCurrentSession) {
-            setTyping(false);
-            setLoading(false);
-            setQueuedMessageId(null);
-            setMessageState('idle');
+            resetSessionTransient(currentSessionId);
             streamBufferRef.current = '';
             streamMsgIdRef.current = null;
             const errorText = data.error || 'Unknown error';
@@ -258,10 +250,7 @@ export function ChatDetailScreen({ route }: Props) {
           // streaming이 있었으면 content는 이미 표시됨 → skip
           // streaming이 없었으면 content를 여기서 표시 → addMessage
           if (isCurrentSession) {
-            setTyping(false);
-            setLoading(false);
-            setQueuedMessageId(null);
-            setMessageState('idle');
+            resetSessionTransient(currentSessionId);
           }
           if (data.content && !streamMsgIdRef.current) {
             // IMPORTANT: relay의 Redis entry ID (message.messageId)를 사용한다.
@@ -288,8 +277,7 @@ export function ChatDetailScreen({ route }: Props) {
         default: {
           // Legacy: complete message (no type field)
           if (data.content && isCurrentSession) {
-            setTyping(false);
-            setLoading(false);
+            resetSessionTransient(currentSessionId);
             streamBufferRef.current = '';
             streamMsgIdRef.current = null;
             addMessage({
@@ -309,11 +297,12 @@ export function ChatDetailScreen({ route }: Props) {
 
     relay.addMessageHandler(handler);
     return () => relay.removeMessageHandler(handler);
-  }, [currentSessionId, addMessage, setLoading, setTyping, setQueuedMessageId, setMessageState, sessions, relay]);
+  }, [currentSessionId, addMessage, setSessionTransient, resetSessionTransient, sessions, relay]);
 
   const sendMessage = useCallback(async () => {
     const text = inputText.trim();
     if (!text || !currentSessionId) return;
+    if (getSessionTransient(currentSessionId).isLoading) return;
 
     const userMsg: ChatMessage = {
       kind: 'text',
@@ -327,9 +316,8 @@ export function ChatDetailScreen({ route }: Props) {
 
     addMessage(userMsg);
     setInputText('');
-    setLoading(true);
+    setSessionTransient(currentSessionId, { isLoading: true });
     // TODO: 타임아웃 추가 — daemon 무응답 시 isLoading 영구 잠금 방지
-    // TODO: isLoading을 세션별로 분리 — 현재 글로벌이라 다른 세션도 잠김
 
     try {
       await relay.sendChat(currentSessionId, text);
@@ -344,28 +332,26 @@ export function ChatDetailScreen({ route }: Props) {
         source: 'user',
         status: 'cancelled',
       });
-      setLoading(false);
+      setSessionTransient(currentSessionId, { isLoading: false });
     }
-  }, [inputText, currentSessionId, addMessage, setLoading, relay]);
+  }, [inputText, currentSessionId, addMessage, setSessionTransient, getSessionTransient, relay]);
 
   const cancelPendingMessage = useCallback(async () => {
-    if (!queuedMessageId) return;
+    const transient = getSessionTransient(currentSessionId);
+    if (!transient.queuedMessageId) return;
     try {
-      if (messageState === 'queued') {
-        await relay.cancelQueued(queuedMessageId);
+      if (transient.messageState === 'queued') {
+        await relay.cancelQueued(transient.queuedMessageId);
       } else {
-        await relay.cancelActive(queuedMessageId);
+        await relay.cancelActive(transient.queuedMessageId);
       }
     } catch (_err: unknown) {
       return
     }
-    setQueuedMessageId(null);
-    setMessageState('idle');
-    setTyping(false);
-    setLoading(false);
+    resetSessionTransient(currentSessionId);
     streamBufferRef.current = '';
     streamMsgIdRef.current = null;
-  }, [queuedMessageId, messageState, relay, setLoading, setTyping, setQueuedMessageId, setMessageState]);
+  }, [currentSessionId, getSessionTransient, resetSessionTransient, relay]);
 
   const renderMessage = useCallback(({ item }: { item: ChatMessage }) => {
     const isUser = item.kind === 'text' && item.role === 'user';

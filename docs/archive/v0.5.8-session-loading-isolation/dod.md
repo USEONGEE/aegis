@@ -4,19 +4,20 @@
 
 | # | 조건 | 검증 방법 |
 |---|------|----------|
-| F1 | `useChatStore`에서 `isLoading`, `isTyping`, `queuedMessageId`, `messageState` 4개 글로벌 필드가 제거되고, `sessionTransient: Record<string, SessionTransientState>`로 대체됨 | `useChatStore.ts`에서 4개 글로벌 필드 grep 시 0건 |
+| F1 | `ChatState` 인터페이스 top-level에 `isLoading`, `isTyping`, `queuedMessageId`, `messageState` 4개 글로벌 필드가 없고, `sessionTransient: Record<string, SessionTransientState>`가 존재함 | 코드 리뷰: `ChatState` 인터페이스 정의 확인 |
 | F2 | `getSessionTransient(sessionId)` 호출 시 해당 세션의 transient 상태를 반환하고, 존재하지 않는 세션 ID에 대해 `DEFAULT_SESSION_TRANSIENT`를 반환함 | 코드 리뷰: getter 구현 확인 |
 | F3 | `setSessionTransient(sessionId, patch)`가 해당 세션의 상태만 업데이트하고 다른 세션의 상태에 영향 없음 | 코드 리뷰: setter가 `[sessionId]` 키만 변경하는지 확인 |
 | F4 | `resetSessionTransient(sessionId)`가 해당 세션의 상태를 `DEFAULT_SESSION_TRANSIENT`로 초기화하고 다른 세션에 영향 없음 | 코드 리뷰: reset 구현 확인 |
 | F5 | `ChatDetailScreen`에서 모든 transient 상태 읽기가 `currentSessionId` 기준으로 이루어짐 | 코드 리뷰: `getSessionTransient(currentSessionId)` 사용 확인 |
 | F6 | `ChatDetailScreen`에서 모든 transient 상태 쓰기가 `currentSessionId`(또는 이벤트의 `sessionId`)를 키로 사용 | 코드 리뷰: `setSessionTransient(sessionId, ...)` 호출 확인 |
 | F7 | `CancelCompleted`/`CancelFailed` 이벤트 핸들러가 어떤 세션의 상태/버퍼도 건드리지 않고 `return`만 수행 | 코드 리뷰: 해당 case문에 `return`만 있는지 확인 |
+| F8 | 동일 세션에서 `isLoading=true` 동안 전송 버튼이 cancel 동작만 수행하고, `sendMessage`가 실행되지 않음 (단일 in-flight 유지) | 코드 리뷰: `onPress={isLoading ? cancelPendingMessage : sendMessage}` 패턴 유지 확인 + 수동 테스트 |
 
 ## 비기능 완료 조건
 
 | # | 조건 | 검증 방법 |
 |---|------|----------|
-| N1 | TypeScript strict 모드 에러 0 | `npx tsc --noEmit` (packages/app) |
+| N1 | 이번 변경으로 인해 새로운 tsc 에러가 추가되지 않음 (변경 전 baseline 대비 악화 없음) | 변경 전/후 `npx tsc --noEmit -p packages/app/tsconfig.json 2>&1 \| grep -c "error TS"` diff 비교: 증가 0 |
 | N2 | `sessionTransient`가 persist 대상에 포함되지 않음 | 코드 리뷰: `partialize` 함수에 `sessionTransient` 미포함 확인 |
 | N3 | 기존 4개 setter(`setLoading`, `setTyping`, `setQueuedMessageId`, `setMessageState`)가 store 인터페이스에서 완전 제거됨 | `ChatState` 인터페이스에서 grep 시 0건 |
 
@@ -29,6 +30,7 @@
 | E3 | 존재하지 않는 세션 ID로 `getSessionTransient` 호출 | `DEFAULT_SESSION_TRANSIENT` 반환 (크래시 없음) | 코드 리뷰 |
 | E4 | 세션 A 취소 직후 세션 B에서 응답 스트리밍 중 CancelCompleted(A) 도착 | 세션 B의 스트림이 끊기지 않음 | 수동 테스트 |
 | E5 | MAX_SESSIONS 초과로 오래된 세션 제거 시 | 해당 세션의 `sessionTransient` 엔트리도 함께 삭제 | 코드 리뷰: 세션 트림 로직에 `sessionTransient` cleanup 포함 확인 |
+| E6 | 앱 재시작 후 이전에 로딩 중이던 세션 열기 | 전송 버튼이 idle 상태 (isLoading=false) | 수동 테스트: 앱 종료 → 재시작 → 세션 진입 |
 
 ## PRD 목표 ↔ DoD 커버리지
 
@@ -36,7 +38,7 @@
 |----------|---------|------|
 | 4개 transient 상태를 세션별 독립 관리 | F1, F2, F3, F4 | ✅ |
 | 각 세션 독립적 전송/대기/취소 | F5, F6, E1, E2 | ✅ |
-| 동일 세션 내 단일 in-flight 유지 | F5 (기존 로직 유지) | ✅ |
+| 동일 세션 내 단일 in-flight 유지 | F8 | ✅ |
 
 ## 설계 결정 ↔ DoD 반영
 

@@ -1,5 +1,5 @@
-import React from 'react';
-import { View, Text, Pressable, FlatList, StyleSheet } from 'react-native';
+import React, { useState, useCallback } from 'react';
+import { View, Text, Pressable, FlatList, StyleSheet, Alert } from 'react-native';
 import { useChatStore, type ChatSession } from '../../../stores/useChatStore';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { ChatStackParamList } from '../../../app/RootNavigator';
@@ -9,9 +9,16 @@ type Props = {
 };
 
 export function ChatListScreen({ navigation }: Props) {
-  const { sessionList, createSession, switchSession } = useChatStore();
+  const { sessionList, createSession, switchSession, deleteSessions } = useChatStore();
+  const [editMode, setEditMode] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
 
   const sorted = [...sessionList].sort((a, b) => b.lastMessageAt - a.lastMessageAt);
+
+  const exitEditMode = useCallback(() => {
+    setEditMode(false);
+    setSelected(new Set());
+  }, []);
 
   const handleNewChat = () => {
     const id = createSession('user');
@@ -19,36 +26,100 @@ export function ChatListScreen({ navigation }: Props) {
   };
 
   const handleSelectSession = (session: ChatSession) => {
+    if (editMode) {
+      setSelected((prev) => {
+        const next = new Set(prev);
+        if (next.has(session.id)) {
+          next.delete(session.id);
+        } else {
+          next.add(session.id);
+        }
+        return next;
+      });
+      return;
+    }
     switchSession(session.id);
     navigation.navigate('ChatDetail', { sessionId: session.id });
   };
 
+  const handleSelectAll = () => {
+    if (selected.size === sorted.length) {
+      setSelected(new Set());
+    } else {
+      setSelected(new Set(sorted.map((s) => s.id)));
+    }
+  };
+
+  const handleDelete = () => {
+    if (selected.size === 0) return;
+    Alert.alert(
+      '대화 삭제',
+      `${selected.size}개의 대화를 삭제하시겠습니까?\n삭제된 대화는 복구할 수 없습니다.`,
+      [
+        { text: '취소', style: 'cancel' },
+        {
+          text: '삭제',
+          style: 'destructive',
+          onPress: () => {
+            deleteSessions([...selected]);
+            exitEditMode();
+          },
+        },
+      ],
+    );
+  };
+
   const renderSession = ({ item }: { item: ChatSession }) => (
-    <Pressable style={styles.sessionCard} onPress={() => handleSelectSession(item)}>
-      <View style={styles.sessionHeader}>
-        <Text style={styles.sessionTitle} numberOfLines={1}>
-          {item.title}
-        </Text>
-        {item.source === 'cron' && (
-          <Text style={styles.cronLabel}>자동 실행</Text>
+    <Pressable
+      style={[styles.sessionCard, editMode && selected.has(item.id) && styles.sessionCardSelected]}
+      onPress={() => handleSelectSession(item)}
+    >
+      <View style={styles.sessionRow}>
+        {editMode && (
+          <View style={[styles.checkbox, selected.has(item.id) && styles.checkboxChecked]}>
+            {selected.has(item.id) && <Text style={styles.checkmark}>✓</Text>}
+          </View>
         )}
-      </View>
-      <View style={styles.sessionMeta}>
-        <Text style={styles.sessionDate}>
-          {new Date(item.lastMessageAt).toLocaleDateString()}
-        </Text>
-        <Text style={styles.sessionCount}>
-          {item.messageCount} messages
-        </Text>
+        <View style={styles.sessionContent}>
+          <View style={styles.sessionHeader}>
+            <Text style={styles.sessionTitle} numberOfLines={1}>
+              {item.title}
+            </Text>
+            {item.source === 'cron' && (
+              <Text style={styles.cronLabel}>자동 실행</Text>
+            )}
+          </View>
+          <View style={styles.sessionMeta}>
+            <Text style={styles.sessionDate}>
+              {new Date(item.lastMessageAt).toLocaleDateString()}
+            </Text>
+            <Text style={styles.sessionCount}>
+              {item.messageCount} messages
+            </Text>
+          </View>
+        </View>
       </View>
     </Pressable>
   );
 
   return (
     <View style={styles.container}>
-      <Pressable style={styles.newChatButton} onPress={handleNewChat}>
-        <Text style={styles.newChatText}>+ 새 대화</Text>
-      </Pressable>
+      <View style={styles.topBar}>
+        {editMode ? (
+          <Pressable style={styles.editButton} onPress={exitEditMode}>
+            <Text style={styles.editButtonText}>완료</Text>
+          </Pressable>
+        ) : (
+          <Pressable style={styles.newChatButton} onPress={handleNewChat}>
+            <Text style={styles.newChatText}>+ 새 대화</Text>
+          </Pressable>
+        )}
+        {sorted.length > 0 && !editMode && (
+          <Pressable style={styles.editButton} onPress={() => setEditMode(true)}>
+            <Text style={styles.editButtonText}>편집</Text>
+          </Pressable>
+        )}
+      </View>
 
       {sorted.length === 0 ? (
         <View style={styles.emptyState}>
@@ -65,6 +136,25 @@ export function ChatListScreen({ navigation }: Props) {
           contentContainerStyle={styles.list}
         />
       )}
+
+      {editMode && (
+        <View style={styles.bottomBar}>
+          <Pressable style={styles.selectAllButton} onPress={handleSelectAll}>
+            <Text style={styles.selectAllText}>
+              {selected.size === sorted.length ? '전체 해제' : '전체 선택'}
+            </Text>
+          </Pressable>
+          <Pressable
+            style={[styles.deleteButton, selected.size === 0 && styles.deleteButtonDisabled]}
+            onPress={handleDelete}
+            disabled={selected.size === 0}
+          >
+            <Text style={[styles.deleteText, selected.size === 0 && styles.deleteTextDisabled]}>
+              {selected.size > 0 ? `${selected.size}개 삭제` : '삭제'}
+            </Text>
+          </Pressable>
+        </View>
+      )}
     </View>
   );
 }
@@ -74,8 +164,17 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#0a0a0a',
   },
+  topBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginHorizontal: 16,
+    marginTop: 16,
+    marginBottom: 8,
+    gap: 12,
+  },
   newChatButton: {
-    margin: 16,
+    flex: 1,
     padding: 14,
     borderRadius: 12,
     backgroundColor: '#1e3a5f',
@@ -86,6 +185,15 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#3b82f6',
   },
+  editButton: {
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+  },
+  editButtonText: {
+    fontSize: 16,
+    fontWeight: '500',
+    color: '#3b82f6',
+  },
   list: {
     paddingHorizontal: 16,
   },
@@ -94,6 +202,37 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     padding: 14,
     marginBottom: 8,
+  },
+  sessionCardSelected: {
+    backgroundColor: '#1a1a2e',
+    borderColor: '#3b82f6',
+    borderWidth: 1,
+  },
+  sessionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  checkbox: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    borderWidth: 2,
+    borderColor: '#4b5563',
+    marginRight: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  checkboxChecked: {
+    backgroundColor: '#3b82f6',
+    borderColor: '#3b82f6',
+  },
+  checkmark: {
+    color: '#ffffff',
+    fontSize: 13,
+    fontWeight: 'bold',
+  },
+  sessionContent: {
+    flex: 1,
   },
   sessionHeader: {
     flexDirection: 'row',
@@ -143,5 +282,41 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#6b7280',
     textAlign: 'center',
+  },
+  bottomBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#1f1f1f',
+    backgroundColor: '#0a0a0a',
+  },
+  selectAllButton: {
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+  },
+  selectAllText: {
+    fontSize: 15,
+    color: '#3b82f6',
+    fontWeight: '500',
+  },
+  deleteButton: {
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+    borderRadius: 8,
+    backgroundColor: '#7f1d1d',
+  },
+  deleteButtonDisabled: {
+    backgroundColor: '#1f1f1f',
+  },
+  deleteText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#ef4444',
+  },
+  deleteTextDisabled: {
+    color: '#4b5563',
   },
 });
