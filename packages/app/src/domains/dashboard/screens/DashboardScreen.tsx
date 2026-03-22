@@ -110,10 +110,7 @@ export function DashboardScreen() {
     setRefreshing(true);
     try {
       const sessionId = `dashboard_refresh_${Date.now()}`;
-      await relay.sendChat(sessionId, {
-        role: 'user',
-        content: 'Show my current wallet balances and DeFi positions.',
-      });
+      await relay.sendChat(sessionId, 'Show my current wallet balances and DeFi positions.');
 
       // Listen for the chat response with balance data
       const responseHandler = (message: { channel: string; payload: unknown; sessionId: string | null }) => {

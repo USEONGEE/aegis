@@ -92,10 +92,7 @@ export function SettingsScreen() {
   const fetchSignerListViaChat = useCallback(async () => {
     try {
       const sessionId = `signer_list_${Date.now()}`;
-      await relay.sendChat(sessionId, {
-        role: 'user',
-        content: 'List my paired signers.',
-      });
+      await relay.sendChat(sessionId, 'List my paired signers.');
 
       const responseHandler = (message: RelayMessage) => {
         if (message.channel !== 'chat' || message.sessionId !== sessionId) return;

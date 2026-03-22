@@ -15,7 +15,7 @@
 import nacl from 'tweetnacl';
 import { encodeBase64, decodeBase64, encodeUTF8 } from 'tweetnacl-util';
 
-import type { RelayChannel, ChatEvent } from '@wdk-app/protocol';
+import type { RelayChannel, ChatEvent, RelayChatInput } from '@wdk-app/protocol';
 export type { RelayChannel };
 
 export interface RelayMessage {
@@ -393,9 +393,10 @@ export class RelayClient {
   /**
    * Send a chat message (user -> OpenClaw via Relay -> daemon).
    */
-  async sendChat(sessionId: string, payload: unknown): Promise<void> {
+  async sendChat(sessionId: string, text: string): Promise<void> {
     this.ensureConnected();
-    this.ws!.send(this.buildEnvelope('chat', payload, { sessionId }));
+    const input: RelayChatInput = { userId: this.userId, sessionId, text };
+    this.ws!.send(this.buildEnvelope('chat', input, { sessionId }));
   }
 
   /**

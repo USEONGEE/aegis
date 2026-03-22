@@ -289,11 +289,7 @@ export function ChatDetailScreen({ route }: Props) {
     setLoading(true);
 
     try {
-      await relay.sendChat(currentSessionId, {
-        role: 'user',
-        content: text,
-        sessionId: currentSessionId,
-      });
+      await relay.sendChat(currentSessionId, text);
     } catch (e) {
       addMessage({
         kind: 'status',
