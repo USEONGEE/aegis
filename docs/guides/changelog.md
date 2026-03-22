@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.5.14 - Activity 정책 뷰 (2026-03-23)
+
+- **ActivityScreen 전면 재작성**: 기존 이벤트 타임라인 제거 → 정책 뷰로 교체. 현재 선택된 지갑의 활성 정책(policyList) + 대기 정책(pendingApprovals, type=policy 필터) 표시
+- **지갑 주소 상단 표시**: useWalletStore 캐시 + getWalletAddress query fallback
+- **상태 4분기**: loading / error(재시도 버튼) / loaded / empty 구분
+- **refetch triggers**: mount, accountIndex 변경, relay 재연결
+- 📝 [Phase 문서](../archive/v0.5.14-activity-policy-view/README.md)
+
 ## v0.5.8 - 세션별 isLoading 분리 (2026-03-23)
 
 - **sessionTransient 구조 전환**: useChatStore의 4개 글로벌 transient 필드(isLoading, isTyping, queuedMessageId, messageState) → `sessionTransient: Record<string, SessionTransientState>` + getter/setter/reset 3개 액션으로 전환

@@ -4,117 +4,56 @@ AI DeFi Agent 서명 엔진 + 제어 인프라.
 
 ## 현재 페이즈
 
-### v0.5.2 — Chat Protocol 타입 강제 적용
-- **상태**: Step 1 - PRD
-- **문서**: [docs/phases/v0.5.2-chat-protocol-enforcement/](docs/phases/v0.5.2-chat-protocol-enforcement/)
-- **Codex Session ID**: `/Users/mousebook/Documents/GitHub/WDK-APP/docs/phases/v0.5.2-chat-protocol-enforcement`
-- **시작일**: 2026-03-22
-
-### v0.5.0 — Chat Poller 구현
-- **상태**: Step 5 - 개발중
-- **문서**: [docs/phases/v0.5.0-chat-poller/](docs/phases/v0.5.0-chat-poller/)
-- **시작일**: 2026-03-22
-
-### v0.4.3 — Relay 타입 구조 정리
-- **상태**: 개발 완료 (Codex 리뷰 통과, 커밋 대기)
-- **문서**: [docs/phases/v0.4.3-relay-type-structure/](docs/phases/v0.4.3-relay-type-structure/)
-- **Codex Session ID**: `/Users/mousebook/Documents/GitHub/WDK-APP/docs/phases/v0.4.3-relay-type-structure`
-- **시작일**: 2026-03-22
-
-### v0.4.5 — 크로스 패키지 Unknown 타입 체인 해소
+### v0.5.15 — EVM Wallet Manager
 - **상태**: 개발 완료 (커밋 대기)
-- **문서**: [docs/phases/v0.4.5-unknown-type-chain/](docs/phases/v0.4.5-unknown-type-chain/)
-- **시작일**: 2026-03-22
-
-### v0.4.6 — Store 경계 분리 (WdkStore / DaemonStore)
-- **상태**: Step 5 대기 (PRD+설계+DoD+티켓 완료)
-- **문서**: [docs/phases/v0.4.6-store-boundary-separation/](docs/phases/v0.4.6-store-boundary-separation/)
-- **Codex Session ID**: `/Users/mousebook/Documents/GitHub/WDK-APP/docs/phases/v0.4.6-store-boundary-separation`
-- **시작일**: 2026-03-22
-
-### v0.4.7 — Dead Exports 정리
-- **상태**: 개발 완료 (Codex 리뷰 통과, 커밋 대기)
-- **문서**: [docs/phases/v0.4.7-dead-exports-cleanup/](docs/phases/v0.4.7-dead-exports-cleanup/)
-- **Codex Session ID**: `/Users/mousebook/Documents/GitHub/WDK-APP/docs/phases/v0.4.7-dead-exports-cleanup`
-- **시작일**: 2026-03-22
-
-### v0.4.0 — No Optional 원칙 전면 적용
-- **상태**: Step 1 - PRD
-- **문서**: [docs/phases/v0.4.0-no-optional-cleanup/](docs/phases/v0.4.0-no-optional-cleanup/)
-- **Codex Session ID**: `/Users/mousebook/Documents/GitHub/WDK-APP/docs/phases/v0.4.0-no-optional-cleanup`
-- **시작일**: 2026-03-22
+- **문서**: [docs/phases/v0.5.15-evm-wallet-manager/](docs/phases/v0.5.15-evm-wallet-manager/)
+- **Codex Session ID**: `/Users/mousebook/Documents/GitHub/WDK-APP/docs/phases/v0.5.15-evm-wallet-manager`
+- **시작일**: 2026-03-23
 
 ## 완료된 페이즈
 
-모든 완료 문서는 [docs/archive/](docs/archive/)에 보관.
-
-| 버전 | 이름 |
-|---|---|
-| v0.1.0 | WDK App Platform |
-| v0.1.1 | Manifest Role Fix |
-| v0.1.2 | TS Migration |
-| v0.1.3 | CI Checks & Type Graph |
-| v0.1.4 | Type Refactoring |
-| v0.1.5 | Gap Resolution |
-| v0.1.6 | Layer 0 Type Cleanup |
-| v0.1.7 | Store 타입 네이밍 통일 |
-| v0.1.8 | EvaluationResult 정책 컨텍스트 |
-| v0.1.9 | Device → Signer 추상화 |
-| v0.1.10 | Layer 0 Semantic Union |
-| v0.2.0 | BIP-44 멀티 월렛 아키텍처 |
-| v0.2.1 | Stored extends Input 타입 통일 |
-| v0.2.2 | Policy Resolver |
-| v0.2.3 | Manifest Type Dedup |
-| v0.2.4 | WDK 외부 타입 직접 참조 |
-| v0.2.5 | Decision 단순화 + 정책 버전 이력 |
-| v0.2.6 | Daemon 타입 경계 정합성 복원 |
-| v0.2.7 | signerId === publicKey 통합 |
-| v0.2.8 | Manifest 정책 호환성 복원 |
-| v0.2.9 | Daemon Wide-Bag Union 분리 |
-| v0.2.10 | WDKContext 분해 + Port Interface |
-| v0.2.11 | Daemon 타입 인프라 정리 |
-| v0.3.0 | Relay Daemon Multiplex |
-| v0.3.1 | App 채팅 UX 완성 |
-| v0.3.2 | 프로토콜 타입 중복 제거 + 취소 API 분리 |
-| v0.3.3 | Relay 오프라인 Cron 복구 통합 |
-| v0.3.4 | Dead Code 정리 + Pairing 전면 제거 |
-| v0.3.5 | Dead Exports CI 체크 포팅 |
-| v0.3.6 | Daemon Self-Register |
-| v0.4.0 | No Optional 원칙 전면 적용 |
-| v0.4.1 | Strict CI Checks (no-empty-catch, no-console, no-explicit-any) |
-| v0.4.2 | WDK 이벤트 단일화 + 타입 규격화 |
-| v0.4.4 | App WDK 이벤트 마이그레이션 — sendApproval() 전환 + eventName→event.type + 이벤트 자동 소비 |
-| v0.4.8 | WS 채널 재설계 + Protocol 타입 강제 적용 |
-| v0.4.9 | 도메인 모델 Null 제거 |
-| v0.5.1 | EVM Wallet Bootstrap |
-| v0.5.4 | Wallet Address SSOT |
-| v0.5.5 | OpenClaw Plugin Integration |
-| v0.5.6 | Portfolio Enso Pricing |
-| v0.5.9 | Chat Markdown 렌더링 |
-| v0.5.7 | Manifest DeFi Tools |
-| v0.5.10 | Wallet Address Display + Multi-Wallet 관리 |
-| v0.5.11 | Transfer Tool 정리 + Manifest Tool 연결 + getWalletAddress |
-| v0.5.13 | KittenSwap 전면 제거 |
-| v0.5.8 | 세션별 isLoading 분리 |
-| v0.5.12 | Chat Session 삭제 |
+[CHANGELOG.md](CHANGELOG.md) 참조. 완료 문서는 [docs/archive/](docs/archive/)에 보관.
 
 ## 프로젝트 구조
 
 ```
 packages/
-  guarded-wdk/   ← 서명 엔진 (@tetherto/wdk 포크)
-  manifest/      ← policy 카탈로그
-  daemon/        ← orchestration host
-  relay/         ← Relay Server
-  app/           ← RN App (Expo)
+  guarded-wdk/      ← 서명 엔진 (@tetherto/wdk 래퍼)
+  manifest/         ← DeFi tool 카탈로그 (tx + policy 빌더)
+  daemon/           ← orchestration host
+  relay/            ← Relay Server
+  app/              ← RN App (Expo)
+  openclaw-plugin/  ← OpenClaw AI 도구 플러그인
 ```
 
 ## 핵심 원칙
 
-1. WDK = 서명 엔진. DeFi 로직은 별도 CLI.
+1. WDK = 서명 엔진. DeFi 로직은 manifest 패키지.
 2. AI는 policy를 요청할 수 있지만, 승인할 수 없다.
 3. tx 승인과 policy 승인은 동일한 보안 모델 (Unified SignedApproval).
 4. Breaking change 적극 허용.
+
+## Manifest — DeFi Tool 카탈로그
+
+manifest 패키지(`packages/manifest/src/tools/`)는 DeFi 프로토콜별 tx + policy를 **한 묶음으로 빌드**하는 순수 함수를 제공한다.
+
+```typescript
+interface ToolCall {
+  tx: { to: string; data: string; value: string }        // 실행할 트랜잭션
+  policy: { type: 'call'; permissions: PermissionDict }   // 이 tx를 허용하는 정책
+  description: string                                      // 사람이 읽을 설명
+}
+```
+
+**모든 manifest tool은 동일한 `ToolCall` 반환**. tx와 policy는 분리 불가 — policy의 permissions가 정확히 이 tx의 selector + args를 허용하도록 생성된다.
+
+**AI 사용 플로우**:
+1. `erc20Transfer(token, to, amount)` → `{ tx, policy, description }` 반환
+2. `policyRequest(policy)` → 사용자 승인 대기
+3. 사용자 앱에서 승인 (Ed25519 서명)
+4. `sendTransaction(tx)` → policy 평가 → ALLOW → 서명+전송
+
+새 DeFi 프로토콜 추가 시 `manifest/src/tools/`에 함수 추가 → daemon tool-surface에 case 추가 → OpenClaw 플러그인에 등록.
 
 ## 설계 원칙
 
