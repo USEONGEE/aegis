@@ -15,6 +15,18 @@ AI DeFi Agent 서명 엔진 + 제어 인프라.
 - **문서**: [docs/phases/v0.4.5-unknown-type-chain/](docs/phases/v0.4.5-unknown-type-chain/)
 - **시작일**: 2026-03-22
 
+### v0.4.6 — Store 경계 분리 (WdkStore / DaemonStore)
+- **상태**: Step 5 대기 (PRD+설계+DoD+티켓 완료)
+- **문서**: [docs/phases/v0.4.6-store-boundary-separation/](docs/phases/v0.4.6-store-boundary-separation/)
+- **Codex Session ID**: `/Users/mousebook/Documents/GitHub/WDK-APP/docs/phases/v0.4.6-store-boundary-separation`
+- **시작일**: 2026-03-22
+
+### v0.4.7 — Dead Exports 정리
+- **상태**: 개발 완료 (Codex 리뷰 통과, 커밋 대기)
+- **문서**: [docs/phases/v0.4.7-dead-exports-cleanup/](docs/phases/v0.4.7-dead-exports-cleanup/)
+- **Codex Session ID**: `/Users/mousebook/Documents/GitHub/WDK-APP/docs/phases/v0.4.7-dead-exports-cleanup`
+- **시작일**: 2026-03-22
+
 ### v0.4.0 — No Optional 원칙 전면 적용
 - **상태**: Step 1 - PRD
 - **문서**: [docs/phases/v0.4.0-no-optional-cleanup/](docs/phases/v0.4.0-no-optional-cleanup/)
