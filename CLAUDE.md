@@ -4,8 +4,14 @@ AI DeFi Agent 서명 엔진 + 제어 인프라.
 
 ## 현재 페이즈
 
-### v0.5.0 — Chat Poller 구현
+### v0.5.2 — Chat Protocol 타입 강제 적용
 - **상태**: Step 1 - PRD
+- **문서**: [docs/phases/v0.5.2-chat-protocol-enforcement/](docs/phases/v0.5.2-chat-protocol-enforcement/)
+- **Codex Session ID**: `/Users/mousebook/Documents/GitHub/WDK-APP/docs/phases/v0.5.2-chat-protocol-enforcement`
+- **시작일**: 2026-03-22
+
+### v0.5.0 — Chat Poller 구현
+- **상태**: Step 5 - 개발중
 - **문서**: [docs/phases/v0.5.0-chat-poller/](docs/phases/v0.5.0-chat-poller/)
 - **시작일**: 2026-03-22
 
