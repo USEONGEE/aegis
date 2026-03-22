@@ -20,7 +20,7 @@ export interface EncryptedPayload {
 
 import type { RelayEnvelope } from '@wdk-app/protocol'
 
-export type MessageHandler = (type: string, payload: any, raw: any) => void
+export type MessageHandler = (type: string, payload: Record<string, unknown>, raw: Record<string, unknown>) => void
 
 // ---------------------------------------------------------------------------
 // RelayClient
@@ -167,7 +167,7 @@ export class RelayClient extends EventEmitter {
     }
 
     // v0.3.0: include userId for multiplex routing (explicit arg or from payload)
-    const effectiveUserId = userId || (payload as any)?.userId || null
+    const effectiveUserId = userId || (payload as Record<string, unknown>)?.userId as string | null || null
 
     // Encrypt payload if E2E session is established
     const encrypted = !!this._sessionKey
@@ -196,7 +196,7 @@ export class RelayClient extends EventEmitter {
     try {
       this._ws.send(message)
       return true
-    } catch (err: any) {
+    } catch (err: unknown) {
       this._logger.error({ err, type }, 'Failed to send message to Relay')
       return false
     }
@@ -219,8 +219,8 @@ export class RelayClient extends EventEmitter {
     if (this._ws) {
       try {
         this._ws.close(1000, 'Client disconnect')
-      } catch {
-        // Ignore close errors
+      } catch (err: unknown) {
+        this._logger.debug({ err }, 'Ignoring close error during disconnect')
       }
       this._ws = null
     }
@@ -243,7 +243,7 @@ export class RelayClient extends EventEmitter {
           authorization: `Bearer ${this._token}`
         }
       })
-    } catch (err: any) {
+    } catch (err: unknown) {
       this._logger.error({ err }, 'Failed to create WebSocket')
       this._scheduleReconnect()
       return
@@ -264,7 +264,7 @@ export class RelayClient extends EventEmitter {
       const authTimeout = setTimeout(() => {
         if (!this._connected) {
           this._logger.warn('Authentication timeout — reconnecting')
-          try { this._ws?.close(4002, 'Authentication timeout') } catch {}
+          try { this._ws?.close(4002, 'Authentication timeout') } catch (err: unknown) { this._logger.debug({ err }, 'Auth timeout close error') }
         }
       }, 10000)
 
@@ -274,9 +274,9 @@ export class RelayClient extends EventEmitter {
     })
 
     this._ws.on('message', (data: WebSocket.Data) => {
-      let msg: any
+      let msg: Record<string, unknown>
       try {
-        msg = JSON.parse(data.toString())
+        msg = JSON.parse(data.toString()) as Record<string, unknown>
       } catch (err) {
         this._logger.warn({ raw: data.toString().slice(0, 200) }, 'Unparseable message from Relay')
         return
@@ -303,18 +303,18 @@ export class RelayClient extends EventEmitter {
 
       // v0.3.0: Track per-user control stream cursors
       if (msg.id && msg.userId && msg.type === 'control') {
-        this._lastControlIds[msg.userId] = msg.id
+        this._lastControlIds[msg.userId as string] = msg.id as string
       }
 
       // Dispatch to handler
       if (this._messageHandler) {
-        const type: string = msg.type || 'unknown'
-        let payload: any = msg.payload || msg
+        const type: string = (msg.type as string) || 'unknown'
+        let payload: Record<string, unknown> = (msg.payload as Record<string, unknown>) || (msg as Record<string, unknown>)
 
         // Decrypt payload if E2E session is established and message is encrypted
         if (this._sessionKey && msg.encrypted && payload.nonce && payload.ciphertext) {
           try {
-            payload = JSON.parse(this._decrypt(payload))
+            payload = JSON.parse(this._decrypt(payload as unknown as EncryptedPayload)) as Record<string, unknown>
           } catch (err) {
             this._logger.error({ err }, 'Failed to decrypt incoming message')
             return
@@ -383,8 +383,8 @@ export class RelayClient extends EventEmitter {
         this._logger.warn({ elapsed }, 'Heartbeat timeout -- closing connection')
         try {
           this._ws.close(4000, 'Heartbeat timeout')
-        } catch {
-          // Ignore
+        } catch (err: unknown) {
+          this._logger.debug({ err }, 'Heartbeat timeout close error')
         }
         return
       }
@@ -393,8 +393,8 @@ export class RelayClient extends EventEmitter {
       try {
         this._ws.send(JSON.stringify({ type: 'heartbeat' }))
         this._ws.ping()
-      } catch {
-        // Ignore -- close handler will trigger reconnect
+      } catch (err: unknown) {
+        this._logger.debug({ err }, 'Heartbeat send failed — close handler will reconnect')
       }
     }, this._heartbeatIntervalMs)
   }

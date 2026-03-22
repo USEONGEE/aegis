@@ -65,7 +65,7 @@ export function createOpenClawClient (config: DaemonConfig): OpenClawClient {
     async chat (userId: string, sessionId: string, messages: ChatMessage[], tools: ToolDefinition[], opts?: { signal?: AbortSignal }): Promise<ChatResponse> {
       const userField = sessionId ? `${userId}:${sessionId}` : userId
 
-      const params: Record<string, any> = {
+      const params: Record<string, unknown> = {
         model: 'default',
         stream: false,
         user: userField,
@@ -76,7 +76,7 @@ export function createOpenClawClient (config: DaemonConfig): OpenClawClient {
         params.tools = tools
       }
 
-      const response = await client.chat.completions.create(params as any, { signal: opts?.signal })
+      const response = await client.chat.completions.create(params as unknown as OpenAI.ChatCompletionCreateParamsNonStreaming, { signal: opts?.signal })
       return response as unknown as ChatResponse
     },
 
@@ -86,7 +86,7 @@ export function createOpenClawClient (config: DaemonConfig): OpenClawClient {
     async chatStream (userId: string, sessionId: string, messages: ChatMessage[], tools: ToolDefinition[], onDelta: ((delta: string) => void) | null, opts?: { signal?: AbortSignal }): Promise<ChatResponse> {
       const userField = sessionId ? `${userId}:${sessionId}` : userId
 
-      const params: Record<string, any> = {
+      const params: Record<string, unknown> = {
         model: 'default',
         stream: true,
         user: userField,
@@ -97,7 +97,7 @@ export function createOpenClawClient (config: DaemonConfig): OpenClawClient {
         params.tools = tools
       }
 
-      const stream = await client.chat.completions.create(params as any, { signal: opts?.signal }) as any
+      const stream = await client.chat.completions.create(params as unknown as OpenAI.ChatCompletionCreateParamsStreaming, { signal: opts?.signal })
 
       let role = 'assistant'
       let content = ''

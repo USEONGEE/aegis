@@ -120,8 +120,8 @@ export function SettingsScreen() {
 
       // Auto-cleanup after timeout
       setTimeout(() => relay.removeMessageHandler(responseHandler), 30_000);
-    } catch {
-      // Will retry on reconnect
+    } catch (_err: unknown) {
+      return
     }
   }, [relay]);
 

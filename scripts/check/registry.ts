@@ -23,6 +23,9 @@ import { packageExportsBoundary } from './checks/cross/package-exports-boundary.
 import { deadFiles } from './checks/cross/dead-files.js'
 import { deadExportsCheck } from './checks/cross/dead-exports.js'
 import { typescriptCompile } from './checks/cross/typescript-compile.js'
+import { noEmptyCatch } from './checks/cross/no-empty-catch.js'
+import { noConsole } from './checks/cross/no-console.js'
+import { noExplicitAny } from './checks/cross/no-explicit-any.js'
 
 export const checks: CheckEntry[] = [
   // guarded-wdk group (2)
@@ -121,6 +124,24 @@ export const checks: CheckEntry[] = [
     description: 'Detect exported symbols never imported anywhere in the project',
     group: 'cross',
     fn: deadExportsCheck,
+  },
+  {
+    name: 'cross/no-empty-catch',
+    description: 'All packages must not have empty catch blocks (comments do not count)',
+    group: 'cross',
+    fn: noEmptyCatch,
+  },
+  {
+    name: 'cross/no-console',
+    description: 'All packages must not use console.* (use structured logger)',
+    group: 'cross',
+    fn: noConsole,
+  },
+  {
+    name: 'cross/no-explicit-any',
+    description: 'daemon/relay/app/manifest must not use explicit any types',
+    group: 'cross',
+    fn: noExplicitAny,
   },
   // Phase 2: typescript-compile (외부 JS 라이브러리 타입 불일치 해소 필요)
   // {

@@ -1,11 +1,12 @@
 import { SessionMessageQueue, MessageQueueManager } from '../src/message-queue.js'
-import type { QueuedMessage, MessageProcessor } from '../src/message-queue.js'
+import type { QueuedMessage, MessageProcessor, ProcessResult } from '../src/message-queue.js'
 
 describe('SessionMessageQueue', () => {
   test('sequential processing: 2 messages enqueued, processed in order', async () => {
     const processed: string[] = []
     const processor: MessageProcessor = async (msg) => {
       processed.push(msg.text)
+      return { ok: true }
     }
 
     const queue = new SessionMessageQueue('sess-1', processor)
@@ -22,6 +23,7 @@ describe('SessionMessageQueue', () => {
     const processor: MessageProcessor = async () => {
       // Block processing so queue fills up
       await new Promise(() => {})
+      return { ok: true }
     }
 
     const queue = new SessionMessageQueue('sess-1', processor, { maxQueueSize: 2 })
@@ -44,6 +46,7 @@ describe('SessionMessageQueue', () => {
     let processingResolve: (() => void) | null = null
     const processor: MessageProcessor = async () => {
       await new Promise<void>(resolve => { processingResolve = resolve })
+      return { ok: true }
     }
 
     const queue = new SessionMessageQueue('sess-1', processor)
@@ -71,7 +74,7 @@ describe('SessionMessageQueue', () => {
   })
 
   test('cancelQueued: non-existent messageId returns not_found', () => {
-    const processor: MessageProcessor = async () => {}
+    const processor: MessageProcessor = async () => ({ ok: true })
     const queue = new SessionMessageQueue('sess-1', processor)
 
     const result = queue.cancelQueued('nonexistent-id')
@@ -80,7 +83,7 @@ describe('SessionMessageQueue', () => {
   })
 
   test('cancelQueued: after processing completes, returns not_found', async () => {
-    const processor: MessageProcessor = async () => {}
+    const processor: MessageProcessor = async () => ({ ok: true })
 
     const queue = new SessionMessageQueue('sess-1', processor)
     const msgId = queue.enqueue({ sessionId: 'sess-1', source: 'user', userId: 'u1', chainId: null, cronId: null, text: 'msg' })
@@ -102,6 +105,7 @@ describe('SessionMessageQueue', () => {
           resolve()
         })
       })
+      return { ok: true }
     }
 
     const queue = new SessionMessageQueue('sess-1', processor)
@@ -122,7 +126,7 @@ describe('SessionMessageQueue', () => {
   })
 
   test('cancelActive: non-processing messageId returns not_found', () => {
-    const processor: MessageProcessor = async () => {}
+    const processor: MessageProcessor = async () => ({ ok: true })
     const queue = new SessionMessageQueue('sess-1', processor)
 
     const result = queue.cancelActive('nonexistent-id')
@@ -131,7 +135,7 @@ describe('SessionMessageQueue', () => {
   })
 
   test('enqueue returns a messageId', () => {
-    const processor: MessageProcessor = async () => {}
+    const processor: MessageProcessor = async () => ({ ok: true })
     const queue = new SessionMessageQueue('sess-1', processor)
 
     const msgId = queue.enqueue({ sessionId: 'sess-1', source: 'user', userId: 'u1', chainId: null, cronId: null, text: 'test' })
@@ -144,6 +148,7 @@ describe('SessionMessageQueue', () => {
     const processor: MessageProcessor = async (msg) => {
       if (msg.text === 'fail') throw new Error('processor error')
       processed.push(msg.text)
+      return { ok: true }
     }
 
     const queue = new SessionMessageQueue('sess-1', processor)
@@ -161,6 +166,7 @@ describe('MessageQueueManager', () => {
     const processed: string[] = []
     const processor: MessageProcessor = async (msg) => {
       processed.push(`${msg.sessionId}:${msg.text}`)
+      return { ok: true }
     }
 
     const manager = new MessageQueueManager(processor)
@@ -180,6 +186,7 @@ describe('MessageQueueManager', () => {
     let processingResolve: (() => void) | null = null
     const processor: MessageProcessor = async () => {
       await new Promise<void>(resolve => { processingResolve = resolve })
+      return { ok: true }
     }
 
     const manager = new MessageQueueManager(processor)
@@ -212,6 +219,7 @@ describe('MessageQueueManager', () => {
           resolve()
         })
       })
+      return { ok: true }
     }
 
     const manager = new MessageQueueManager(processor)

@@ -88,8 +88,8 @@ export class AdminServer {
     // Remove stale socket file if present
     try {
       await unlink(this._socketPath)
-    } catch (err: any) {
-      if (err.code !== 'ENOENT') throw err
+    } catch (err: unknown) {
+      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err
     }
 
     return new Promise<void>((resolve, reject) => {
@@ -151,14 +151,14 @@ export class AdminServer {
         try {
           const result = await this._dispatch(request)
           this._respond(conn, result)
-        } catch (err: any) {
+        } catch (err: unknown) {
           this._logger.error({ err, command: request.command }, 'Admin command error')
-          this._respond(conn, { ok: false, error: err.message })
+          this._respond(conn, { ok: false, error: err instanceof Error ? err.message : String(err) })
         }
       }
     })
 
-    conn.on('error', (err: any) => {
+    conn.on('error', (err: NodeJS.ErrnoException) => {
       if (err.code !== 'ECONNRESET' && err.code !== 'EPIPE') {
         this._logger.warn({ err: err.message }, 'Admin connection error')
       }
@@ -168,8 +168,8 @@ export class AdminServer {
   private _respond (conn: Socket, data: AdminResponse): void {
     try {
       conn.write(JSON.stringify(data) + '\n')
-    } catch {
-      // Connection may have closed -- ignore
+    } catch (err: unknown) {
+      this._logger.debug({ err }, 'Failed to write admin response — connection closed')
     }
   }
 

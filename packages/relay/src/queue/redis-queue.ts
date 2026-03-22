@@ -36,7 +36,7 @@ export class RedisQueue extends QueueAdapter {
     // Separate connection for blocking reads (XREAD BLOCK shares nothing with
     // the writer connection to avoid head-of-line blocking).
     this.blockingRedis = new Redis(url, {
-      maxRetriesPerRequest: null as any, // allow indefinite retry for blocking reads
+      maxRetriesPerRequest: null as unknown as number, // allow indefinite retry for blocking reads
       retryStrategy (times: number): number {
         return Math.min(times * 200, 5000)
       },
@@ -83,7 +83,7 @@ export class RedisQueue extends QueueAdapter {
       'STREAMS',
       stream,
       lastId,
-    ) as any
+    )
 
     if (!result) return []
 
@@ -158,9 +158,9 @@ export class RedisQueue extends QueueAdapter {
   async ensureGroup (stream: string, group: string, startId: string = '0'): Promise<void> {
     try {
       await this.redis.xgroup('CREATE', stream, group, startId, 'MKSTREAM')
-    } catch (err: any) {
+    } catch (err: unknown) {
       // BUSYGROUP = group already exists -- safe to ignore.
-      if (!err.message.includes('BUSYGROUP')) throw err
+      if (!(err instanceof Error) || !err.message.includes('BUSYGROUP')) throw err
     }
   }
 
@@ -179,7 +179,7 @@ export class RedisQueue extends QueueAdapter {
       'STREAMS',
       stream,
       '>',
-    ) as any
+    )
 
     if (!result) return []
 

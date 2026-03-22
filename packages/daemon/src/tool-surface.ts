@@ -1,9 +1,37 @@
 import { randomUUID } from 'node:crypto'
 import { intentHash, policyHash, CHAIN_IDS } from '@wdk-app/canonical'
+import type { PolicyObject } from '@wdk-app/canonical'
 import type { Logger } from 'pino'
 import type { WDKInstance } from './wdk-host.js'
 import type { ExecutionJournal } from './execution-journal.js'
 import type { ToolStorePort, ApprovalBrokerPort } from './ports.js'
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/** Extract error message from unknown catch value. */
+function errMsg (err: unknown): string {
+  return err instanceof Error ? err.message : String(err)
+}
+
+/** Narrow unknown catch value to an object with optional typed fields. */
+function errObj (err: unknown): { name?: string; message?: string; context?: unknown } {
+  if (err instanceof Error) return err as Error & { context?: unknown }
+  return {}
+}
+
+// ---------------------------------------------------------------------------
+// Boundary type: describes methods the tool-surface calls on an account.
+// IWalletAccountWithProtocols lacks `data` on sendTransaction and `signTransaction`
+// because those are added by the guarded middleware at runtime.
+// ---------------------------------------------------------------------------
+
+interface ToolAccount {
+  sendTransaction (tx: { to: string; data: string; value: string }): Promise<{ hash?: string | null; fee?: bigint | null }>
+  signTransaction (tx: { to: string; data: string; value: string }): Promise<{ signedTx?: string | null; intentHash?: string | null; requestId?: string | null }>
+  getBalance (): Promise<unknown>
+}
 
 // ---------------------------------------------------------------------------
 // Types
@@ -262,31 +290,32 @@ export async function executeToolCall (name: string, args: ToolArgs, ctx: ToolEx
       }
 
       try {
-        const account: any = await wdk.getAccount(chain, acctIdx)
+        const account = await wdk.getAccount(chain, acctIdx) as unknown as ToolAccount
         const result = await account.sendTransaction({ to, data, value })
 
         if (journal) journal.updateStatus(hash, 'settled', result?.hash ?? null)
         return {
           status: 'executed',
           hash: result?.hash || null,
-          fee: result?.fee || null,
+          fee: result?.fee != null ? String(result.fee) : null,
           intentHash: hash
         }
-      } catch (err: any) {
-        if (err.name === 'PolicyRejectionError') {
+      } catch (err: unknown) {
+        const e = errObj(err)
+        if (e.name === 'PolicyRejectionError') {
           if (journal) journal.updateStatus(hash, 'rejected')
           try {
             const pv = await store.getPolicyVersion(acctIdx, chainId)
-            await store.saveRejection({ intentHash: hash, accountIndex: acctIdx, chainId, targetHash: hash, reason: err.message, context: err.context ?? null, policyVersion: pv, rejectedAt: Date.now() })
-          } catch (rejErr: any) {
+            await store.saveRejection({ intentHash: hash, accountIndex: acctIdx, chainId, targetHash: hash, reason: errMsg(err), context: e.context ?? null, policyVersion: pv, rejectedAt: Date.now() })
+          } catch (rejErr: unknown) {
             logger.error({ err: rejErr }, 'Failed to save rejection history')
           }
-          return { status: 'rejected', reason: err.message, intentHash: hash, context: err.context ?? null }
+          return { status: 'rejected', reason: errMsg(err), intentHash: hash, context: e.context ?? null }
         }
 
         if (journal) journal.updateStatus(hash, 'failed')
         logger.error({ err, name: 'sendTransaction' }, 'Tool execution error')
-        return { status: 'error', error: err.message, intentHash: hash }
+        return { status: 'error', error: errMsg(err), intentHash: hash }
       }
     }
 
@@ -297,32 +326,33 @@ export async function executeToolCall (name: string, args: ToolArgs, ctx: ToolEx
       const { chain, token, to, amount, accountIndex: acctIdx } = args as TransferArgs
 
       try {
-        const account: any = await wdk.getAccount(chain, acctIdx)
+        const account = await wdk.getAccount(chain, acctIdx) as unknown as ToolAccount
         const result = await account.sendTransaction({ to, data: encodeTransferData(token, to, amount), value: token.toLowerCase() === 'eth' ? amount : '0' })
 
         return {
           status: 'executed',
           hash: result?.hash || null,
-          fee: result?.fee || null,
+          fee: result?.fee != null ? String(result.fee) : null,
           token,
           amount
         }
-      } catch (err: any) {
-        if (err.name === 'PolicyRejectionError') {
+      } catch (err: unknown) {
+        const e = errObj(err)
+        if (e.name === 'PolicyRejectionError') {
           try {
             const chainId = resolveChainId(chain)
             const txData = encodeTransferData(token, to, amount)
             const txValue = token.toLowerCase() === 'eth' ? amount : '0'
             const rejHash = intentHash({ chainId, to, data: txData, value: txValue, timestamp: Date.now() })
             const pv = await store.getPolicyVersion(acctIdx, chainId)
-            await store.saveRejection({ intentHash: rejHash, accountIndex: acctIdx, chainId, targetHash: rejHash, reason: err.message, context: err.context ?? null, policyVersion: pv, rejectedAt: Date.now() })
-          } catch (rejErr: any) {
+            await store.saveRejection({ intentHash: rejHash, accountIndex: acctIdx, chainId, targetHash: rejHash, reason: errMsg(err), context: e.context ?? null, policyVersion: pv, rejectedAt: Date.now() })
+          } catch (rejErr: unknown) {
             logger.error({ err: rejErr }, 'Failed to save rejection history')
           }
-          return { status: 'rejected', reason: err.message, context: err.context ?? null }
+          return { status: 'rejected', reason: errMsg(err), context: e.context ?? null }
         }
         logger.error({ err, name: 'transfer' }, 'Tool execution error')
-        return { status: 'error', error: err.message }
+        return { status: 'error', error: errMsg(err) }
       }
     }
 
@@ -332,12 +362,12 @@ export async function executeToolCall (name: string, args: ToolArgs, ctx: ToolEx
     case 'getBalance': {
       const { chain, accountIndex } = args as ChainArgs
       try {
-        const account: any = await wdk.getAccount(chain, accountIndex)
-        const balances = await account.getBalance()
-        return { balances: balances || [] }
-      } catch (err: any) {
+        const account = await wdk.getAccount(chain, accountIndex) as unknown as ToolAccount
+        const balance = await account.getBalance()
+        return { balances: Array.isArray(balance) ? balance : [balance] }
+      } catch (err: unknown) {
         logger.error({ err, name: 'getBalance' }, 'Tool execution error')
-        return { status: 'error', error: err.message }
+        return { status: 'error', error: errMsg(err) }
       }
     }
 
@@ -350,9 +380,9 @@ export async function executeToolCall (name: string, args: ToolArgs, ctx: ToolEx
         const chainId = resolveChainId(chain)
         const policy = await store.loadPolicy(accountIndex, chainId)
         return { policies: policy ? policy.policies : [] }
-      } catch (err: any) {
+      } catch (err: unknown) {
         logger.error({ err, name: 'policyList' }, 'Tool execution error')
-        return { status: 'error', error: err.message }
+        return { status: 'error', error: errMsg(err) }
       }
     }
 
@@ -365,9 +395,9 @@ export async function executeToolCall (name: string, args: ToolArgs, ctx: ToolEx
         const chainId = resolveChainId(chain)
         const pending = await store.loadPendingApprovals(accountIndex ?? null, 'policy', chainId)
         return { pending: pending || [] }
-      } catch (err: any) {
+      } catch (err: unknown) {
         logger.error({ err, name: 'policyPending' }, 'Tool execution error')
-        return { status: 'error', error: err.message }
+        return { status: 'error', error: errMsg(err) }
       }
     }
 
@@ -378,7 +408,7 @@ export async function executeToolCall (name: string, args: ToolArgs, ctx: ToolEx
       const { chain, description, policies, accountIndex: acctIdx } = args as PolicyRequestArgs
       try {
         const chainId = resolveChainId(chain)
-        const hash = policyHash(policies as any)
+        const hash = policyHash(policies as unknown as PolicyObject[])
 
         await broker.createRequest('policy', {
           requestId: randomUUID(),
@@ -390,9 +420,9 @@ export async function executeToolCall (name: string, args: ToolArgs, ctx: ToolEx
         })
 
         return { status: 'pending', policyHash: hash }
-      } catch (err: any) {
+      } catch (err: unknown) {
         logger.error({ err, name: 'policyRequest' }, 'Tool execution error')
-        return { status: 'error', error: err.message }
+        return { status: 'error', error: errMsg(err) }
       }
     }
 
@@ -410,9 +440,9 @@ export async function executeToolCall (name: string, args: ToolArgs, ctx: ToolEx
           chainId
         })
         return { cronId, status: 'registered' }
-      } catch (err: any) {
+      } catch (err: unknown) {
         logger.error({ err, name: 'registerCron' }, 'Tool execution error')
-        return { status: 'error', error: err.message }
+        return { status: 'error', error: errMsg(err) }
       }
     }
 
@@ -423,9 +453,9 @@ export async function executeToolCall (name: string, args: ToolArgs, ctx: ToolEx
       try {
         const crons = await store.listCrons(accountIndex)
         return { crons }
-      } catch (err: any) {
+      } catch (err: unknown) {
         logger.error({ err, name: 'listCrons' }, 'Tool execution error')
-        return { status: 'error', error: err.message }
+        return { status: 'error', error: errMsg(err) }
       }
     }
 
@@ -437,9 +467,9 @@ export async function executeToolCall (name: string, args: ToolArgs, ctx: ToolEx
       try {
         await store.removeCron(cronId)
         return { status: 'removed' }
-      } catch (err: any) {
+      } catch (err: unknown) {
         logger.error({ err, name: 'removeCron' }, 'Tool execution error')
-        return { status: 'error', error: err.message }
+        return { status: 'error', error: errMsg(err) }
       }
     }
 
@@ -461,7 +491,7 @@ export async function executeToolCall (name: string, args: ToolArgs, ctx: ToolEx
       }
 
       try {
-        const account: any = await wdk.getAccount(chain, acctIdx)
+        const account = await wdk.getAccount(chain, acctIdx) as unknown as ToolAccount
         const result = await account.signTransaction({ to, data, value })
 
         if (journal) journal.updateStatus(hash, 'signed')
@@ -471,21 +501,22 @@ export async function executeToolCall (name: string, args: ToolArgs, ctx: ToolEx
           intentHash: result?.intentHash || hash,
           requestId: result?.requestId || hash
         }
-      } catch (err: any) {
-        if (err.name === 'PolicyRejectionError') {
+      } catch (err: unknown) {
+        const e = errObj(err)
+        if (e.name === 'PolicyRejectionError') {
           if (journal) journal.updateStatus(hash, 'rejected')
           try {
             const pv = await store.getPolicyVersion(acctIdx, chainId)
-            await store.saveRejection({ intentHash: hash, accountIndex: acctIdx, chainId, targetHash: hash, reason: err.message, context: err.context ?? null, policyVersion: pv, rejectedAt: Date.now() })
-          } catch (rejErr: any) {
+            await store.saveRejection({ intentHash: hash, accountIndex: acctIdx, chainId, targetHash: hash, reason: errMsg(err), context: e.context ?? null, policyVersion: pv, rejectedAt: Date.now() })
+          } catch (rejErr: unknown) {
             logger.error({ err: rejErr }, 'Failed to save rejection history')
           }
-          return { status: 'rejected', reason: err.message, intentHash: hash, context: err.context ?? null }
+          return { status: 'rejected', reason: errMsg(err), intentHash: hash, context: e.context ?? null }
         }
 
         if (journal) journal.updateStatus(hash, 'failed')
         logger.error({ err, name: 'signTransaction' }, 'Tool execution error')
-        return { status: 'error', error: err.message, intentHash: hash }
+        return { status: 'error', error: errMsg(err), intentHash: hash }
       }
     }
 
@@ -498,9 +529,9 @@ export async function executeToolCall (name: string, args: ToolArgs, ctx: ToolEx
         const chainId = resolveChainId(chain)
         const rejections = await store.listRejections({ accountIndex: acctIdx, chainId, limit })
         return { rejections }
-      } catch (err: any) {
+      } catch (err: unknown) {
         logger.error({ err, name: 'listRejections' }, 'Tool execution error')
-        return { status: 'error', error: err.message }
+        return { status: 'error', error: errMsg(err) }
       }
     }
 
@@ -513,9 +544,9 @@ export async function executeToolCall (name: string, args: ToolArgs, ctx: ToolEx
         const chainId = resolveChainId(chain)
         const policyVersions = await store.listPolicyVersions(acctIdx, chainId)
         return { policyVersions }
-      } catch (err: any) {
+      } catch (err: unknown) {
         logger.error({ err, name: 'listPolicyVersions' }, 'Tool execution error')
-        return { status: 'error', error: err.message }
+        return { status: 'error', error: errMsg(err) }
       }
     }
 

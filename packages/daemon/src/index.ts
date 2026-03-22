@@ -6,7 +6,7 @@ import { initWDK } from './wdk-host.js'
 import { createOpenClawClient } from './openclaw-client.js'
 import { RelayClient } from './relay-client.js'
 import { handleControlMessage } from './control-handler.js'
-import type { ControlMessage } from '@wdk-app/protocol'
+import type { ControlMessage, RelayChatInput } from '@wdk-app/protocol'
 import { handleChatMessage } from './chat-handler.js'
 import { ExecutionJournal } from './execution-journal.js'
 import { CronScheduler } from './cron-scheduler.js'
@@ -72,17 +72,22 @@ async function main (): Promise<void> {
         messageId: msg.messageId
       })
 
-      await _processChatDirect(
-        msg.userId,
-        msg.sessionId,
-        msg.text,
-        openclawClient,
-        relayClient,
-        ctx,
-        { maxIterations: config.toolCallMaxIterations },
-        signal,
-        msg.source
-      )
+      try {
+        await _processChatDirect(
+          msg.userId,
+          msg.sessionId,
+          msg.text,
+          openclawClient,
+          relayClient,
+          ctx,
+          { maxIterations: config.toolCallMaxIterations },
+          signal,
+          msg.source
+        )
+        return { ok: true }
+      } catch (err: unknown) {
+        return { ok: false, error: err instanceof Error ? err.message : String(err) }
+      }
     }
   )
 
@@ -93,14 +98,14 @@ async function main (): Promise<void> {
         handleControlMessage(payload as ControlMessage, { broker: broker!, logger, approvalStore: store, queueManager })
           .then((result) => {
             // v0.3.0: Forward control result with userId from incoming message
-            const incomingUserId = (payload as any)?.userId
+            const incomingUserId = (payload as Record<string, unknown>)?.userId as string | undefined
             relayClient.send('control', result as unknown as Record<string, unknown>, incomingUserId)
           })
           .catch((err: Error) => logger.error({ err }, 'Unhandled error in control handler'))
         break
 
       case 'chat':
-        handleChatMessage(payload, openclawClient, relayClient, ctx, {
+        handleChatMessage(payload as unknown as RelayChatInput, openclawClient, relayClient, ctx, {
           maxIterations: config.toolCallMaxIterations
         }, queueManager)
           .catch((err: Error) => logger.error({ err }, 'Unhandled error in chat handler'))
@@ -153,24 +158,15 @@ async function main (): Promise<void> {
         })
         if (enrollRes.ok) {
           const { enrollmentCode, expiresIn } = await enrollRes.json() as { enrollmentCode: string, expiresIn: number }
-          console.log('')
-          console.log('╔══════════════════════════════════════════╗')
-          console.log('║     DAEMON ENROLLMENT CODE               ║')
-          console.log('║                                          ║')
-          console.log(`║     ${enrollmentCode}                        ║`)
-          console.log('║                                          ║')
-          console.log(`║     Expires in ${expiresIn}s                      ║`)
-          console.log('║     Enter this code in the WDK App       ║')
-          console.log('╚══════════════════════════════════════════╝')
-          console.log('')
+          logger.info({ enrollmentCode, expiresIn }, 'Daemon enrollment code generated — enter this code in the WDK App')
         }
-      } catch (err: any) {
-        logger.warn({ err: err.message }, 'Could not request enrollment code')
+      } catch (err: unknown) {
+        logger.warn({ err: err instanceof Error ? err.message : String(err) }, 'Could not request enrollment code')
       }
 
       relayClient.connect(relayWsUrl, token)
-    } catch (err: any) {
-      logger.error({ err: err.message }, 'Daemon bootstrap failed — relay connection skipped')
+    } catch (err: unknown) {
+      logger.error({ err: err instanceof Error ? err.message : String(err) }, 'Daemon bootstrap failed — relay connection skipped')
     }
   } else if (config.relayUrl && config.relayToken) {
     // Legacy fallback: direct token (relayUrl must include /ws/daemon path)
@@ -261,7 +257,7 @@ async function main (): Promise<void> {
 // ---------------------------------------------------------------------------
 
 main().catch((err: Error) => {
-  // eslint-disable-next-line no-console
-  console.error('Fatal error starting daemon:', err)
+  const fallbackLogger = pino({ name: 'wdk-daemon' })
+  fallbackLogger.fatal({ err }, 'Fatal error starting daemon')
   process.exit(1)
 })

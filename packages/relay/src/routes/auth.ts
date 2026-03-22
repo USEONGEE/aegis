@@ -1,22 +1,34 @@
 import { createHash, randomBytes, timingSafeEqual, createPublicKey, verify as cryptoVerify } from 'node:crypto'
 import jwt from 'jsonwebtoken'
+import type { StringValue } from 'ms'
 import config from '../config.js'
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify'
 import type { RegistryAdapter } from '../registry/registry-adapter.js'
+import type { QueueAdapter } from '../queue/queue-adapter.js'
 
 // ---------------------------------------------------------------------------
 // Google OAuth token verification
 // ---------------------------------------------------------------------------
 
-let _googleCertsCache: { keys: any[], fetchedAt: number } | null = null
+interface GoogleJWK {
+  kid: string
+  kty: string
+  alg: string
+  use: string
+  n: string
+  e: string
+  [key: string]: unknown
+}
 
-async function fetchGoogleCerts (): Promise<any[]> {
+let _googleCertsCache: { keys: GoogleJWK[], fetchedAt: number } | null = null
+
+async function fetchGoogleCerts (): Promise<GoogleJWK[]> {
   if (_googleCertsCache && Date.now() - _googleCertsCache.fetchedAt < 3600_000) {
     return _googleCertsCache.keys
   }
   const res = await fetch('https://www.googleapis.com/oauth2/v3/certs')
   if (!res.ok) throw new Error(`Failed to fetch Google certs: ${res.status}`)
-  const data = await res.json() as { keys: any[] }
+  const data = await res.json() as { keys: GoogleJWK[] }
   _googleCertsCache = { keys: data.keys, fetchedAt: Date.now() }
   return data.keys
 }
@@ -40,7 +52,7 @@ async function verifyGoogleIdToken (idToken: string): Promise<{ sub: string, ema
 
   // Verify signature against Google's public keys
   const certs = await fetchGoogleCerts()
-  const cert = certs.find((k: any) => k.kid === header.kid)
+  const cert = certs.find((k: GoogleJWK) => k.kid === header.kid)
   if (!cert) throw new Error('Unknown signing key')
 
   const publicKey = createPublicKey({ key: cert, format: 'jwk' })
@@ -136,23 +148,23 @@ function signAppToken (userId: string, deviceId: string | null): string {
   const payload: Record<string, unknown> = { sub: userId, role: 'app' }
   if (deviceId !== null) payload.deviceId = deviceId
   return jwt.sign(payload, config.jwt.secret, {
-    expiresIn: config.jwt.expiresIn as any,
+    expiresIn: config.jwt.expiresIn as StringValue,
   })
 }
 
 function signDaemonToken (daemonId: string): string {
   return jwt.sign({ sub: daemonId, role: 'daemon' }, config.jwt.secret, {
-    expiresIn: config.jwt.expiresIn as any,
+    expiresIn: config.jwt.expiresIn as StringValue,
   })
 }
 
 export function verifyToken (token: string): JwtPayload | null {
   try {
-    const decoded = jwt.verify(token, config.jwt.secret) as any
+    const decoded = jwt.verify(token, config.jwt.secret) as Record<string, unknown>
     return {
-      sub: decoded.sub,
-      role: decoded.role || 'app',
-      deviceId: decoded.deviceId ?? null,
+      sub: decoded.sub as string,
+      role: (decoded.role as JwtPayload['role']) || 'app',
+      deviceId: (decoded.deviceId as string) ?? null,
     }
   } catch {
     return null
@@ -218,7 +230,7 @@ function requireBearer (request: FastifyRequest, reply: FastifyReply): JwtPayloa
 // ---------------------------------------------------------------------------
 
 export default async function authRoutes (fastify: FastifyInstance): Promise<void> {
-  const registry = (fastify as any).registry as RegistryAdapter
+  const registry = (fastify as unknown as { registry: RegistryAdapter }).registry
 
   /* ----------------------------------------------------------------
    * POST /auth/register  (legacy user registration)
@@ -477,16 +489,17 @@ export default async function authRoutes (fastify: FastifyInstance): Promise<voi
     // Bind user to daemon
     try {
       await registry.bindUser({ daemonId: enrollment.daemonId, userId })
-    } catch (err: any) {
+    } catch (err: unknown) {
       // UNIQUE violation → user already bound to another daemon
-      if (err.code === '23505' || err.message?.includes('unique') || err.message?.includes('duplicate')) {
+      const errObj = err as { code?: string; message?: string }
+      if (errObj.code === '23505' || errObj.message?.includes('unique') || errObj.message?.includes('duplicate')) {
         return reply.code(409).send({ error: 'User already bound to another daemon' })
       }
       throw err
     }
 
     // Notify daemon via WS if connected (handled by ws.ts event system)
-    const queue = (fastify as any).queue
+    const queue = (fastify as unknown as { queue?: QueueAdapter }).queue
     if (queue) {
       await queue.publish(`daemon-events:${enrollment.daemonId}`, {
         type: 'user_bound',
@@ -523,7 +536,7 @@ export default async function authRoutes (fastify: FastifyInstance): Promise<voi
     const unbound = await registry.unbindUsers(daemonId, userIds)
 
     // Notify daemon via WS for each unbound user
-    const queue = (fastify as any).queue
+    const queue = (fastify as unknown as { queue?: QueueAdapter }).queue
     if (queue) {
       for (const userId of unbound) {
         await queue.publish(`daemon-events:${daemonId}`, {
@@ -566,8 +579,8 @@ export default async function authRoutes (fastify: FastifyInstance): Promise<voi
     try {
       const verified = await verifyGoogleIdToken(idToken)
       googleSub = verified.sub
-    } catch (err: any) {
-      return reply.code(401).send({ error: `Invalid Google ID token: ${err.message}` })
+    } catch (err: unknown) {
+      return reply.code(401).send({ error: `Invalid Google ID token: ${err instanceof Error ? err.message : String(err)}` })
     }
 
     // Use Google sub as userId (prefixed to avoid collision)

@@ -38,8 +38,8 @@ export function EnrollmentScreen({ onEnrolled, onSkip }: { onEnrolled: () => voi
       Alert.alert('Connected', `Linked to daemon: ${data.daemonId}`, [
         { text: 'OK', onPress: onEnrolled },
       ]);
-    } catch (err: any) {
-      Alert.alert('Enrollment Failed', err.message);
+    } catch (err: unknown) {
+      Alert.alert('Enrollment Failed', err instanceof Error ? err.message : String(err));
     } finally {
       setLoading(false);
     }

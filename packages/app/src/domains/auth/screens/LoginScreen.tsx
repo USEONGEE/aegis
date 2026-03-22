@@ -26,8 +26,8 @@ export function LoginScreen() {
         'Google Sign-In',
         'Google Sign-In SDK not yet installed. Use development login instead.',
       );
-    } catch (err: any) {
-      Alert.alert('Sign-In Error', err.message);
+    } catch (err: unknown) {
+      Alert.alert('Sign-In Error', err instanceof Error ? err.message : String(err));
     } finally {
       setLoading(false);
     }
@@ -58,8 +58,8 @@ export function LoginScreen() {
 
       const data = await loginRes.json() as { userId: string; token: string; refreshToken: string };
       await setAuth(data.userId, data.token, data.refreshToken);
-    } catch (err: any) {
-      Alert.alert('Login Error', err.message);
+    } catch (err: unknown) {
+      Alert.alert('Login Error', err instanceof Error ? err.message : String(err));
     } finally {
       setLoading(false);
     }

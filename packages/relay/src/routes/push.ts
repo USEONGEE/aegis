@@ -64,9 +64,10 @@ export async function sendPushNotification (
     }
 
     // ticket.status === 'error'
-    return { ok: false, error: (ticket as any).message || (ticket as any).details?.error || 'unknown' }
-  } catch (err: any) {
-    return { ok: false, error: err.message }
+    const errorTicket = ticket as { message?: string; details?: { error?: string } }
+    return { ok: false, error: errorTicket.message || errorTicket.details?.error || 'unknown' }
+  } catch (err: unknown) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) }
   }
 }
 

@@ -151,10 +151,10 @@ export async function processChat (
       try {
         result = await executeToolCall(fnName, fnArgs, ctx)
         opts.onToolDone?.(fnName, toolCall.id, true)
-      } catch (err: any) {
+      } catch (err: unknown) {
         logger.error({ err, tool: fnName }, 'Unhandled tool execution error')
         opts.onToolDone?.(fnName, toolCall.id, false)
-        result = { status: 'error', error: err.message }
+        result = { status: 'error', error: err instanceof Error ? err.message : String(err) }
       }
 
       const resultStr = JSON.stringify(result)

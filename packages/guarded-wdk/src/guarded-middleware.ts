@@ -317,8 +317,8 @@ async function pollReceipt (account: GuardedAccount, hash: string, emitter: Even
         })
         return
       }
-    } catch {
-      // ignore polling errors
+    } catch (err) {
+      emitter.emit('PollingError', { type: 'PollingError', requestId, hash, error: err, timestamp: Date.now() })
     }
     await new Promise<void>(resolve => setTimeout(resolve, 1000))
   }

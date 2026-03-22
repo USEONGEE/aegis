@@ -24,7 +24,12 @@ export interface CancelResultFailed {
 
 export type CancelResult = CancelResultOk | CancelResultFailed
 
-export type MessageProcessor = (msg: QueuedMessage, signal: AbortSignal) => Promise<void>
+export interface ProcessResult {
+  ok: boolean
+  error?: string
+}
+
+export type MessageProcessor = (msg: QueuedMessage, signal: AbortSignal) => Promise<ProcessResult>
 
 export interface MessageQueueOptions {
   maxQueueSize?: number       // default 100
@@ -98,9 +103,12 @@ export class SessionMessageQueue {
       const msg = this._queue.shift()!
       this._processing = msg
       try {
-        await this._processor(msg, msg.abortController.signal)
-      } catch {
-        // errors handled by processor
+        const result = await this._processor(msg, msg.abortController.signal)
+        if (!result.ok) {
+          process.stderr.write(`[message-queue] processor returned failure: ${result.error}\n`)
+        }
+      } catch (err: unknown) {
+        process.stderr.write(`[message-queue] unexpected processor error: ${err instanceof Error ? err.message : String(err)}\n`)
       }
       this._processing = null
     }

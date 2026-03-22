@@ -25,7 +25,7 @@ interface DaemonSocket {
 /** Incoming message: wire JSON with required RelayEnvelope fields + extras */
 interface IncomingMessage {
   type: string
-  payload: any
+  payload: unknown
   encrypted: boolean
   sessionId: string | null
   userId: string | null
@@ -53,8 +53,8 @@ interface OutgoingMessage {
  * to be decorated before registration.
  */
 export default async function wsRoutes (fastify: FastifyInstance): Promise<void> {
-  const queue = (fastify as any).queue as QueueAdapter
-  const registry = (fastify as any).registry as RegistryAdapter
+  const queue = (fastify as unknown as { queue: QueueAdapter }).queue
+  const registry = (fastify as unknown as { registry: RegistryAdapter }).registry
 
   // -----------------------------------------------------------------------
   // Connection state
@@ -69,12 +69,12 @@ export default async function wsRoutes (fastify: FastifyInstance): Promise<void>
   // -----------------------------------------------------------------------
 
   function send (socket: WebSocket, data: OutgoingMessage): void {
-    if ((socket as any).readyState === 1) {
+    if (socket.readyState === 1) {
       socket.send(JSON.stringify(data))
     }
   }
 
-  function tryParseJSON (str: string): any {
+  function tryParseJSON (str: string): unknown {
     try { return JSON.parse(str) } catch { return str }
   }
 
@@ -92,7 +92,7 @@ export default async function wsRoutes (fastify: FastifyInstance): Promise<void>
   // /ws/daemon
   // -----------------------------------------------------------------------
 
-  fastify.get('/ws/daemon', { websocket: true } as any, (socket: any, _request: any) => {
+  fastify.get('/ws/daemon', { websocket: true }, (socket, _request) => {
     handleDaemonConnection(socket)
   })
 
@@ -108,7 +108,8 @@ export default async function wsRoutes (fastify: FastifyInstance): Promise<void>
 
       /* ---- authenticate ---- */
       if (msg.type === 'authenticate') {
-        const token: string | undefined = msg.payload?.token
+        const authPayload = msg.payload as Record<string, unknown> | undefined
+        const token: string | undefined = authPayload?.token as string | undefined
         if (!token) {
           send(socket, { type: 'error', message: 'Missing token' })
           socket.close(4001, 'Missing token')
@@ -148,7 +149,7 @@ export default async function wsRoutes (fastify: FastifyInstance): Promise<void>
         fastify.log.info({ daemonId, userCount: userIds.length }, 'Daemon authenticated')
 
         // Start control stream polling (per user with individual abort)
-        const lastControlIds: Record<string, string> = msg.lastControlIds ?? msg.payload?.lastControlIds ?? {}
+        const lastControlIds: Record<string, string> = msg.lastControlIds ?? (authPayload?.lastControlIds as Record<string, string>) ?? {}
         for (const uid of userIds) {
           const cursor = lastControlIds[uid] || '$'
           const userAc = new AbortController()
@@ -178,7 +179,8 @@ export default async function wsRoutes (fastify: FastifyInstance): Promise<void>
 
         // v0.3.0: userId is required unless it's an event_stream broadcast
         if (!msg.userId) {
-          const isEventStream = msg.payload?.type === 'event_stream'
+          const payloadObj = msg.payload as Record<string, unknown> | undefined
+          const isEventStream = payloadObj?.type === 'event_stream'
           if (!isEventStream) {
             return send(socket, { type: 'error', message: 'Missing userId' })
           }
@@ -249,7 +251,7 @@ export default async function wsRoutes (fastify: FastifyInstance): Promise<void>
   // /ws/app
   // -----------------------------------------------------------------------
 
-  fastify.get('/ws/app', { websocket: true } as any, (socket: any, _request: any) => {
+  fastify.get('/ws/app', { websocket: true }, (socket, _request) => {
     handleAppConnection(socket)
   })
 
@@ -267,7 +269,8 @@ export default async function wsRoutes (fastify: FastifyInstance): Promise<void>
 
       /* ---- authenticate ---- */
       if (msg.type === 'authenticate') {
-        const token: string | undefined = msg.payload?.token
+        const authPayload = msg.payload as Record<string, unknown> | undefined
+        const token: string | undefined = authPayload?.token as string | undefined
         if (!token) {
           send(socket, { type: 'error', message: 'Missing token' })
           socket.close(4001, 'Missing token')
@@ -284,7 +287,7 @@ export default async function wsRoutes (fastify: FastifyInstance): Promise<void>
         userId = payload.sub
         authenticated = true
 
-        const clientLastStreamId: string | undefined = msg.payload?.lastStreamId
+        const clientLastStreamId: string | undefined = authPayload?.lastStreamId as string | undefined
         if (clientLastStreamId && clientLastStreamId !== '$' && clientLastStreamId !== '0') {
           controlCursor = clientLastStreamId
         }
@@ -296,7 +299,7 @@ export default async function wsRoutes (fastify: FastifyInstance): Promise<void>
         pollControlForApp(userId, socket, controlCursor, ac.signal)
 
         // Backfill known chat sessions for offline cron recovery (one-shot, non-blocking)
-        const chatCursors: Record<string, string> = msg.payload?.chatCursors ?? {}
+        const chatCursors: Record<string, string> = (authPayload?.chatCursors as Record<string, string>) ?? {}
         for (const [sessionId, cursor] of Object.entries(chatCursors)) {
           backfillChatStream(userId, sessionId, cursor, socket)
         }
@@ -310,7 +313,7 @@ export default async function wsRoutes (fastify: FastifyInstance): Promise<void>
 
       /* ---- subscribe_chat: one-shot backfill for newly discovered sessions ---- */
       if (msg.type === 'subscribe_chat') {
-        const sessionId = msg.payload?.sessionId
+        const sessionId = (msg.payload as Record<string, unknown> | undefined)?.sessionId as string | undefined
         if (sessionId && userId) {
           backfillChatStream(userId, sessionId, '0', socket)
         }
@@ -395,9 +398,9 @@ export default async function wsRoutes (fastify: FastifyInstance): Promise<void>
           if (encrypted) out.encrypted = true
           send(ds.socket, out)
         }
-      } catch (err: any) {
+      } catch (err: unknown) {
         if (!signal.aborted) {
-          fastify.log.error({ err: err.message, userId }, 'Daemon control poll error')
+          fastify.log.error({ err: err instanceof Error ? err.message : String(err), userId }, 'Daemon control poll error')
           await sleep(1000)
         }
       }
@@ -424,9 +427,9 @@ export default async function wsRoutes (fastify: FastifyInstance): Promise<void>
           if (encrypted) out.encrypted = true
           send(socket, out)
         }
-      } catch (err: any) {
+      } catch (err: unknown) {
         if (!signal.aborted) {
-          fastify.log.error({ err: err.message, userId }, 'App control poll error')
+          fastify.log.error({ err: err instanceof Error ? err.message : String(err), userId }, 'App control poll error')
           await sleep(1000)
         }
       }
@@ -452,8 +455,8 @@ export default async function wsRoutes (fastify: FastifyInstance): Promise<void>
         send(socket, out)
       }
       fastify.log.info({ userId, sessionId, startId, count: entries.length }, 'Chat backfill completed')
-    } catch (err: any) {
-      fastify.log.error({ err: err.message, userId, sessionId }, 'Chat backfill error')
+    } catch (err: unknown) {
+      fastify.log.error({ err: err instanceof Error ? err.message : String(err), userId, sessionId }, 'Chat backfill error')
     }
   }
 
@@ -499,9 +502,9 @@ export default async function wsRoutes (fastify: FastifyInstance): Promise<void>
             fastify.log.info({ daemonId: ds.daemonId, userId }, 'User unbound (runtime)')
           }
         }
-      } catch (err: any) {
+      } catch (err: unknown) {
         if (!signal.aborted) {
-          fastify.log.error({ err: err.message, daemonId: ds.daemonId }, 'Daemon events poll error')
+          fastify.log.error({ err: err instanceof Error ? err.message : String(err), daemonId: ds.daemonId }, 'Daemon events poll error')
           await sleep(1000)
         }
       }
@@ -523,8 +526,8 @@ export default async function wsRoutes (fastify: FastifyInstance): Promise<void>
           await sendPushNotification(device.pushToken, title, body, { userId })
         }
       }
-    } catch (err: any) {
-      fastify.log.error({ err: err.message, userId }, 'Push notification error')
+    } catch (err: unknown) {
+      fastify.log.error({ err: err instanceof Error ? err.message : String(err), userId }, 'Push notification error')
     }
   }
 }

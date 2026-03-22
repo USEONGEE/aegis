@@ -141,7 +141,7 @@ export async function _processChatDirect (
       { userId, sessionId, iterations: result.iterations, tools: result.toolResults.length },
       'Chat message processed'
     )
-  } catch (err: any) {
+  } catch (err: unknown) {
     if (signal?.aborted) {
       logger.info({ userId, sessionId }, 'Chat processing aborted')
       relayClient.send('chat', {

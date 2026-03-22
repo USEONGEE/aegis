@@ -185,7 +185,6 @@ export class RelayClient {
         // v0.3.0: Set auth timeout — if no 'authenticated' response in 10s, reconnect
         const authTimeout = setTimeout(() => {
           if (!this.connected) {
-            console.warn('[RelayClient] Authentication timeout — reconnecting');
             this.ws?.close(4002, 'Authentication timeout');
           }
         }, 10000);
@@ -215,7 +214,6 @@ export class RelayClient {
 
           // v0.3.0: Handle auth failure — relay closes socket
           if (data.type === 'error' && !this.connected) {
-            console.error('[RelayClient] Auth error:', data.message);
             return;
           }
 
@@ -231,8 +229,7 @@ export class RelayClient {
           if (this.sessionKey && data.encrypted && payload?.nonce && payload?.ciphertext) {
             try {
               payload = JSON.parse(this.decrypt(payload as EncryptedPayload));
-            } catch (e) {
-              console.error('[RelayClient] E2E decryption failed:', e);
+            } catch (_e) {
               return;
             }
           }
@@ -249,12 +246,12 @@ export class RelayClient {
           this.messageHandlers.forEach(handler => {
             try {
               handler(message);
-            } catch (e) {
-              console.error('[RelayClient] Handler error:', e);
+            } catch (_e: unknown) {
+              return
             }
           });
-        } catch (e) {
-          console.error('[RelayClient] Parse error:', e);
+        } catch (_e: unknown) {
+          return
         }
       };
 
@@ -268,8 +265,7 @@ export class RelayClient {
         }
       };
 
-      const onError = (error: Event) => {
-        console.error('[RelayClient] WebSocket error:', error);
+      const onError = (_error: Event) => {
         if (!this.connected) {
           reject(new Error('WebSocket connection failed'));
         }
@@ -300,7 +296,7 @@ export class RelayClient {
       MAX_BACKOFF_MS,
     );
 
-    console.log(`[RelayClient] Reconnecting in ${backoff}ms (attempt ${this.reconnectAttempts + 1})`);
+    // Reconnecting with exponential backoff
 
     this.reconnectTimer = setTimeout(async () => {
       this.reconnectTimer = null;
@@ -313,15 +309,14 @@ export class RelayClient {
           this.authToken = newToken;
         } else {
           // Refresh failed — stop reconnecting, app should navigate to login
-          console.warn('[RelayClient] Token refresh failed — stopping reconnect');
           return;
         }
       }
 
       try {
         await this.doConnect();
-      } catch {
-        // doConnect failure will trigger onClose → scheduleReconnect
+      } catch (_err: unknown) {
+        return
       }
     }, backoff);
   }
@@ -420,10 +415,11 @@ export class RelayClient {
           resolve({ txHash: (data.txHash ?? data.hash)! });
         } else if (data.type === 'wallet_create' || data.type === 'wallet_delete') {
           // Wallet lifecycle responses don't have txHash
-          if ((data as any).ok) {
+          const walletData = data as { type?: string; requestId?: string; ok?: boolean; error?: string };
+          if (walletData.ok) {
             resolve({ txHash: '' });
           } else {
-            reject(new Error((data as any).error ?? 'Wallet operation failed'));
+            reject(new Error(walletData.error ?? 'Wallet operation failed'));
           }
         } else if (data.type === 'approval_error') {
           reject(new Error(data.error ?? 'Approval failed'));

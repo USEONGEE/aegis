@@ -17,6 +17,21 @@ import type { ChatEvent, ControlEvent } from '@wdk-app/protocol';
 
 type Props = NativeStackScreenProps<ChatStackParamList, 'ChatDetail'>;
 
+/** Flexible payload shape covering control + chat event fields from relay. */
+interface RelayPayloadData {
+  type?: string;
+  sessionId?: string;
+  messageId?: string;
+  source?: string;
+  toolCallId?: string;
+  toolName?: string;
+  status?: string;
+  delta?: string;
+  error?: string;
+  content?: string;
+  role?: string;
+}
+
 /**
  * ChatDetailScreen — conversation with OpenClaw AI via Relay.
  *
@@ -51,7 +66,7 @@ export function ChatDetailScreen({ route }: Props) {
   useEffect(() => {
     const handler = (message: { channel: string; payload: unknown; timestamp: number }) => {
       // Use flexible type for payload — protocol types + extra fields from relay
-      const data = message.payload as Record<string, any>;
+      const data = message.payload as RelayPayloadData;
 
       // Control channel: handle message_queued, message_started, and cancel results (screen-level)
       // cron_session_created and cursor tracking are handled at app-level (ChatNavigator)
@@ -88,7 +103,7 @@ export function ChatDetailScreen({ route }: Props) {
       if (message.channel !== 'chat') return;
 
       const msgSessionId = data.sessionId ?? currentSessionId;
-      const msgSource = (data as any).source ?? 'user';
+      const msgSource = data.source ?? 'user';
 
       // Store messages for all sessions (not just current) for cron/offline recovery
       // But only update UI state (typing, stream, loading) for current session
@@ -101,13 +116,13 @@ export function ChatDetailScreen({ route }: Props) {
           }
           addMessage({
             kind: 'tool',
-            id: `tool_${(data as any).toolCallId}`,
+            id: `tool_${data.toolCallId}`,
             role: 'system',
-            content: `🔧 ${(data as any).toolName}`,
+            content: `🔧 ${data.toolName}`,
             timestamp: message.timestamp,
             sessionId: msgSessionId!,
             source: msgSource,
-            toolCall: (data as any).toolName,
+            toolCall: data.toolName,
             toolStatus: 'running',
           });
           return;
@@ -116,16 +131,16 @@ export function ChatDetailScreen({ route }: Props) {
         case 'tool_done': {
           addMessage({
             kind: 'tool',
-            id: `tool_${(data as any).toolCallId}`,
+            id: `tool_${data.toolCallId}`,
             role: 'system',
-            content: (data as any).status === 'success'
-              ? `✅ ${(data as any).toolName} 완료`
-              : `❌ ${(data as any).toolName} 실패`,
+            content: data.status === 'success'
+              ? `✅ ${data.toolName} 완료`
+              : `❌ ${data.toolName} 실패`,
             timestamp: message.timestamp,
             sessionId: msgSessionId!,
             source: msgSource,
-            toolCall: (data as any).toolName,
-            toolStatus: (data as any).status === 'success' ? 'done' : 'error',
+            toolCall: data.toolName,
+            toolStatus: data.status === 'success' ? 'done' : 'error',
           });
           return;
         }
@@ -299,8 +314,8 @@ export function ChatDetailScreen({ route }: Props) {
       } else {
         await relay.cancelActive(queuedMessageId);
       }
-    } catch {
-      // Cancel best-effort; clear state regardless
+    } catch (_err: unknown) {
+      return
     }
     setQueuedMessageId(null);
     setMessageState('idle');
