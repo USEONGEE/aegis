@@ -1,6 +1,25 @@
-# Aegis — AI DeFi Agent의 정책 기반 실행 엔진
+# Aegis — AI Agent를 위한 정책 기반 실행 엔진
 
 > AI가 돈을 움직인다. 단, 내가 허락한 만큼만.
+
+**트랙**: Agent Wallets (WDK / Openclaw and Agents Integration)
+
+---
+
+## Aegis가 다른 프로젝트와 다른 점
+
+이 해커톤의 대부분의 프로젝트는 묻는다: **"AI로 크립토에서 뭘 더 할 수 있을까?"**
+
+Aegis는 다른 질문을 한다: **"사람들이 AI가 크립토로 무언가를 하는 것을 어떻게 신뢰할 수 있을까?"**
+
+다른 모든 프로젝트는 AI에게 월렛 접근 권한을 주고 잘 되기를 바란다 — confidence score, 휴리스틱 필터, 혹은 그냥 프롬프트를 믿는다. Aegis는 정반대 접근을 취한다: **AI는 인간이 명시적으로 허락하기 전까지 아무것도 할 수 없으며, 그 허락은 WDK 서명 엔진 레벨에서 강제된다 — 프롬프트가 아니라, 애플리케이션 코드가 아니라, 확률적 임계값이 아니라.**
+
+해커톤이 제시한 Nice to Have 항목을 우리는 **프로젝트의 핵심으로 삼고 심도 있게 파고들었다**:
+
+> **"Safety: permissions, limits, recovery, role separation"**
+> — Agent Wallets 트랙, Nice to Have
+
+다른 프로젝트에게 이것은 부가 기능이다. Aegis에게는 **프로젝트 전체가 이것이다.**
 
 ---
 
@@ -188,7 +207,7 @@ AI가 트랜잭션을 요청하면 **Policy Engine이 평가**한다. 정책 범
 
 신뢰가 점진적으로 쌓이는 2개 시나리오로 Aegis의 핵심 메커니즘을 보여준다.
 
-### Scenario 1: No Policy — "Approval Required"
+### Scenario 1: 정책 없음 — "승인이 필요하다"
 
 ```
   User: "Send 100 USDC to Alice"
@@ -213,7 +232,7 @@ AI가 트랜잭션을 요청하면 **Policy Engine이 평가**한다. 정책 범
 
 정책이 없으면 AI는 아무것도 자율로 실행할 수 없다. 모든 트랜잭션이 Owner의 모바일 승인을 거친다.
 
-### Scenario 2: With Policy — "Autonomous Execution"
+### Scenario 2: 정책 있음 — "자율 실행"
 
 ```
   User: "Send 100 USDC to Alice"
@@ -289,17 +308,17 @@ AI는 **seed 접근, 정책 수정, 서명 우회가 불가능**하다.
 
 ## Security
 
-### Key Management
+### 키 관리
 - **Ed25519 Identity Key**: Expo SecureStore에 저장. 디바이스 밖으로 절대 나가지 않음
 - **Seed Phrase**: WDK 내부에서만 관리. AI Agent는 접근 불가
 - **키 분리**: identity key(승인 서명용) ≠ signing key(온체인 tx용)
 
-### Policy Enforcement
+### 정책 강제
 - 정책은 **서명 엔진 레벨**에서 강제됨 — 프롬프트가 아님
 - AI가 정책을 우회, 수정, 삭제하는 것은 물리적으로 불가능
 - 정책 변경은 Owner의 Ed25519 서명이 필요
 
-### Approval Verification (6-Step)
+### 승인 검증 (6단계)
 1. 신뢰된 승인자인가?
 2. 해지되지 않았나?
 3. 서명이 유효한가?
@@ -307,14 +326,14 @@ AI는 **seed 접근, 정책 수정, 서명 우회가 불가능**하다.
 5. nonce 재사용이 아닌가?
 6. 타입별 추가 검증
 
-### Transport Security
+### 전송 보안
 - Daemon ↔ App 통신은 **E2E 암호화** — Relay는 payload를 복호화할 수 없음
 - Daemon은 NAT 뒤에서 **outbound WebSocket만** 사용 — 외부에서 접근 불가
 - 오프라인 시 Redis Streams 커서 기반 복구 — 메시지 유실 없음
 
 ---
 
-## Track: Agent Wallets (WDK / Openclaw and Agents Integration)
+## 트랙: Agent Wallets (WDK / Openclaw and Agents Integration)
 
 ### Must Have ✅
 
@@ -340,11 +359,91 @@ AI는 **seed 접근, 정책 수정, 서명 우회가 불가능**하다.
 
 ---
 
-## Judging Criteria
+## 심사 기준
 
 | Criterion | How Aegis Scores |
 |-----------|-----------------|
-| **Technical correctness** | 5-package monorepo (guarded-wdk, manifest, daemon, relay, app). Facade/port pattern. CI checks. 타입 의존성 그래프 기반 아키텍처 검증 |
+| **Technical correctness** | 5개 패키지 모노레포 (guarded-wdk, manifest, daemon, relay, app). Facade/port 패턴. CI 체크. 타입 의존성 그래프 기반 아키텍처 검증 |
 | **Degree of agent autonomy** | 정책 범위 내 완전 자율 실행 — ALLOW 판정 시 사람 개입 0. cron 기반 자율 스케줄링 지원 |
 | **Economic soundness** | Policy가 금액 상한(LTE), 허용 주소(ONE_OF), 함수 셀렉터 단위로 리스크를 제어. 중복 실행 방지(Journal). AI가 정책 밖 행위를 시도하면 물리적으로 차단 |
 | **Real-world applicability** | 풀스택 배포 가능: 모바일 앱(Expo) + 서버(Daemon+Relay) + 서명 엔진. E2E 암호화. 오프라인 복구. 실제 사용 가능한 인프라 |
+
+---
+
+## 다른 프로젝트와의 차이점
+
+이 해커톤의 다른 프로젝트들은 **AI가 무엇을 할 수 있는지**에 집중한다 — lending, tipping, treasury 관리, DeFi 자동화. Aegis는 그 **아래 레이어**에 집중한다: **사람이 AI가 그 중 어떤 것이든 하는 것을 어떻게 신뢰할 수 있는가.**
+
+| | 다른 프로젝트들 | Aegis |
+|---|---|---|
+| **AI 통제** | 프롬프트를 믿거나, confidence score, 혹은 통제 없음 | Policy Engine이 서명 엔진 레벨에서 규칙 강제 — AI가 물리적으로 우회 불가 |
+| **인간 승인** | 없음. AI가 인간 게이트 없이 자율적으로 행동 | 모든 행위에 인간의 허락 필요. Policy = 사전 승인된 허락. Policy 없음 = 수동 승인 필요 |
+| **규칙이 사는 곳** | 애플리케이션 코드 (변경, 우회, AI가 무시 가능) | WDK 레이어 — AI 아래, 애플리케이션 아래. Owner의 Ed25519 서명 없이 수정 불가 |
+| **키 관리** | 많은 프로젝트가 private key를 직접 추출, 비밀 하드코딩, seed phrase를 로그에 출력 | Seed는 WDK를 절대 벗어나지 않음. AI는 접근 권한 0. Identity key는 디바이스를 벗어나지 않음 (SecureStore) |
+| **아키텍처** | 단일 스크립트, 평면 파일 구조, 커밋 1개짜리 PoC | 5개 패키지 모노레포, 30개 이상 버전 반복, CI 체크, facade/port 패턴 |
+
+근본적인 차이: 다른 프로젝트들은 AI에게 월렛을 주고 그 위에 가드레일을 추가한다. **Aegis는 권한 0에서 시작하여 사람이 원하는 만큼의 자율성만 정확히 opt-in하게 한다.** AI의 능력이 줄어드는 게 아니다 — 범위가 지정되는 것이다.
+
+---
+
+## 실행 방법
+
+Aegis는 완전히 dockerize되어 있다. 전체 스택을 한 번에 시작할 수 있다:
+
+```bash
+docker compose up
+```
+
+이것이 실행하는 것:
+- **Daemon** — AI agent + GuardedWDK 서명 엔진
+- **Relay** — 메시지 버스 (Redis Streams + PostgreSQL)
+- **Mobile App** — Expo dev server
+
+### 환경 설정
+
+```bash
+cp .env.example .env
+# .env를 편집하여 추가:
+#   - SEED_PHRASE (월렛 시드)
+#   - OPENCLAW_API_KEY (AI 엔진)
+#   - RELAY_URL (relay 엔드포인트)
+```
+
+**중요**: seed phrase는 Daemon 서버의 `.env`에 저장된다. AI agent는 **이 파일에 접근할 수 없다** — GuardedWDK의 12개 도구 API를 통해서만 상호작용하며, 모든 서명 작업 전에 정책 평가를 강제한다. AI는 seed를 절대 보지 못하고, 키를 만지지 못하며, Policy Engine을 우회할 수 없다.
+
+향후 버전에서는 서명 책임이 **하드웨어 월렛** (Ledger, Trezor)으로 위임되어, 서버에 seed phrase가 존재할 필요가 완전히 없어진다. 아래 로드맵 참조.
+
+---
+
+## 로드맵
+
+### Phase 1 — WDK에 기여 (단기)
+Aegis의 GuardedWDK 레이어(정책 평가, 승인 검증, 실행 저널)는 **WDK에 모듈로 기여하도록 설계**되었다. WDK는 현재 stateless하다 — 요청받는 대로 서명한다. Aegis는 모듈러 미들웨어로 통합할 수 있는 stateful 정책 레이어를 추가한다:
+
+```
+  WDK (stateless, 무조건 서명)
+    + GuardedWDK 모듈 (stateful, 서명 전 정책 평가)
+    = opt-in 정책 강제가 가능한 WDK
+```
+
+WDK를 사용하는 어떤 프로젝트든 처음부터 구축하지 않고도 정책 기반 제어를 추가할 수 있게 된다.
+
+### Phase 2 — 하드웨어 월렛 통합
+현재는 Daemon 서버가 seed phrase를 보유한다. 다음 단계는 **서명 주체를 모듈화**하는 것이다:
+
+```
+  현재:   Daemon → WDK (소프트웨어 서명, seed는 .env에)
+  미래:   Daemon → WDK → Hardware Wallet (Ledger/Trezor가 직접 서명)
+```
+
+서명 인터페이스는 동일하게 유지된다 — GuardedWDK가 정책을 평가하되, 실제 서명은 하드웨어 디바이스에 위임한다. seed는 어떤 서버에도 존재하지 않게 된다.
+
+### Phase 3 — 프로토콜 생태계
+Manifest 시스템으로, 어떤 DeFi 프로토콜이든 JSON 선언서를 제공하여 통합할 수 있다. 프로토콜들이 Manifest 표준을 채택함에 따라:
+
+```
+  1 protocol  → 1 Manifest  → 자동 생성된 Policy → AI가 사용 가능
+  10 protocols → 10 Manifests → 코드 변경 없이 AI의 역량이 확장
+```
+
+Aegis는 AI agent와 전체 DeFi 생태계 사이의 **신뢰 레이어**가 된다.
