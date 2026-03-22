@@ -246,6 +246,7 @@ describe('MessageQueueManager', () => {
   test('dispose cleans up all queues', async () => {
     const processor: MessageProcessor = async () => {
       await new Promise(() => {}) // Never resolves
+      return { ok: true }
     }
 
     const manager = new MessageQueueManager(processor)
