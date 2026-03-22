@@ -61,3 +61,18 @@ export interface AdminFacadePort {
 export interface ControlFacadePort {
   submitApproval (signedApproval: SignedApproval, context: ApprovalSubmitContext): Promise<void>
 }
+
+// ---------------------------------------------------------------------------
+// Port: query-handler.ts용 Facade
+// ---------------------------------------------------------------------------
+
+/**
+ * query-handler.ts가 facade에서 사용하는 메서드만 정의한 Port.
+ * ToolFacadePort + AdminFacadePort에서 query에 필요한 메서드만 조합.
+ */
+export interface QueryFacadePort {
+  loadPolicy (accountIndex: number, chainId: number): Promise<StoredPolicy | null>
+  getPendingApprovals (accountIndex: number | null, type: string | null, chainId: number | null): Promise<PendingApprovalRequest[]>
+  listSigners (): Promise<StoredSigner[]>
+  listWallets (): Promise<StoredWallet[]>
+}

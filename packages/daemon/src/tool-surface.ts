@@ -5,7 +5,8 @@ import type { Logger } from 'pino'
 import type { WDKInstance } from './wdk-host.js'
 import type { ToolFacadePort } from './ports.js'
 import type { DaemonStore } from './daemon-store.js'
-import type { EvaluationContext, Policy, PendingApprovalRequest, StoredCron, RejectionEntry, PolicyVersionEntry } from '@wdk-app/guarded-wdk'
+import type { EvaluationContext, Policy, PendingApprovalRequest, RejectionEntry, PolicyVersionEntry } from '@wdk-app/guarded-wdk'
+import type { StoredCron } from './daemon-store.js'
 
 // ---------------------------------------------------------------------------
 // Helpers

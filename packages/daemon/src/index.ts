@@ -6,7 +6,8 @@ import { initWDK } from './wdk-host.js'
 import { createOpenClawClient } from './openclaw-client.js'
 import { RelayClient } from './relay-client.js'
 import { handleControlMessage } from './control-handler.js'
-import type { ControlMessage, RelayChatInput } from '@wdk-app/protocol'
+import { handleQueryMessage } from './query-handler.js'
+import type { ControlMessage, RelayChatInput, QueryMessage } from '@wdk-app/protocol'
 import { handleChatMessage } from './chat-handler.js'
 import { CronScheduler } from './cron-scheduler.js'
 import type { CronDispatch } from './cron-scheduler.js'
@@ -93,12 +94,12 @@ async function main (): Promise<void> {
   relayClient.onMessage((type, payload, raw) => {
     switch (type) {
       case 'control':
-        // v0.4.2: 승인 6종은 null 반환 (WDK 이벤트로 앱에 전달). cancel 2종만 ControlResult forward.
+        // v0.4.8: 승인 6종 null 반환. cancel 2종은 CancelEventPayload → event_stream으로 전송.
         handleControlMessage(payload as ControlMessage, { facade: facade!, logger, queueManager })
           .then((result) => {
             if (result === null) return // 승인 타입: WDK 이벤트가 대신 전달
             const incomingUserId = (payload as Record<string, unknown>)?.userId as string | undefined
-            relayClient.send('control', result as unknown as Record<string, unknown>, incomingUserId)
+            relayClient.send('control', { type: 'event_stream', event: result } as unknown as Record<string, unknown>, incomingUserId)
           })
           .catch((err: Error) => logger.error({ err }, 'Unhandled error in control handler'))
         break
@@ -108,6 +109,16 @@ async function main (): Promise<void> {
           maxIterations: config.toolCallMaxIterations
         }, queueManager)
           .catch((err: Error) => logger.error({ err }, 'Unhandled error in chat handler'))
+        break
+
+      case 'query':
+        // v0.4.8: query → query-handler → query_result (WS 직접 전달)
+        handleQueryMessage(payload as unknown as QueryMessage, { facade: facade!, logger })
+          .then((result) => {
+            const incomingUserId = (raw as Record<string, unknown>)?.userId as string | undefined
+            relayClient.send('query_result', result as unknown as Record<string, unknown>, incomingUserId)
+          })
+          .catch((err: Error) => logger.error({ err }, 'Unhandled error in query handler'))
         break
 
       default:

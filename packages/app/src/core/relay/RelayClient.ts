@@ -15,7 +15,7 @@
 import nacl from 'tweetnacl';
 import { encodeBase64, decodeBase64, encodeUTF8 } from 'tweetnacl-util';
 
-import type { RelayChannel, ControlEvent, ChatEvent } from '@wdk-app/protocol';
+import type { RelayChannel, ChatEvent } from '@wdk-app/protocol';
 export type { RelayChannel };
 
 export interface RelayMessage {
@@ -76,6 +76,9 @@ export class RelayClient {
 
   /** Provider for persisted control cursor (for cold-start offline recovery). */
   private controlCursorProvider: (() => string) | null = null;
+
+  /** v0.4.8: pending query promises keyed by requestId */
+  private pendingQueries = new Map<string, { resolve: (data: unknown) => void; reject: (err: Error) => void }>();
 
   private constructor() {}
 
@@ -232,6 +235,20 @@ export class RelayClient {
             } catch (_e) {
               return;
             }
+          }
+
+          // v0.4.8: query_result — resolve/reject pendingQueries (not dispatched to handlers)
+          if (data.type === 'query_result' && payload) {
+            const result = payload as { requestId?: string; status?: string; data?: unknown; error?: string };
+            if (result.requestId) {
+              const pending = this.pendingQueries.get(result.requestId);
+              if (pending) {
+                this.pendingQueries.delete(result.requestId);
+                if (result.status === 'ok') pending.resolve(result.data);
+                else pending.reject(new Error(result.error ?? 'Query failed'));
+              }
+            }
+            return;
           }
 
           // Dispatch to handlers — map relay's `type` field to our `channel`
@@ -489,6 +506,32 @@ export class RelayClient {
       payload: { messageId },
       messageId: `msg_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
       timestamp: Date.now(),
+    });
+  }
+
+  /**
+   * v0.4.8: Send a query to daemon and wait for query_result.
+   * requestId-based Promise wrapping + timeout.
+   */
+  async query<T>(queryType: string, params: Record<string, unknown>, timeoutMs = 10000): Promise<T> {
+    this.ensureConnected();
+    const requestId = `q_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+
+    return new Promise<T>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.pendingQueries.delete(requestId);
+        reject(new Error(`Query ${queryType} timed out (${timeoutMs}ms)`));
+      }, timeoutMs);
+
+      this.pendingQueries.set(requestId, {
+        resolve: (data) => { clearTimeout(timer); resolve(data as T); },
+        reject: (err) => { clearTimeout(timer); reject(err); },
+      });
+
+      this.ws!.send(JSON.stringify({
+        type: 'query',
+        payload: { type: queryType, requestId, params },
+      }));
     });
   }
 

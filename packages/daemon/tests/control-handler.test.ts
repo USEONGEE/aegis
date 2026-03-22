@@ -1,7 +1,8 @@
 import { jest } from '@jest/globals'
 import { createHash } from 'node:crypto'
 import { handleControlMessage } from '../src/control-handler.js'
-import type { ControlMessage, ControlResult, SignedApprovalFields } from '@wdk-app/protocol'
+import type { ControlMessage, SignedApprovalFields, CancelCompletedEvent, CancelFailedEvent } from '@wdk-app/protocol'
+import type { CancelEventPayload } from '../src/control-handler.js'
 
 // ---------------------------------------------------------------------------
 // Mock helpers
@@ -77,23 +78,19 @@ describe('handleControlMessage', () => {
   // Malformed messages
   // -------------------------------------------------------------------------
 
-  test('returns error for message with missing type', async () => {
+  test('returns null for message with missing type', async () => {
     const msg = { payload: { requestId: 'r1' } } as any
     const result = await handleControlMessage(msg, { facade, logger: logger as any, queueManager })
 
-    expect(result).not.toBeNull()
-    expect(result!.ok).toBe(false)
-    expect((result as any).error).toBe('Malformed control message')
+    expect(result).toBeNull()
     expect(logger.warn).toHaveBeenCalled()
   })
 
-  test('returns error for message with missing payload', async () => {
+  test('returns null for message with missing payload', async () => {
     const msg = { type: 'policy_approval' } as any
     const result = await handleControlMessage(msg, { facade, logger: logger as any, queueManager })
 
-    expect(result).not.toBeNull()
-    expect(result!.ok).toBe(false)
-    expect((result as any).error).toBe('Malformed control message')
+    expect(result).toBeNull()
   })
 
   // -------------------------------------------------------------------------
@@ -272,107 +269,108 @@ describe('handleControlMessage', () => {
   })
 
   // -------------------------------------------------------------------------
-  // cancel_queued — ControlResult 유지
+  // cancel_queued — v0.4.8: CancelEventPayload 반환
   // -------------------------------------------------------------------------
 
-  test('cancel_queued: returns error when messageId is missing', async () => {
+  test('cancel_queued: returns CancelFailed when messageId is missing', async () => {
     const msg: ControlMessage = {
       type: 'cancel_queued',
       payload: { messageId: '' }
     }
 
-    const result = await handleControlMessage(msg, { facade, logger: logger as any, queueManager })
+    const result = await handleControlMessage(msg, { facade, logger: logger as any, queueManager }) as CancelFailedEvent
 
     expect(result).not.toBeNull()
-    expect(result!.ok).toBe(false)
-    expect((result as any).type).toBe('cancel_queued')
-    expect((result as any).error).toBe('Missing messageId')
+    expect(result.type).toBe('CancelFailed')
+    expect(result.cancelType).toBe('cancel_queued')
+    expect(result.reason).toBe('Missing messageId')
   })
 
-  test('cancel_queued: successfully cancels queued message', async () => {
+  test('cancel_queued: returns CancelCompleted on success', async () => {
     queueManager.cancelQueued.mockReturnValue({ ok: true, wasProcessing: false })
     const msg: ControlMessage = {
       type: 'cancel_queued',
       payload: { messageId: 'msg-123' }
     }
 
-    const result = await handleControlMessage(msg, { facade, logger: logger as any, queueManager })
+    const result = await handleControlMessage(msg, { facade, logger: logger as any, queueManager }) as CancelCompletedEvent
 
     expect(result).not.toBeNull()
-    expect(result!.ok).toBe(true)
-    expect((result as any).type).toBe('cancel_queued')
-    expect((result as any).messageId).toBe('msg-123')
+    expect(result.type).toBe('CancelCompleted')
+    expect(result.cancelType).toBe('cancel_queued')
+    expect(result.messageId).toBe('msg-123')
+    expect(result.wasProcessing).toBe(false)
     expect(queueManager.cancelQueued).toHaveBeenCalledWith('msg-123')
   })
 
-  test('cancel_queued: returns not_found for already-processing message', async () => {
+  test('cancel_queued: returns CancelFailed for not_found', async () => {
     queueManager.cancelQueued.mockReturnValue({ ok: false, reason: 'not_found' })
     const msg: ControlMessage = {
       type: 'cancel_queued',
       payload: { messageId: 'msg-active' }
     }
 
-    const result = await handleControlMessage(msg, { facade, logger: logger as any, queueManager })
+    const result = await handleControlMessage(msg, { facade, logger: logger as any, queueManager }) as CancelFailedEvent
 
     expect(result).not.toBeNull()
-    expect(result!.ok).toBe(false)
-    expect((result as any).reason).toBe('not_found')
+    expect(result.type).toBe('CancelFailed')
+    expect(result.reason).toBe('not_found')
   })
 
   // -------------------------------------------------------------------------
-  // cancel_active — ControlResult 유지
+  // cancel_active — v0.4.8: CancelEventPayload 반환
   // -------------------------------------------------------------------------
 
-  test('cancel_active: returns error when messageId is missing', async () => {
+  test('cancel_active: returns CancelFailed when messageId is missing', async () => {
     const msg: ControlMessage = {
       type: 'cancel_active',
       payload: { messageId: '' }
     }
 
-    const result = await handleControlMessage(msg, { facade, logger: logger as any, queueManager })
+    const result = await handleControlMessage(msg, { facade, logger: logger as any, queueManager }) as CancelFailedEvent
 
     expect(result).not.toBeNull()
-    expect(result!.ok).toBe(false)
-    expect((result as any).type).toBe('cancel_active')
-    expect((result as any).error).toBe('Missing messageId')
+    expect(result.type).toBe('CancelFailed')
+    expect(result.cancelType).toBe('cancel_active')
+    expect(result.reason).toBe('Missing messageId')
   })
 
-  test('cancel_active: successfully cancels active message', async () => {
+  test('cancel_active: returns CancelCompleted on success', async () => {
     queueManager.cancelActive.mockReturnValue({ ok: true, wasProcessing: true })
     const msg: ControlMessage = {
       type: 'cancel_active',
       payload: { messageId: 'msg-456' }
     }
 
-    const result = await handleControlMessage(msg, { facade, logger: logger as any, queueManager })
+    const result = await handleControlMessage(msg, { facade, logger: logger as any, queueManager }) as CancelCompletedEvent
 
     expect(result).not.toBeNull()
-    expect(result!.ok).toBe(true)
-    expect((result as any).type).toBe('cancel_active')
-    expect((result as any).messageId).toBe('msg-456')
-    expect((result as any).wasProcessing).toBe(true)
+    expect(result.type).toBe('CancelCompleted')
+    expect(result.cancelType).toBe('cancel_active')
+    expect(result.messageId).toBe('msg-456')
+    expect(result.wasProcessing).toBe(true)
     expect(queueManager.cancelActive).toHaveBeenCalledWith('msg-456')
   })
 
-  test('cancel_active: returns not_found for queued message', async () => {
+  test('cancel_active: returns CancelFailed for not_found', async () => {
     queueManager.cancelActive.mockReturnValue({ ok: false, reason: 'not_found' })
     const msg: ControlMessage = {
       type: 'cancel_active',
       payload: { messageId: 'msg-queued' }
     }
 
-    const result = await handleControlMessage(msg, { facade, logger: logger as any, queueManager })
+    const result = await handleControlMessage(msg, { facade, logger: logger as any, queueManager }) as CancelFailedEvent
 
     expect(result).not.toBeNull()
-    expect(result!.ok).toBe(false)
-    expect((result as any).reason).toBe('not_found')
+    expect(result.type).toBe('CancelFailed')
+    expect(result.reason).toBe('not_found')
   })
 
   // -------------------------------------------------------------------------
   // Unknown type
   // -------------------------------------------------------------------------
 
-  test('unknown type: returns error with unknown type message', async () => {
+  test('unknown type: returns null and logs warning', async () => {
     const msg = {
       type: 'banana',
       payload: { requestId: 'r1' }
@@ -380,9 +378,7 @@ describe('handleControlMessage', () => {
 
     const result = await handleControlMessage(msg, { facade, logger: logger as any, queueManager })
 
-    expect(result).not.toBeNull()
-    expect(result!.ok).toBe(false)
-    expect((result as any).error).toBe('Unknown control type: banana')
+    expect(result).toBeNull()
     expect(logger.warn).toHaveBeenCalled()
   })
 })

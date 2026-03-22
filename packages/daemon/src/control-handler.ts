@@ -4,7 +4,8 @@ import type { SignedApproval, Policy } from '@wdk-app/guarded-wdk'
 import type { ApprovalSubmitContext } from '@wdk-app/guarded-wdk'
 import type { ControlFacadePort } from './ports.js'
 import type {
-  SignedApprovalFields, ControlMessage, ControlResult
+  SignedApprovalFields, ControlMessage,
+  CancelCompletedEvent, CancelFailedEvent
 } from '@wdk-app/protocol'
 import type { MessageQueueManager } from './message-queue.js'
 
@@ -33,6 +34,12 @@ function toSignedApproval (fields: SignedApprovalFields, type: SignedApproval['t
 }
 
 // ---------------------------------------------------------------------------
+// Cancel event payload (returned to index.ts for event_stream delivery)
+// ---------------------------------------------------------------------------
+
+export type CancelEventPayload = CancelCompletedEvent | CancelFailedEvent
+
+// ---------------------------------------------------------------------------
 // Handler
 // ---------------------------------------------------------------------------
 
@@ -45,17 +52,18 @@ interface ControlHandlerDeps {
 /**
  * Handle control channel messages from the Relay.
  *
- * v0.4.2: 승인 6종은 broker.submitApproval() 한 줄로 처리 후 null 반환 (WDK 이벤트가 앱에 전달).
- *         cancel 2종은 기존 ControlResult 반환 유지.
+ * v0.4.8: 승인 6종은 null 반환 (WDK 이벤트가 앱에 전달).
+ *         cancel 2종은 CancelEventPayload 반환 → index.ts가 event_stream으로 전송.
+ *         ControlResult 제거됨.
  */
 export async function handleControlMessage (
   msg: ControlMessage,
   deps: ControlHandlerDeps
-): Promise<ControlResult | null> {
+): Promise<CancelEventPayload | null> {
   const { facade, logger, queueManager } = deps
   if (!msg.type || !msg.payload) {
     logger.warn({ msg }, 'Malformed control message: missing type or payload')
-    return { ok: false, error: 'Malformed control message' }
+    return null
   }
 
   logger.info({ type: msg.type, requestId: 'requestId' in msg.payload ? (msg.payload as SignedApprovalFields).requestId : undefined }, 'Processing control message')
@@ -178,13 +186,13 @@ export async function handleControlMessage (
     case 'cancel_queued': {
       const payload = msg.payload
       if (!payload.messageId) {
-        return { ok: false, type: 'cancel_queued', error: 'Missing messageId' }
+        return { type: 'CancelFailed', cancelType: 'cancel_queued', messageId: '', reason: 'Missing messageId', timestamp: Date.now() }
       }
       const cancelResult = queueManager.cancelQueued(payload.messageId)
       if (cancelResult.ok) {
-        return { ok: true, type: 'cancel_queued', messageId: payload.messageId }
+        return { type: 'CancelCompleted', cancelType: 'cancel_queued', messageId: payload.messageId, wasProcessing: false, timestamp: Date.now() }
       }
-      return { ok: false, type: 'cancel_queued', messageId: payload.messageId, reason: cancelResult.reason }
+      return { type: 'CancelFailed', cancelType: 'cancel_queued', messageId: payload.messageId, reason: cancelResult.reason, timestamp: Date.now() }
     }
 
     // -----------------------------------------------------------------------
@@ -193,13 +201,13 @@ export async function handleControlMessage (
     case 'cancel_active': {
       const payload = msg.payload
       if (!payload.messageId) {
-        return { ok: false, type: 'cancel_active', error: 'Missing messageId' }
+        return { type: 'CancelFailed', cancelType: 'cancel_active', messageId: '', reason: 'Missing messageId', timestamp: Date.now() }
       }
       const cancelResult = queueManager.cancelActive(payload.messageId)
       if (cancelResult.ok) {
-        return { ok: true, type: 'cancel_active', messageId: payload.messageId, wasProcessing: cancelResult.wasProcessing }
+        return { type: 'CancelCompleted', cancelType: 'cancel_active', messageId: payload.messageId, wasProcessing: cancelResult.wasProcessing, timestamp: Date.now() }
       }
-      return { ok: false, type: 'cancel_active', messageId: payload.messageId, reason: cancelResult.reason }
+      return { type: 'CancelFailed', cancelType: 'cancel_active', messageId: payload.messageId, reason: cancelResult.reason, timestamp: Date.now() }
     }
 
     // -----------------------------------------------------------------------
@@ -208,7 +216,7 @@ export async function handleControlMessage (
     default: {
       const unknownType: string = (msg as { type: string }).type
       logger.warn({ type: unknownType }, 'Unknown control message type')
-      return { ok: false, error: `Unknown control type: ${unknownType}` }
+      return null
     }
   }
 }

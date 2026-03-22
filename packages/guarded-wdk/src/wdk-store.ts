@@ -90,23 +90,6 @@ export interface StoredSigner {
   revokedAt: number | null
 }
 
-// CronRow: see store-types.ts (@internal)
-
-export interface CronInput {
-  sessionId: string
-  interval: string
-  prompt: string
-  chainId: number | null
-}
-
-export interface StoredCron extends CronInput {
-  id: string
-  accountIndex: number
-  createdAt: number
-  lastRunAt: number | null
-  isActive: boolean
-}
-
 export interface JournalInput {
   intentHash: string
   accountIndex: number

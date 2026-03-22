@@ -31,8 +31,6 @@ export type {
   PendingApprovalRequest,
   HistoryEntry,
   StoredSigner,
-  CronInput,
-  StoredCron,
   MasterSeed,
   StoredWallet,
   JournalInput,

@@ -170,6 +170,20 @@ export default async function wsRoutes (fastify: FastifyInstance): Promise<void>
         return
       }
 
+      /* ---- query_result (daemon → app, WS 직접 전달, Redis bypass) ---- */
+      if (msg.type === 'query_result') {
+        if (!msg.userId) {
+          return send(socket, { type: 'error', message: 'Missing userId for query_result' })
+        }
+        const apps = appBuckets.get(msg.userId)
+        if (apps) {
+          const outgoing: OutgoingMessage = { type: 'query_result', payload: msg.payload }
+          if (msg.encrypted) outgoing.encrypted = true
+          for (const appSocket of apps) { send(appSocket, outgoing) }
+        }
+        return
+      }
+
       /* ---- control / chat (daemon → app) ---- */
       if (msg.type === 'control' || msg.type === 'chat') {
         const ds = daemonSockets.get(daemonId)
@@ -204,15 +218,9 @@ export default async function wsRoutes (fastify: FastifyInstance): Promise<void>
           if (msg.encrypted) entry.encrypted = '1'
           const id = await queue.publish(stream, entry)
 
-          const outgoing: OutgoingMessage = { type: msg.type, id, userId, payload: msg.payload }
-          if (msg.sessionId) outgoing.sessionId = msg.sessionId
-          if (msg.encrypted) outgoing.encrypted = true
+          // v0.4.8: 직접 forward 제거. Redis → poller가 유일한 전달 경로.
 
           const apps = appBuckets.get(userId)
-          if (apps) {
-            for (const appSocket of apps) { send(appSocket, outgoing) }
-          }
-
           if (!apps || apps.size === 0) {
             await pushToOfflineApps(userId, msg.type === 'chat' ? 'New message' : 'Control', 'You have a new message')
           }
@@ -323,6 +331,23 @@ export default async function wsRoutes (fastify: FastifyInstance): Promise<void>
         return
       }
 
+      /* ---- query (app → daemon, WS 직접 전달, Redis bypass) ---- */
+      if (msg.type === 'query') {
+        const daemonId = userToDaemon.get(userId)
+        if (daemonId) {
+          const ds = daemonSockets.get(daemonId)
+          if (ds) {
+            send(ds.socket, { type: 'query', userId, payload: msg.payload })
+          } else {
+            // daemon socket gone — respond with error
+            send(socket, { type: 'query_result', payload: { requestId: (msg.payload as Record<string, unknown>)?.requestId, status: 'error', error: 'daemon_offline' } })
+          }
+        } else {
+          send(socket, { type: 'query_result', payload: { requestId: (msg.payload as Record<string, unknown>)?.requestId, status: 'error', error: 'daemon_offline' } })
+        }
+        return
+      }
+
       /* ---- control / chat (app → daemon) ---- */
       if (msg.type === 'control' || msg.type === 'chat') {
         if (msg.type === 'chat' && !msg.sessionId) {
@@ -340,19 +365,9 @@ export default async function wsRoutes (fastify: FastifyInstance): Promise<void>
         }
         if (msg.sessionId) entry.sessionId = msg.sessionId
         if (msg.encrypted) entry.encrypted = '1'
-        const id = await queue.publish(stream, entry)
+        await queue.publish(stream, entry)
 
-        // Forward to daemon
-        const daemonId = userToDaemon.get(userId)
-        if (daemonId) {
-          const ds = daemonSockets.get(daemonId)
-          if (ds) {
-            const outgoing: OutgoingMessage = { type: msg.type, id, userId, payload: msg.payload }
-            if (msg.sessionId) outgoing.sessionId = msg.sessionId
-            if (msg.encrypted) outgoing.encrypted = true
-            send(ds.socket, outgoing)
-          }
-        }
+        // v0.4.8: 직접 forward 제거. Redis → poller가 유일한 전달 경로.
         return
       }
 
@@ -421,7 +436,8 @@ export default async function wsRoutes (fastify: FastifyInstance): Promise<void>
           if (entry.data.sender === 'app') continue
           const payload = tryParseJSON(entry.data.payload)
           const encrypted = entry.data.encrypted === '1'
-          const out: OutgoingMessage = { type: 'control', id: entry.id, payload }
+          // v0.4.8: sender=daemon 메시지는 event_stream 채널로 전달
+          const out: OutgoingMessage = { type: 'event_stream', id: entry.id, payload }
           if (encrypted) out.encrypted = true
           send(socket, out)
         }

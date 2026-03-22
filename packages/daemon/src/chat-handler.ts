@@ -3,7 +3,7 @@ import type { ToolExecutionContext } from './tool-surface.js'
 import type { OpenClawClient } from './openclaw-client.js'
 import type { RelayClient } from './relay-client.js'
 import type { MessageQueueManager } from './message-queue.js'
-import type { RelayChatInput } from '@wdk-app/protocol'
+import type { RelayChatInput, ChatEvent } from '@wdk-app/protocol'
 
 // ---------------------------------------------------------------------------
 // Types

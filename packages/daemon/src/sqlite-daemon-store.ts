@@ -2,8 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { chmodSync } from 'node:fs'
 import Database from 'better-sqlite3'
 import type BetterSqlite3 from 'better-sqlite3'
-import type { CronInput, StoredCron } from '@wdk-app/guarded-wdk'
-import type { DaemonStore } from './daemon-store.js'
+import type { CronInput, StoredCron, DaemonStore } from './daemon-store.js'
 
 interface CronRow {
   id: string

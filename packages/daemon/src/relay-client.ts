@@ -18,7 +18,7 @@ interface EncryptedPayload {
   ciphertext: string
 }
 
-import type { RelayEnvelope } from '@wdk-app/protocol'
+import type { RelayEnvelope, ChatEvent, EventStreamPayload, QueryResult } from '@wdk-app/protocol'
 
 type MessageHandler = (type: string, payload: Record<string, unknown>, raw: Record<string, unknown>) => void
 
@@ -158,8 +158,13 @@ export class RelayClient extends EventEmitter {
 
   /**
    * Send a message to the Relay.
-   * v0.3.0: userId is required for control/chat messages (multiplex).
+   * v0.4.8: 채널별 타입 오버로드로 컴파일 타임 체크.
+   * Note: daemon sends all messages to relay with type='control' or type='chat'.
+   * Relay poller transforms sender=daemon messages to WS type='event_stream' for app.
    */
+  send (type: 'chat', payload: Record<string, unknown>, userId?: string): boolean
+  send (type: 'control', payload: Record<string, unknown>, userId?: string): boolean
+  send (type: 'query_result', payload: Record<string, unknown>, userId?: string): boolean
   send (type: string, payload: Record<string, unknown>, userId?: string): boolean {
     if (!this._ws || !this._connected) {
       this._logger.warn({ type }, 'Cannot send: not connected to Relay')

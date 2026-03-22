@@ -68,25 +68,27 @@ export function ChatDetailScreen({ route }: Props) {
       // Use flexible type for payload — protocol types + extra fields from relay
       const data = message.payload as RelayPayloadData;
 
-      // Control channel: handle message_queued, message_started, and cancel results (screen-level)
-      // cron_session_created and cursor tracking are handled at app-level (ChatNavigator)
-      if (message.channel === 'control') {
-        switch (data.type) {
+      // v0.4.8: event_stream channel — message_queued, message_started, cancel results
+      // cron_session_created and cursor tracking are handled at app-level (RootNavigator)
+      if (message.channel === 'event_stream') {
+        // event_stream wraps events in { event: ... } payload
+        const eventData = (data.event ?? data) as RelayPayloadData;
+        switch (eventData.type) {
           case 'message_queued': {
-            if (data.sessionId === currentSessionId && data.messageId) {
-              setQueuedMessageId(data.messageId);
+            if (eventData.sessionId === currentSessionId && eventData.messageId) {
+              setQueuedMessageId(eventData.messageId);
               setMessageState('queued');
             }
             return;
           }
           case 'message_started': {
-            if (data.sessionId === currentSessionId) {
+            if (eventData.sessionId === currentSessionId) {
               setMessageState('active');
             }
             return;
           }
-          case 'cancel_queued':
-          case 'cancel_active': {
+          case 'CancelCompleted':
+          case 'CancelFailed': {
             setQueuedMessageId(null);
             setMessageState('idle');
             setTyping(false);

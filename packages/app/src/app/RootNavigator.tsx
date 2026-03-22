@@ -85,8 +85,8 @@ function ChatNavigator() {
         updateCursor(data.sessionId, entryId);
       }
 
-      // v0.4.4: event_stream → activity store 적재
-      if (message.channel === 'control' && data.type === 'event_stream') {
+      // v0.4.8: event_stream is now a top-level channel (was nested in control)
+      if (message.channel === 'event_stream') {
         const event = (data as { event?: { type?: string; requestId?: string; chainId?: number; timestamp?: number } }).event;
         if (event && event.type) {
           const { addEvent } = useActivityStore.getState();
@@ -101,8 +101,8 @@ function ChatNavigator() {
         }
       }
 
-      // Control: cron_session_created (typed as ControlEvent from @wdk-app/protocol)
-      if (message.channel === 'control' && data.type === 'cron_session_created' && data.sessionId) {
+      // v0.4.8: cron_session_created is now delivered via event_stream channel
+      if (message.channel === 'event_stream' && data.type === 'cron_session_created' && data.sessionId) {
         registerSession(data.sessionId, 'cron');
         if (!backfilledSessions.has(data.sessionId)) {
           backfilledSessions.add(data.sessionId);

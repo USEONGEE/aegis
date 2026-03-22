@@ -1,4 +1,21 @@
-import type { CronInput, StoredCron } from '@wdk-app/guarded-wdk'
+// ---------------------------------------------------------------------------
+// Cron types — daemon-owned, not imported from guarded-wdk
+// ---------------------------------------------------------------------------
+
+export interface CronInput {
+  sessionId: string
+  interval: string
+  prompt: string
+  chainId: number | null
+}
+
+export interface StoredCron extends CronInput {
+  id: string
+  accountIndex: number
+  createdAt: number
+  lastRunAt: number | null
+  isActive: boolean
+}
 
 /**
  * Persistence interface for daemon-owned data.
