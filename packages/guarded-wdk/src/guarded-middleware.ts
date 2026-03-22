@@ -352,6 +352,11 @@ async function pollReceipt (account: GuardedAccount, hash: string, emitter: Even
 export function createGuardedMiddleware ({ policyResolver, emitter, chainId, getAccountIndex, onRejection, getPolicyVersion, journal }: MiddlewareConfig): (account: IWalletAccount) => Promise<void> {
   return async (acct: IWalletAccount) => {
     const account = acct as GuardedAccount
+
+    // WalletManagerEvm caches account objects. Skip if middleware was already applied.
+    if ((account as unknown as { __guarded?: boolean }).__guarded) return
+    ;(account as unknown as { __guarded?: boolean }).__guarded = true
+
     const rawSendTransaction = account.sendTransaction.bind(account)
     const rawTransfer = account.transfer.bind(account)
     const rawSign: ((message: string) => Promise<string>) | null =

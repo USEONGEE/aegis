@@ -155,7 +155,10 @@ export async function createGuardedWDK (config: GuardedWDKConfig): Promise<Guard
     async getAccount (chain: string, index: number) {
       currentAccountIndex = index
       const account = await wdk.getAccount(chain, index)
-      Object.freeze(account)
+      // NOTE: Object.freeze 제거 (v0.5.15)
+      // WalletManagerEvm은 account를 캐시하므로, freeze하면 두 번째 getAccount 호출 시
+      // middleware가 frozen 객체에 메서드를 덮어쓸 수 없어 "Cannot assign to read only property" 에러 발생.
+      // guarded middleware가 sign/keyPair 등을 이미 차단하므로 freeze는 불필요.
       return account
     },
 
@@ -167,7 +170,6 @@ export async function createGuardedWDK (config: GuardedWDKConfig): Promise<Guard
         if (!isNaN(idx)) currentAccountIndex = idx
       }
       const account = await wdk.getAccountByPath(chain, path)
-      Object.freeze(account)
       return account
     },
 
