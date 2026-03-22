@@ -23,22 +23,36 @@
 
 > "사용자, 데몬, 디바이스, 세션, 바인딩, 인증 토큰을 PostgreSQL에 영속하는 ID 관리 계층"
 
-Aggregate Root: `RegistryAdapter` — port (`registry-adapter.ts:19`)
+Aggregate Root: `RegistryAdapter` — port (`registry-adapter.ts:94`)
 생애주기: 정적 — 서버 부팅 시 migrate, 종료 시 close
 
 ```
   ┌──────────────────────────────────────────────────────────────────┐
   │                                                                  │
-  │  CreateUserParams ─input─→ [RegistryAdapter] ──→ UserRecord      │
-  │  CreateDaemonParams ─────→     (port)        ──→ DaemonRecord    │
-  │  RegisterDeviceParams ───→       │           ──→ DeviceRecord    │
-  │  CreateSessionParams ────→       │           ──→ SessionRecord   │
-  │  CreateRefreshTokenParams→       │           ──→ RefreshTokenRecord│
-  │                                  │                                │
-  │                                  ├──→ DaemonUserRecord (바인딩)   │
-  │                                  ├──→ EnrollmentCodeRecord        │
-  │                                  ├──→ DeviceListItem (output)     │
-  │                                  └──→ SessionListItem (output)    │
+  │  ── 타입 별칭 (actor-types.ts, v0.4.3) ──                        │
+  │  DeviceType = 'daemon' | 'app'   (디바이스 종류)                  │
+  │  SubjectRole = 'daemon' | 'app'  (인증 주체 역할)                 │
+  │                                                                  │
+  │  ── CreateParams (input, depth 0) ──                              │
+  │  CreateUserParams ─────→ [RegistryAdapter] ──→ UserRecord         │
+  │  CreateDaemonParams ───→     (port)        ──→ DaemonRecord       │
+  │  CreateDeviceParams ───→       │           ──→ DeviceRecord       │
+  │  CreateSessionParams ──→       │           ──→ SessionRecord      │
+  │  CreateRefreshTokenParams →    │           ──→ RefreshTokenRecord  │
+  │  CreateDaemonUserParams ──→    │           ──→ DaemonUserRecord    │
+  │  CreateEnrollmentCodeParams →  │           ──→ EnrollmentCodeRecord│
+  │                                │                                   │
+  │  ── Record extends CreateParams (v0.4.3) ──                       │
+  │  UserRecord extends CreateUserParams { createdAt }                │
+  │  DeviceRecord extends CreateDeviceParams { lastSeenAt, createdAt }│
+  │  DaemonRecord extends CreateDaemonParams { createdAt }            │
+  │  ... (7쌍 전부 extends 관계)                                      │
+  │                                                                  │
+  │  ── ListItem = Pick<Record> (v0.4.3) ──                           │
+  │  DeviceListItem = Pick<DeviceRecord, 'id'|'type'|'pushToken'|    │
+  │                                       'lastSeenAt'>              │
+  │  SessionListItem = Pick<SessionRecord, 'id'|'metadata'|         │
+  │                                         'createdAt'>             │
   │                                                                  │
   │  PgRegistry ── (core, extends RegistryAdapter)                   │
   │    Pool(PostgreSQL) 기반 구현                                      │
@@ -48,12 +62,15 @@ Aggregate Root: `RegistryAdapter` — port (`registry-adapter.ts:19`)
   └──────────────────────────────────────────────────────────────────┘
 ```
 
-- **RegistryAdapter** — 추상 클래스. 6개 엔티티(User, Daemon, Device, Session, DaemonUser, RefreshToken, EnrollmentCode) CRUD 메서드 정의. 구현은 PgRegistry
-- **UserRecord** — `{ id, passwordHash, createdAt }`. Google OAuth 시 passwordHash=null
-- **DaemonRecord** — `{ id, secretHash, createdAt }`. daemon self-register로 생성
-- **DaemonUserRecord** — `{ daemonId, userId, boundAt }`. **UNIQUE(userId)** — 1 user : 1 daemon 강제
-- **EnrollmentCodeRecord** — `{ code, daemonId, expiresAt, usedAt }`. 5분 TTL, 1회 사용
-- **RefreshTokenRecord** — `{ id, subjectId, role, deviceId, expiresAt, revokedAt }`. daemon/app 공용
+- **DeviceType / SubjectRole** — v0.4.3에서 `actor-types.ts`로 추출. 이전에 10곳에 인라인 `'daemon' | 'app'`으로 반복되던 것을 타입 별칭으로 통일. 의미 구분: DeviceType은 디바이스 종류, SubjectRole은 인증 주체 역할 (현재 같은 값이지만 도메인이 다름)
+- **Record extends CreateParams** — v0.4.3에서 7쌍 전부 extends 관계 적용 (v0.2.1 "Stored extends Input" 패턴). 이전에는 독립 정의로 필드가 중복
+- **ListItem = Pick\<Record\>** — v0.4.3에서 Pick 파생으로 전환. DeviceListItem.type이 `string`에서 `DeviceType`으로 좁혀짐 (**버그 수정**)
+- **RegistryAdapter** — 추상 클래스. 7개 엔티티(User, Daemon, Device, Session, DaemonUser, RefreshToken, EnrollmentCode) CRUD 메서드 정의. 구현은 PgRegistry
+- **UserRecord** — CreateUserParams(`id, passwordHash`) + `createdAt`. Google OAuth 시 passwordHash=null
+- **DaemonRecord** — CreateDaemonParams(`id, secretHash`) + `createdAt`. daemon self-register로 생성
+- **DaemonUserRecord** — CreateDaemonUserParams(`daemonId, userId`) + `boundAt`. **UNIQUE(userId)** — 1 user : 1 daemon 강제
+- **EnrollmentCodeRecord** — CreateEnrollmentCodeParams(`code, daemonId, expiresAt`) + `usedAt`. 5분 TTL, 1회 사용
+- **RefreshTokenRecord** — CreateRefreshTokenParams(`id, subjectId, role, deviceId, expiresAt`) + `createdAt, revokedAt`. daemon/app 공용
 
 ---
 
@@ -128,7 +145,7 @@ Aggregate Root: 함수 집합 (auth.ts — 진입점이 여러 라우트)
   │    → registry.claimEnrollmentCode (atomic)                       │
   │    → registry.bindUser → queue.publish(user_bound)               │
   │                                                                  │
-  │  JwtPayload ── value ── { sub, role:'daemon'|'app', deviceId? }  │
+  │  JwtPayload ── value ── { sub, role: SubjectRole, deviceId? }    │
   │                                                                  │
   └──────────────────────────────────────────────────────────────────┘
 ```
@@ -413,3 +430,4 @@ App 재연결
 ---
 
 **작성일**: 2026-03-22 00:30 KST
+**갱신일**: 2026-03-22 KST — v0.4.3 반영 (DeviceType/SubjectRole 추출, Record extends CreateParams, ListItem = Pick\<Record\>)
