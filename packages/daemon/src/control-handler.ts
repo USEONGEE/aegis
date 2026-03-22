@@ -1,8 +1,8 @@
 import { createHash } from 'node:crypto'
 import type { Logger } from 'pino'
 import type { SignedApproval, Policy } from '@wdk-app/guarded-wdk'
-import { SignedApprovalBroker } from '@wdk-app/guarded-wdk'
 import type { ApprovalSubmitContext } from '@wdk-app/guarded-wdk'
+import type { ControlFacadePort } from './ports.js'
 import type {
   SignedApprovalFields, ControlMessage, ControlResult
 } from '@wdk-app/protocol'
@@ -36,8 +36,8 @@ function toSignedApproval (fields: SignedApprovalFields, type: SignedApproval['t
 // Handler
 // ---------------------------------------------------------------------------
 
-export interface ControlHandlerDeps {
-  broker: SignedApprovalBroker
+interface ControlHandlerDeps {
+  facade: ControlFacadePort
   logger: Logger
   queueManager: MessageQueueManager
 }
@@ -52,7 +52,7 @@ export async function handleControlMessage (
   msg: ControlMessage,
   deps: ControlHandlerDeps
 ): Promise<ControlResult | null> {
-  const { broker, logger, queueManager } = deps
+  const { facade, logger, queueManager } = deps
   if (!msg.type || !msg.payload) {
     logger.warn({ msg }, 'Malformed control message: missing type or payload')
     return { ok: false, error: 'Malformed control message' }
@@ -69,7 +69,7 @@ export async function handleControlMessage (
       try {
         const signedApproval = toSignedApproval(payload, 'tx')
         const context: ApprovalSubmitContext = { kind: 'tx', expectedTargetHash: payload.targetHash }
-        await broker.submitApproval(signedApproval, context)
+        await facade.submitApproval(signedApproval, context)
         logger.info({ requestId: payload.requestId }, 'Tx approval submitted successfully')
         return null
       } catch (err: unknown) {
@@ -91,7 +91,7 @@ export async function handleControlMessage (
           policies: (payload.policies ?? []) as unknown as Policy[],
           description: ''
         }
-        await broker.submitApproval(signedApproval, context)
+        await facade.submitApproval(signedApproval, context)
         logger.info({ requestId: payload.requestId }, 'Policy approval submitted successfully')
         return null
       } catch (err: unknown) {
@@ -108,7 +108,7 @@ export async function handleControlMessage (
       try {
         const signedApproval = toSignedApproval(payload, 'policy_reject')
         const context: ApprovalSubmitContext = { kind: 'policy_reject' }
-        await broker.submitApproval(signedApproval, context)
+        await facade.submitApproval(signedApproval, context)
         logger.info({ requestId: payload.requestId }, 'Policy rejection submitted successfully')
         return null
       } catch (err: unknown) {
@@ -129,7 +129,7 @@ export async function handleControlMessage (
           ? '0x' + createHash('sha256').update(targetPubKey).digest('hex')
           : ''
         const context: ApprovalSubmitContext = { kind: 'device_revoke', expectedTargetHash }
-        await broker.submitApproval(signedApproval, context)
+        await facade.submitApproval(signedApproval, context)
         logger.info({ requestId: payload.requestId }, 'Signer revocation submitted successfully')
         return null
       } catch (err: unknown) {
@@ -146,7 +146,7 @@ export async function handleControlMessage (
       try {
         const signedApproval = toSignedApproval(payload, 'wallet_create')
         const context: ApprovalSubmitContext = { kind: 'wallet_create' }
-        await broker.submitApproval(signedApproval, context)
+        await facade.submitApproval(signedApproval, context)
         logger.info({ requestId: payload.requestId }, 'Wallet creation approval submitted successfully')
         return null
       } catch (err: unknown) {
@@ -163,7 +163,7 @@ export async function handleControlMessage (
       try {
         const signedApproval = toSignedApproval(payload, 'wallet_delete')
         const context: ApprovalSubmitContext = { kind: 'wallet_delete' }
-        await broker.submitApproval(signedApproval, context)
+        await facade.submitApproval(signedApproval, context)
         logger.info({ requestId: payload.requestId }, 'Wallet deletion approval submitted successfully')
         return null
       } catch (err: unknown) {

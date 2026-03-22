@@ -69,6 +69,7 @@ const ALL_PACKAGES: PackageDef[] = [
   { name: 'daemon', root: 'packages/daemon', tsconfig: 'packages/daemon/tsconfig.json' },
   { name: 'relay', root: 'packages/relay', tsconfig: 'packages/relay/tsconfig.json' },
   { name: 'manifest', root: 'packages/manifest', tsconfig: 'packages/manifest/tsconfig.json' },
+  { name: 'app', root: 'packages/app', tsconfig: 'packages/app/tsconfig.json' },
 ];
 
 // ── Constants ──
@@ -628,10 +629,11 @@ const PKG_COLORS: Record<string, string> = {
   daemon: '#dae8fc',
   relay: '#fff2cc',
   manifest: '#fce8e6',
+  app: '#e8dcf5',
   external: '#f0f0f0',
 };
 
-const PACKAGE_NAMES = ['guarded-wdk', 'daemon', 'relay', 'manifest'];
+const PACKAGE_NAMES = ['guarded-wdk', 'daemon', 'relay', 'manifest', 'app'];
 
 function getClusterKey(n: GraphNode, multiPkg: boolean): string {
   if (n.isExternal) return 'external';

@@ -3,8 +3,8 @@ import { intentHash, policyHash, CHAIN_IDS } from '@wdk-app/canonical'
 import type { PolicyObject } from '@wdk-app/canonical'
 import type { Logger } from 'pino'
 import type { WDKInstance } from './wdk-host.js'
-import type { ExecutionJournal } from './execution-journal.js'
-import type { ToolStorePort, ApprovalBrokerPort } from './ports.js'
+import type { ToolFacadePort } from './ports.js'
+import type { DaemonStore } from './daemon-store.js'
 import type { EvaluationContext, Policy, PendingApprovalRequest, StoredCron, RejectionEntry, PolicyVersionEntry } from '@wdk-app/guarded-wdk'
 
 // ---------------------------------------------------------------------------
@@ -39,11 +39,9 @@ interface ToolAccount {
 // ---------------------------------------------------------------------------
 
 export interface ToolExecutionContext {
-  wdk: WDKInstance
-  broker: ApprovalBrokerPort
-  store: ToolStorePort
+  facade: WDKInstance & ToolFacadePort
+  daemonStore: DaemonStore
   logger: Logger
-  journal: ExecutionJournal | null
 }
 
 // ---------------------------------------------------------------------------
@@ -56,20 +54,20 @@ export interface ToolErrorResult {
   error: string
 }
 
-export interface IntentErrorResult {
+interface IntentErrorResult {
   status: 'error'
   error: string
   intentHash: string
 }
 
-export interface IntentRejectedResult {
+interface IntentRejectedResult {
   status: 'rejected'
   reason: string
   intentHash: string
   context: EvaluationContext | null
 }
 
-export interface TransferRejectedResult {
+interface TransferRejectedResult {
   status: 'rejected'
   reason: string
   context: EvaluationContext | null
@@ -269,7 +267,7 @@ type ToolArgs = SendTransactionArgs | TransferArgs | ChainArgs | PolicyRequestAr
  * Execute a single tool call.
  */
 export async function executeToolCall (name: string, args: ToolArgs, ctx: ToolExecutionContext): Promise<AnyToolResult> {
-  const { wdk, broker, store, logger, journal } = ctx
+  const { facade, daemonStore, logger } = ctx
   const accountIndex = (args as Record<string, unknown>).accountIndex as number | undefined
 
   switch (name) {
@@ -281,20 +279,10 @@ export async function executeToolCall (name: string, args: ToolArgs, ctx: ToolEx
       const chainId = resolveChainId(chain)
       const hash = intentHash({ chainId, to, data, value, timestamp: Date.now() })
 
-      if (journal && journal.isDuplicate(hash)) {
-        logger.info({ hash }, 'Duplicate intent detected, skipping.')
-        return { status: 'duplicate', intentHash: hash }
-      }
-
-      if (journal) {
-        journal.track(hash, { accountIndex: acctIdx, chainId, targetHash: hash })
-      }
-
       try {
-        const account = await wdk.getAccount(chain, acctIdx) as unknown as ToolAccount
+        const account = await facade.getAccount(chain, acctIdx) as unknown as ToolAccount
         const result = await account.sendTransaction({ to, data, value })
 
-        if (journal) journal.updateStatus(hash, 'settled', result?.hash ?? null)
         return {
           status: 'executed',
           hash: result?.hash || null,
@@ -304,17 +292,9 @@ export async function executeToolCall (name: string, args: ToolArgs, ctx: ToolEx
       } catch (err: unknown) {
         const e = errObj(err)
         if (e.name === 'PolicyRejectionError') {
-          if (journal) journal.updateStatus(hash, 'rejected')
-          try {
-            const pv = await store.getPolicyVersion(acctIdx, chainId)
-            await store.saveRejection({ intentHash: hash, accountIndex: acctIdx, chainId, targetHash: hash, reason: errMsg(err), context: e.context ?? null, policyVersion: pv, rejectedAt: Date.now() })
-          } catch (rejErr: unknown) {
-            logger.error({ err: rejErr }, 'Failed to save rejection history')
-          }
           return { status: 'rejected', reason: errMsg(err), intentHash: hash, context: e.context ?? null }
         }
 
-        if (journal) journal.updateStatus(hash, 'failed')
         logger.error({ err, name: 'sendTransaction' }, 'Tool execution error')
         return { status: 'error', error: errMsg(err), intentHash: hash }
       }
@@ -327,7 +307,7 @@ export async function executeToolCall (name: string, args: ToolArgs, ctx: ToolEx
       const { chain, token, to, amount, accountIndex: acctIdx } = args as TransferArgs
 
       try {
-        const account = await wdk.getAccount(chain, acctIdx) as unknown as ToolAccount
+        const account = await facade.getAccount(chain, acctIdx) as unknown as ToolAccount
         const result = await account.sendTransaction({ to, data: encodeTransferData(token, to, amount), value: token.toLowerCase() === 'eth' ? amount : '0' })
 
         return {
@@ -340,16 +320,6 @@ export async function executeToolCall (name: string, args: ToolArgs, ctx: ToolEx
       } catch (err: unknown) {
         const e = errObj(err)
         if (e.name === 'PolicyRejectionError') {
-          try {
-            const chainId = resolveChainId(chain)
-            const txData = encodeTransferData(token, to, amount)
-            const txValue = token.toLowerCase() === 'eth' ? amount : '0'
-            const rejHash = intentHash({ chainId, to, data: txData, value: txValue, timestamp: Date.now() })
-            const pv = await store.getPolicyVersion(acctIdx, chainId)
-            await store.saveRejection({ intentHash: rejHash, accountIndex: acctIdx, chainId, targetHash: rejHash, reason: errMsg(err), context: e.context ?? null, policyVersion: pv, rejectedAt: Date.now() })
-          } catch (rejErr: unknown) {
-            logger.error({ err: rejErr }, 'Failed to save rejection history')
-          }
           return { status: 'rejected', reason: errMsg(err), context: e.context ?? null }
         }
         logger.error({ err, name: 'transfer' }, 'Tool execution error')
@@ -363,7 +333,7 @@ export async function executeToolCall (name: string, args: ToolArgs, ctx: ToolEx
     case 'getBalance': {
       const { chain, accountIndex } = args as ChainArgs
       try {
-        const account = await wdk.getAccount(chain, accountIndex) as unknown as ToolAccount
+        const account = await facade.getAccount(chain, accountIndex) as unknown as ToolAccount
         const balance = await account.getBalance()
         return { balances: Array.isArray(balance) ? balance : [balance] }
       } catch (err: unknown) {
@@ -379,7 +349,7 @@ export async function executeToolCall (name: string, args: ToolArgs, ctx: ToolEx
       const { chain, accountIndex } = args as ChainArgs
       try {
         const chainId = resolveChainId(chain)
-        const policy = await store.loadPolicy(accountIndex, chainId)
+        const policy = await facade.loadPolicy(accountIndex, chainId)
         return { policies: policy ? policy.policies : [] }
       } catch (err: unknown) {
         logger.error({ err, name: 'policyList' }, 'Tool execution error')
@@ -394,7 +364,7 @@ export async function executeToolCall (name: string, args: ToolArgs, ctx: ToolEx
       const { chain } = args as ChainArgs
       try {
         const chainId = resolveChainId(chain)
-        const pending = await store.loadPendingApprovals(accountIndex ?? null, 'policy', chainId)
+        const pending = await facade.getPendingApprovals(accountIndex ?? null, 'policy', chainId)
         return { pending: pending || [] }
       } catch (err: unknown) {
         logger.error({ err, name: 'policyPending' }, 'Tool execution error')
@@ -411,7 +381,7 @@ export async function executeToolCall (name: string, args: ToolArgs, ctx: ToolEx
         const chainId = resolveChainId(chain)
         const hash = policyHash(policies as unknown as PolicyObject[])
 
-        await broker.createRequest('policy', {
+        await facade.createApprovalRequest('policy', {
           requestId: randomUUID(),
           chainId,
           targetHash: hash,
@@ -434,7 +404,7 @@ export async function executeToolCall (name: string, args: ToolArgs, ctx: ToolEx
       const { interval, prompt, chain, sessionId, accountIndex: acctIdx } = args as RegisterCronArgs
       try {
         const chainId = resolveChainId(chain)
-        const cronId = await store.saveCron(acctIdx, {
+        const cronId = await daemonStore.saveCron(acctIdx, {
           sessionId,
           interval,
           prompt,
@@ -452,7 +422,7 @@ export async function executeToolCall (name: string, args: ToolArgs, ctx: ToolEx
     // -----------------------------------------------------------------------
     case 'listCrons': {
       try {
-        const crons = await store.listCrons(accountIndex)
+        const crons = await daemonStore.listCrons(accountIndex ?? null)
         return { crons }
       } catch (err: unknown) {
         logger.error({ err, name: 'listCrons' }, 'Tool execution error')
@@ -466,7 +436,7 @@ export async function executeToolCall (name: string, args: ToolArgs, ctx: ToolEx
     case 'removeCron': {
       const { cronId } = args as CronIdArgs
       try {
-        await store.removeCron(cronId)
+        await daemonStore.removeCron(cronId)
         return { status: 'removed' }
       } catch (err: unknown) {
         logger.error({ err, name: 'removeCron' }, 'Tool execution error')
@@ -482,20 +452,10 @@ export async function executeToolCall (name: string, args: ToolArgs, ctx: ToolEx
       const chainId = resolveChainId(chain)
       const hash = intentHash({ chainId, to, data, value, timestamp: Date.now() })
 
-      if (journal && journal.isDuplicate(hash)) {
-        logger.info({ hash }, 'Duplicate intent detected, skipping.')
-        return { status: 'duplicate', intentHash: hash }
-      }
-
-      if (journal) {
-        journal.track(hash, { accountIndex: acctIdx, chainId, targetHash: hash })
-      }
-
       try {
-        const account = await wdk.getAccount(chain, acctIdx) as unknown as ToolAccount
+        const account = await facade.getAccount(chain, acctIdx) as unknown as ToolAccount
         const result = await account.signTransaction({ to, data, value })
 
-        if (journal) journal.updateStatus(hash, 'signed')
         return {
           status: 'signed',
           signedTx: result?.signedTx || null,
@@ -505,17 +465,9 @@ export async function executeToolCall (name: string, args: ToolArgs, ctx: ToolEx
       } catch (err: unknown) {
         const e = errObj(err)
         if (e.name === 'PolicyRejectionError') {
-          if (journal) journal.updateStatus(hash, 'rejected')
-          try {
-            const pv = await store.getPolicyVersion(acctIdx, chainId)
-            await store.saveRejection({ intentHash: hash, accountIndex: acctIdx, chainId, targetHash: hash, reason: errMsg(err), context: e.context ?? null, policyVersion: pv, rejectedAt: Date.now() })
-          } catch (rejErr: unknown) {
-            logger.error({ err: rejErr }, 'Failed to save rejection history')
-          }
           return { status: 'rejected', reason: errMsg(err), intentHash: hash, context: e.context ?? null }
         }
 
-        if (journal) journal.updateStatus(hash, 'failed')
         logger.error({ err, name: 'signTransaction' }, 'Tool execution error')
         return { status: 'error', error: errMsg(err), intentHash: hash }
       }
@@ -528,7 +480,7 @@ export async function executeToolCall (name: string, args: ToolArgs, ctx: ToolEx
       const { chain, accountIndex: acctIdx, limit } = args as RejectionListArgs
       try {
         const chainId = resolveChainId(chain)
-        const rejections = await store.listRejections({ accountIndex: acctIdx, chainId, limit })
+        const rejections = await facade.listRejections({ accountIndex: acctIdx, chainId, limit })
         return { rejections }
       } catch (err: unknown) {
         logger.error({ err, name: 'listRejections' }, 'Tool execution error')
@@ -543,7 +495,7 @@ export async function executeToolCall (name: string, args: ToolArgs, ctx: ToolEx
       const { chain, accountIndex: acctIdx } = args as PolicyVersionListArgs
       try {
         const chainId = resolveChainId(chain)
-        const policyVersions = await store.listPolicyVersions(acctIdx, chainId)
+        const policyVersions = await facade.listPolicyVersions(acctIdx, chainId)
         return { policyVersions }
       } catch (err: unknown) {
         logger.error({ err, name: 'listPolicyVersions' }, 'Tool execution error')

@@ -3,22 +3,20 @@ import type { Server, Socket } from 'node:net'
 import { chmodSync } from 'node:fs'
 import { unlink } from 'node:fs/promises'
 import type { Logger } from 'pino'
-import type { AdminStorePort } from './ports.js'
+import type { AdminFacadePort } from './ports.js'
 import type { RelayClient } from './relay-client.js'
-import type { ExecutionJournal, JournalListOptions } from './execution-journal.js'
 import type { CronScheduler } from './cron-scheduler.js'
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
-export interface AdminServerConfig {
+interface AdminServerConfig {
   socketPath: string
 }
 
 interface AdminServerDeps {
-  store: AdminStorePort
-  journal: ExecutionJournal | null
+  facade: AdminFacadePort
   cronScheduler: CronScheduler | null
   relayClient: RelayClient
   logger: Logger
@@ -26,7 +24,6 @@ interface AdminServerDeps {
 
 type AdminRequest =
   | { command: 'status' }
-  | { command: 'journal_list'; status: string | null; chainId: number | null; limit: number | null }
   | { command: 'signer_list' }
   | { command: 'cron_list' }
   | { command: 'wallet_list' }
@@ -55,15 +52,13 @@ type AdminResponse = AdminResponseOk | AdminResponseError
  *
  * Commands:
  *   - status         -> daemon health and connection state
- *   - journal_list   -> list execution journal entries
  *   - signer_list    -> list paired signers
  *   - cron_list      -> list registered cron jobs
  *   - wallet_list    -> list wallets
  */
 export class AdminServer {
   private _socketPath: string
-  private _store: AdminStorePort
-  private _journal: ExecutionJournal | null
+  private _facade: AdminFacadePort
   private _cronScheduler: CronScheduler | null
   private _relayClient: RelayClient
   private _logger: Logger
@@ -72,8 +67,7 @@ export class AdminServer {
 
   constructor (config: AdminServerConfig, deps: AdminServerDeps) {
     this._socketPath = config.socketPath
-    this._store = deps.store
-    this._journal = deps.journal
+    this._facade = deps.facade
     this._cronScheduler = deps.cronScheduler
     this._relayClient = deps.relayClient
     this._logger = deps.logger
@@ -190,35 +184,16 @@ export class AdminServer {
             uptime: Date.now() - this._startedAt,
             startedAt: this._startedAt,
             relayConnected: this._relayClient?.connected || false,
-            journalActive: this._journal?.activeCount || 0,
             cronCount: this._cronScheduler?.size || 0
           }
         }
       }
 
       // -------------------------------------------------------------------
-      // journal_list -- execution journal entries
-      // -------------------------------------------------------------------
-      case 'journal_list': {
-        if (!this._journal) {
-          return { ok: true, data: { entries: [] } }
-        }
-
-        const req = request as { command: 'journal_list'; status: string | null; chainId: number | null; limit: number | null }
-        const entries = await this._journal.list({
-          status: (req.status ?? undefined) as JournalListOptions['status'],
-          chainId: req.chainId ?? undefined,
-          limit: req.limit ?? 50
-        })
-
-        return { ok: true, data: { entries } }
-      }
-
-      // -------------------------------------------------------------------
       // signer_list -- paired signers
       // -------------------------------------------------------------------
       case 'signer_list': {
-        const signers = await this._store.listSigners()
+        const signers = await this._facade.listSigners()
         return {
           ok: true,
           data: {
@@ -248,7 +223,7 @@ export class AdminServer {
       // wallet_list -- wallets
       // -------------------------------------------------------------------
       case 'wallet_list': {
-        const wallets = await this._store.listWallets()
+        const wallets = await this._facade.listWallets()
 
         return {
           ok: true,

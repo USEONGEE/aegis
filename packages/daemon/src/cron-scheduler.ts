@@ -1,10 +1,11 @@
 import type { Logger } from 'pino'
+import type { DaemonStore } from './daemon-store.js'
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
-export interface CronBase {
+interface CronBase {
   id: string
   sessionId: string
   interval: string
@@ -13,14 +14,14 @@ export interface CronBase {
   accountIndex: number
 }
 
-export interface CronEntry extends CronBase {
+interface CronEntry extends CronBase {
   intervalMs: number
   lastRunAt: number
 }
 
-export type CronRegistration = CronBase
+type CronRegistration = CronBase
 
-export interface CronListItem extends CronBase {
+interface CronListItem extends CronBase {
   lastRunAt: number
 }
 
@@ -32,13 +33,9 @@ export type CronDispatch = (
   chainId: number | null
 ) => Promise<void>
 
-interface CronStore {
-  listCrons (accountIndex?: number): Promise<Array<{ id: string; accountIndex: number; sessionId: string; interval: string; prompt: string; chainId: number | null; createdAt: number; lastRunAt: number | null; isActive: boolean }>>
-  removeCron (cronId: string): Promise<void>
-  updateCronLastRun (cronId: string, timestamp: number): Promise<void>
-}
+// Local CronStore interface removed — using DaemonStore (imported above)
 
-export interface CronSchedulerConfig {
+interface CronSchedulerConfig {
   tickIntervalMs: number
 }
 
@@ -52,7 +49,7 @@ export interface CronSchedulerConfig {
  * prompts through the OpenClaw tool-call loop.
  */
 export class CronScheduler {
-  private _store: CronStore
+  private _store: DaemonStore
   private _logger: Logger
   private _dispatch: CronDispatch
   private _tickIntervalMs: number
@@ -63,7 +60,7 @@ export class CronScheduler {
   private _running: boolean
 
   constructor (
-    store: CronStore,
+    store: DaemonStore,
     logger: Logger,
     dispatch: CronDispatch,
     config: CronSchedulerConfig
@@ -85,7 +82,7 @@ export class CronScheduler {
     if (this._running) return
 
     // Load existing crons from store
-    const crons = await this._store.listCrons()
+    const crons = await this._store.listCrons(null)
     for (const cron of crons) {
       if (cron.isActive) {
         this._crons.set(cron.id, {

@@ -23,7 +23,7 @@ function createMockLogger (): MockLogger {
   }
 }
 
-function createMockBroker (overrides: Record<string, any> = {}): any {
+function createMockFacade (overrides: Record<string, any> = {}): any {
   return {
     submitApproval: jest.fn<() => Promise<undefined>>().mockResolvedValue(undefined),
     setTrustedApprovers: jest.fn(),
@@ -64,12 +64,12 @@ function defaultApprovalFields (overrides: Partial<SignedApprovalFields> = {}): 
 
 describe('handleControlMessage', () => {
   let logger: MockLogger
-  let broker: any
+  let facade: any
   let queueManager: any
 
   beforeEach(() => {
     logger = createMockLogger()
-    broker = createMockBroker()
+    facade = createMockFacade()
     queueManager = createMockQueueManager()
   })
 
@@ -79,7 +79,7 @@ describe('handleControlMessage', () => {
 
   test('returns error for message with missing type', async () => {
     const msg = { payload: { requestId: 'r1' } } as any
-    const result = await handleControlMessage(msg, { broker, logger: logger as any, queueManager })
+    const result = await handleControlMessage(msg, { facade, logger: logger as any, queueManager })
 
     expect(result).not.toBeNull()
     expect(result!.ok).toBe(false)
@@ -89,7 +89,7 @@ describe('handleControlMessage', () => {
 
   test('returns error for message with missing payload', async () => {
     const msg = { type: 'policy_approval' } as any
-    const result = await handleControlMessage(msg, { broker, logger: logger as any, queueManager })
+    const result = await handleControlMessage(msg, { facade, logger: logger as any, queueManager })
 
     expect(result).not.toBeNull()
     expect(result!.ok).toBe(false)
@@ -100,7 +100,7 @@ describe('handleControlMessage', () => {
   // policy_approval — v0.4.2: returns null (WDK events replace ControlResult)
   // -------------------------------------------------------------------------
 
-  test('policy_approval: calls broker.submitApproval and returns null', async () => {
+  test('policy_approval: calls facade.submitApproval and returns null', async () => {
     const msg: ControlMessage = {
       type: 'policy_approval',
       payload: {
@@ -112,17 +112,17 @@ describe('handleControlMessage', () => {
       }
     }
 
-    const result = await handleControlMessage(msg, { broker, logger: logger as any, queueManager })
+    const result = await handleControlMessage(msg, { facade, logger: logger as any, queueManager })
 
     expect(result).toBeNull()
-    expect(broker.submitApproval).toHaveBeenCalledWith(expect.objectContaining({
+    expect(facade.submitApproval).toHaveBeenCalledWith(expect.objectContaining({
       type: 'policy',
       requestId: 'req_pol_1'
     }), expect.objectContaining({ kind: 'policy_approval' }))
   })
 
   test('policy_approval: broker failure returns null (ApprovalFailed event handles error)', async () => {
-    broker.submitApproval.mockRejectedValue(new Error('Verification failed'))
+    facade.submitApproval.mockRejectedValue(new Error('Verification failed'))
 
     const msg: ControlMessage = {
       type: 'policy_approval',
@@ -132,7 +132,7 @@ describe('handleControlMessage', () => {
       }
     }
 
-    const result = await handleControlMessage(msg, { broker, logger: logger as any, queueManager })
+    const result = await handleControlMessage(msg, { facade, logger: logger as any, queueManager })
 
     expect(result).toBeNull()
     expect(logger.error).toHaveBeenCalled()
@@ -142,7 +142,7 @@ describe('handleControlMessage', () => {
   // policy_reject — v0.4.2: returns null
   // -------------------------------------------------------------------------
 
-  test('policy_reject: calls broker.submitApproval and returns null', async () => {
+  test('policy_reject: calls facade.submitApproval and returns null', async () => {
     const msg: ControlMessage = {
       type: 'policy_reject',
       payload: defaultApprovalFields({
@@ -151,10 +151,10 @@ describe('handleControlMessage', () => {
       })
     }
 
-    const result = await handleControlMessage(msg, { broker, logger: logger as any, queueManager })
+    const result = await handleControlMessage(msg, { facade, logger: logger as any, queueManager })
 
     expect(result).toBeNull()
-    expect(broker.submitApproval).toHaveBeenCalledWith(expect.objectContaining({
+    expect(facade.submitApproval).toHaveBeenCalledWith(expect.objectContaining({
       type: 'policy_reject',
       requestId: 'req_rej_1'
     }), expect.objectContaining({ kind: 'policy_reject' }))
@@ -164,7 +164,7 @@ describe('handleControlMessage', () => {
   // device_revoke — v0.4.2: returns null, no setTrustedApprovers (broker internal)
   // -------------------------------------------------------------------------
 
-  test('device_revoke: calls broker.submitApproval and returns null', async () => {
+  test('device_revoke: calls facade.submitApproval and returns null', async () => {
     const signerToRevoke = '0xpubkey_to_revoke'
     const expectedHash = '0x' + createHash('sha256').update(signerToRevoke).digest('hex')
 
@@ -176,16 +176,16 @@ describe('handleControlMessage', () => {
       }), targetPublicKey: signerToRevoke }
     }
 
-    const result = await handleControlMessage(msg, { broker, logger: logger as any, queueManager })
+    const result = await handleControlMessage(msg, { facade, logger: logger as any, queueManager })
 
     expect(result).toBeNull()
-    expect(broker.submitApproval).toHaveBeenCalledWith(
+    expect(facade.submitApproval).toHaveBeenCalledWith(
       expect.objectContaining({ type: 'device_revoke' }),
       expect.objectContaining({ kind: 'device_revoke', expectedTargetHash: expectedHash })
     )
   })
 
-  test('device_revoke: does NOT call broker.setTrustedApprovers (moved to broker internal)', async () => {
+  test('device_revoke: does NOT call facade.setTrustedApprovers (moved to broker internal)', async () => {
     const msg: ControlMessage = {
       type: 'device_revoke',
       payload: { ...defaultApprovalFields({
@@ -194,13 +194,13 @@ describe('handleControlMessage', () => {
       }), targetPublicKey: '0xdev_x' }
     }
 
-    await handleControlMessage(msg, { broker, logger: logger as any, queueManager })
+    await handleControlMessage(msg, { facade, logger: logger as any, queueManager })
 
-    expect(broker.setTrustedApprovers).not.toHaveBeenCalled()
+    expect(facade.setTrustedApprovers).not.toHaveBeenCalled()
   })
 
   test('device_revoke: broker failure returns null', async () => {
-    broker.submitApproval.mockRejectedValue(new Error('Revocation denied'))
+    facade.submitApproval.mockRejectedValue(new Error('Revocation denied'))
 
     const msg: ControlMessage = {
       type: 'device_revoke',
@@ -210,7 +210,7 @@ describe('handleControlMessage', () => {
       }), targetPublicKey: '0xdev_y' }
     }
 
-    const result = await handleControlMessage(msg, { broker, logger: logger as any, queueManager })
+    const result = await handleControlMessage(msg, { facade, logger: logger as any, queueManager })
 
     expect(result).toBeNull()
   })
@@ -219,7 +219,7 @@ describe('handleControlMessage', () => {
   // tx_approval — v0.4.2: returns null
   // -------------------------------------------------------------------------
 
-  test('tx_approval: calls broker.submitApproval and returns null', async () => {
+  test('tx_approval: calls facade.submitApproval and returns null', async () => {
     const msg: ControlMessage = {
       type: 'tx_approval',
       payload: defaultApprovalFields({
@@ -228,10 +228,10 @@ describe('handleControlMessage', () => {
       })
     }
 
-    const result = await handleControlMessage(msg, { broker, logger: logger as any, queueManager })
+    const result = await handleControlMessage(msg, { facade, logger: logger as any, queueManager })
 
     expect(result).toBeNull()
-    expect(broker.submitApproval).toHaveBeenCalledWith(
+    expect(facade.submitApproval).toHaveBeenCalledWith(
       expect.objectContaining({ type: 'tx', requestId: 'req_tx_1' }),
       expect.objectContaining({ kind: 'tx', expectedTargetHash: '0xtxhash' })
     )
@@ -241,31 +241,31 @@ describe('handleControlMessage', () => {
   // wallet_create / wallet_delete — v0.4.2: returns null
   // -------------------------------------------------------------------------
 
-  test('wallet_create: calls broker.submitApproval and returns null', async () => {
+  test('wallet_create: calls facade.submitApproval and returns null', async () => {
     const msg: ControlMessage = {
       type: 'wallet_create',
       payload: defaultApprovalFields({ requestId: 'req_wc_1' })
     }
 
-    const result = await handleControlMessage(msg, { broker, logger: logger as any, queueManager })
+    const result = await handleControlMessage(msg, { facade, logger: logger as any, queueManager })
 
     expect(result).toBeNull()
-    expect(broker.submitApproval).toHaveBeenCalledWith(
+    expect(facade.submitApproval).toHaveBeenCalledWith(
       expect.objectContaining({ type: 'wallet_create' }),
       expect.objectContaining({ kind: 'wallet_create' })
     )
   })
 
-  test('wallet_delete: calls broker.submitApproval and returns null', async () => {
+  test('wallet_delete: calls facade.submitApproval and returns null', async () => {
     const msg: ControlMessage = {
       type: 'wallet_delete',
       payload: defaultApprovalFields({ requestId: 'req_wd_1' })
     }
 
-    const result = await handleControlMessage(msg, { broker, logger: logger as any, queueManager })
+    const result = await handleControlMessage(msg, { facade, logger: logger as any, queueManager })
 
     expect(result).toBeNull()
-    expect(broker.submitApproval).toHaveBeenCalledWith(
+    expect(facade.submitApproval).toHaveBeenCalledWith(
       expect.objectContaining({ type: 'wallet_delete' }),
       expect.objectContaining({ kind: 'wallet_delete' })
     )
@@ -281,7 +281,7 @@ describe('handleControlMessage', () => {
       payload: { messageId: '' }
     }
 
-    const result = await handleControlMessage(msg, { broker, logger: logger as any, queueManager })
+    const result = await handleControlMessage(msg, { facade, logger: logger as any, queueManager })
 
     expect(result).not.toBeNull()
     expect(result!.ok).toBe(false)
@@ -296,7 +296,7 @@ describe('handleControlMessage', () => {
       payload: { messageId: 'msg-123' }
     }
 
-    const result = await handleControlMessage(msg, { broker, logger: logger as any, queueManager })
+    const result = await handleControlMessage(msg, { facade, logger: logger as any, queueManager })
 
     expect(result).not.toBeNull()
     expect(result!.ok).toBe(true)
@@ -312,7 +312,7 @@ describe('handleControlMessage', () => {
       payload: { messageId: 'msg-active' }
     }
 
-    const result = await handleControlMessage(msg, { broker, logger: logger as any, queueManager })
+    const result = await handleControlMessage(msg, { facade, logger: logger as any, queueManager })
 
     expect(result).not.toBeNull()
     expect(result!.ok).toBe(false)
@@ -329,7 +329,7 @@ describe('handleControlMessage', () => {
       payload: { messageId: '' }
     }
 
-    const result = await handleControlMessage(msg, { broker, logger: logger as any, queueManager })
+    const result = await handleControlMessage(msg, { facade, logger: logger as any, queueManager })
 
     expect(result).not.toBeNull()
     expect(result!.ok).toBe(false)
@@ -344,7 +344,7 @@ describe('handleControlMessage', () => {
       payload: { messageId: 'msg-456' }
     }
 
-    const result = await handleControlMessage(msg, { broker, logger: logger as any, queueManager })
+    const result = await handleControlMessage(msg, { facade, logger: logger as any, queueManager })
 
     expect(result).not.toBeNull()
     expect(result!.ok).toBe(true)
@@ -361,7 +361,7 @@ describe('handleControlMessage', () => {
       payload: { messageId: 'msg-queued' }
     }
 
-    const result = await handleControlMessage(msg, { broker, logger: logger as any, queueManager })
+    const result = await handleControlMessage(msg, { facade, logger: logger as any, queueManager })
 
     expect(result).not.toBeNull()
     expect(result!.ok).toBe(false)
@@ -378,7 +378,7 @@ describe('handleControlMessage', () => {
       payload: { requestId: 'r1' }
     } as any
 
-    const result = await handleControlMessage(msg, { broker, logger: logger as any, queueManager })
+    const result = await handleControlMessage(msg, { facade, logger: logger as any, queueManager })
 
     expect(result).not.toBeNull()
     expect(result!.ok).toBe(false)

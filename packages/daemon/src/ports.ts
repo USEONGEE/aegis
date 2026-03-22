@@ -1,39 +1,19 @@
 import type {
   StoredPolicy,
   PendingApprovalRequest,
-  CronInput,
-  StoredCron,
-  RejectionEntry,
   RejectionQueryOpts,
+  RejectionEntry,
   PolicyVersionEntry,
   ApprovalType,
   ApprovalRequest,
   StoredSigner,
-  StoredWallet
+  StoredWallet,
+  SignedApproval,
+  ApprovalSubmitContext
 } from '@wdk-app/guarded-wdk'
 
 // ---------------------------------------------------------------------------
-// Port: tool-surface.ts용 Store
-// ---------------------------------------------------------------------------
-
-/**
- * tool-surface.ts가 store에서 사용하는 메서드만 정의한 Port.
- * 구현: SqliteApprovalStore (guarded-wdk).
- */
-export interface ToolStorePort {
-  getPolicyVersion (accountIndex: number, chainId: number): Promise<number>
-  loadPolicy (accountIndex: number, chainId: number): Promise<StoredPolicy | null>
-  loadPendingApprovals (accountIndex: number | null, type: string | null, chainId: number | null): Promise<PendingApprovalRequest[]>
-  saveRejection (entry: RejectionEntry): Promise<void>
-  listRejections (opts: RejectionQueryOpts): Promise<RejectionEntry[]>
-  saveCron (accountIndex: number, cron: CronInput): Promise<string>
-  listCrons (accountIndex?: number): Promise<StoredCron[]>
-  removeCron (cronId: string): Promise<void>
-  listPolicyVersions (accountIndex: number, chainId: number): Promise<PolicyVersionEntry[]>
-}
-
-// ---------------------------------------------------------------------------
-// Port: tool-surface.ts용 Broker
+// Port: tool-surface.ts용 Facade
 // ---------------------------------------------------------------------------
 
 interface CreateRequestOptions {
@@ -46,22 +26,38 @@ interface CreateRequestOptions {
 }
 
 /**
- * tool-surface.ts가 broker에서 사용하는 메서드만 정의한 Port.
- * 구현: SignedApprovalBroker (guarded-wdk).
+ * tool-surface.ts가 facade에서 사용하는 메서드만 정의한 Port.
+ * 구현: GuardedWDKFacade (guarded-wdk).
  */
-export interface ApprovalBrokerPort {
-  createRequest (type: ApprovalType, opts: CreateRequestOptions): Promise<ApprovalRequest>
+export interface ToolFacadePort {
+  loadPolicy (accountIndex: number, chainId: number): Promise<StoredPolicy | null>
+  getPendingApprovals (accountIndex: number | null, type: string | null, chainId: number | null): Promise<PendingApprovalRequest[]>
+  listRejections (opts: RejectionQueryOpts): Promise<RejectionEntry[]>
+  listPolicyVersions (accountIndex: number, chainId: number): Promise<PolicyVersionEntry[]>
+  createApprovalRequest (type: ApprovalType, opts: CreateRequestOptions): Promise<ApprovalRequest>
 }
 
 // ---------------------------------------------------------------------------
-// Port: admin-server.ts용 Store
+// Port: admin-server.ts용 Facade
 // ---------------------------------------------------------------------------
 
 /**
- * admin-server.ts가 store에서 사용하는 메서드만 정의한 Port.
- * 구현: SqliteApprovalStore (guarded-wdk).
+ * admin-server.ts가 facade에서 사용하는 메서드만 정의한 Port.
+ * 구현: GuardedWDKFacade (guarded-wdk).
  */
-export interface AdminStorePort {
+export interface AdminFacadePort {
   listSigners (): Promise<StoredSigner[]>
   listWallets (): Promise<StoredWallet[]>
+}
+
+// ---------------------------------------------------------------------------
+// Port: control-handler.ts용 Facade
+// ---------------------------------------------------------------------------
+
+/**
+ * control-handler.ts가 facade에서 사용하는 메서드만 정의한 Port.
+ * 구현: GuardedWDKFacade (guarded-wdk).
+ */
+export interface ControlFacadePort {
+  submitApproval (signedApproval: SignedApproval, context: ApprovalSubmitContext): Promise<void>
 }

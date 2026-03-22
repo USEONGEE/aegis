@@ -9,6 +9,7 @@ export interface DaemonConfig {
   // --- WDK paths ---
   wdkHome: string
   storePath: string
+  daemonStorePath: string
   socketPath: string
 
   // --- OpenClaw ---
@@ -44,6 +45,7 @@ export function loadConfig (): DaemonConfig {
     // --- WDK paths ---
     wdkHome,
     storePath: join(wdkHome, 'store'),
+    daemonStorePath: join(wdkHome, 'daemon-store'),
     socketPath: join(wdkHome, 'daemon.sock'),
 
     // --- OpenClaw ---

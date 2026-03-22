@@ -13,6 +13,9 @@ import {
   noPublicVerifierExport
 } from './checks/guarded-wdk/responsibility-boundary.js'
 
+// --- daemon checks ---
+import { noDaemonDirectWdkStore } from './checks/daemon/no-direct-wdk-store.js'
+
 // --- server checks ---
 import { noBrowserGlobals } from './checks/server/no-browser-globals.js'
 
@@ -40,6 +43,14 @@ export const checks: CheckEntry[] = [
     description: 'guarded-wdk must not use `as any` or `as unknown as`',
     group: 'guarded-wdk',
     fn: noTypeAssertion,
+  },
+
+  // daemon group (1)
+  {
+    name: 'daemon/no-direct-wdk-store-access',
+    description: 'daemon must not runtime-import WdkStore or call getApprovalStore/getBroker',
+    group: 'daemon',
+    fn: noDaemonDirectWdkStore,
   },
 
   // server group (1)

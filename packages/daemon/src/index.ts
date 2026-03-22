@@ -8,10 +8,10 @@ import { RelayClient } from './relay-client.js'
 import { handleControlMessage } from './control-handler.js'
 import type { ControlMessage, RelayChatInput } from '@wdk-app/protocol'
 import { handleChatMessage } from './chat-handler.js'
-import { ExecutionJournal } from './execution-journal.js'
 import { CronScheduler } from './cron-scheduler.js'
 import type { CronDispatch } from './cron-scheduler.js'
 import { AdminServer } from './admin-server.js'
+import { SqliteDaemonStore } from './sqlite-daemon-store.js'
 import { MessageQueueManager } from './message-queue.js'
 import { authenticateWithRelay } from './relay-auth.js'
 import type { QueuedMessage } from './message-queue.js'
@@ -34,14 +34,14 @@ async function main (): Promise<void> {
   const config = loadConfig()
   logger.info({ wdkHome: config.wdkHome, relayUrl: config.relayUrl }, 'Config loaded')
 
-  // 2. Init WDK (load master seed -> store -> broker)
-  const { wdk, broker, store } = await initWDK(config, logger)
+  // 2. Init WDK (load master seed -> facade)
+  const { facade } = await initWDK(config, logger)
 
-  // 3. Init execution journal
-  const journal = new ExecutionJournal(store, logger)
-  await journal.recover()
+  // 2b. Init daemon store (cron persistence)
+  const daemonStore = new SqliteDaemonStore(config.daemonStorePath + '/daemon.db')
+  await daemonStore.init()
 
-  // 4. Create OpenClaw client
+  // 3. Create OpenClaw client
   const openclawClient = createOpenClawClient(config)
   logger.info({ baseUrl: config.openclawBaseUrl }, 'OpenClaw client created')
 
@@ -54,11 +54,9 @@ async function main (): Promise<void> {
 
   // 6. Build tool execution context (passed to tool execution)
   const ctx: ToolExecutionContext = {
-    wdk: wdk!,
-    broker: broker!,
-    store,
-    logger,
-    journal
+    facade: facade!,
+    daemonStore,
+    logger
   }
 
   // 6b. Create FIFO message queue manager
@@ -96,7 +94,7 @@ async function main (): Promise<void> {
     switch (type) {
       case 'control':
         // v0.4.2: 승인 6종은 null 반환 (WDK 이벤트로 앱에 전달). cancel 2종만 ControlResult forward.
-        handleControlMessage(payload as ControlMessage, { broker: broker!, logger, queueManager })
+        handleControlMessage(payload as ControlMessage, { facade: facade!, logger, queueManager })
           .then((result) => {
             if (result === null) return // 승인 타입: WDK 이벤트가 대신 전달
             const incomingUserId = (payload as Record<string, unknown>)?.userId as string | undefined
@@ -128,9 +126,9 @@ async function main (): Promise<void> {
     'ApprovalFailed'
   ] as const
 
-  if (wdk) {
+  if (facade) {
     for (const eventName of RELAY_EVENTS) {
-      wdk.on(eventName, (event: unknown) => {
+      facade.on(eventName, (event: unknown) => {
         // v0.4.2: eventName 제거. event.type이 유일한 판별자.
         relayClient.send('control', { type: 'event_stream', event: event as Record<string, unknown> })
       })
@@ -202,7 +200,7 @@ async function main (): Promise<void> {
   }
 
   const cronScheduler = new CronScheduler(
-    store, logger, cronDispatch,
+    daemonStore, logger, cronDispatch,
     { tickIntervalMs: config.cronTickIntervalMs }
   )
   await cronScheduler.start()
@@ -210,7 +208,7 @@ async function main (): Promise<void> {
   // 8. Start admin server
   const adminServer = new AdminServer(
     { socketPath: config.socketPath },
-    { store, journal, cronScheduler, relayClient, logger }
+    { facade: facade!, cronScheduler, relayClient, logger }
   )
   await adminServer.start()
 
@@ -232,15 +230,13 @@ async function main (): Promise<void> {
     // Stop admin server
     await adminServer.stop()
 
-    // Dispose WDK
-    if (wdk && wdk.dispose) {
-      wdk.dispose()
+    // Dispose facade (also disposes internal store)
+    if (facade && facade.dispose) {
+      facade.dispose()
     }
 
-    // Dispose store
-    if (store && store.dispose) {
-      await store.dispose()
-    }
+    // Dispose daemon store
+    await daemonStore.dispose()
 
     logger.info('Daemon stopped.')
     process.exit(0)

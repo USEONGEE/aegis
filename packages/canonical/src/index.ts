@@ -3,9 +3,6 @@ import { createHash } from 'node:crypto'
 /** Well-known chain IDs */
 export const CHAIN_IDS = { ethereum: 1, arbitrum: 42161, sepolia: 11155111, polygon: 137 } as const satisfies Record<string, number>
 
-/** A known chain ID value */
-export type ChainId = (typeof CHAIN_IDS)[keyof typeof CHAIN_IDS]
-
 /** JSON-compatible primitive types */
 type JsonPrimitive = string | number | boolean | null
 
@@ -15,7 +12,7 @@ type JsonValue = JsonPrimitive | JsonValue[] | { [key: string]: JsonValue }
 /**
  * Input fields for computing an intent hash.
  */
-export interface IntentInput {
+interface IntentInput {
   chainId: number
   to: string
   data: string
@@ -33,7 +30,7 @@ export type PolicyObject = Record<string, JsonValue>
  * Arrays are preserved in order, but objects inside arrays are also sorted.
  * Primitives (string, number, boolean, null) are returned as-is.
  */
-export function sortKeysDeep(obj: JsonValue): JsonValue {
+function sortKeysDeep(obj: JsonValue): JsonValue {
   if (obj === null || typeof obj !== 'object') return obj
   if (Array.isArray(obj)) return obj.map(sortKeysDeep)
 
@@ -64,6 +61,21 @@ function normalizeAddress(addr: string): string {
  */
 function normalizeValue(val: string): string {
   return val
+}
+
+/**
+ * Compute a stable dedup key from intent fields (no timestamp).
+ * Used for journal duplicate detection. Same tx always produces the same key.
+ */
+export function dedupKey({ chainId, to, data, value }: Omit<IntentInput, 'timestamp'>): string {
+  const normalized: Record<string, string | number> = {
+    chainId,
+    data: normalizeAddress(data),
+    to: normalizeAddress(to),
+    value: normalizeValue(value)
+  }
+  const json: string = JSON.stringify(normalized)
+  return '0x' + createHash('sha256').update(json).digest('hex')
 }
 
 /**

@@ -23,7 +23,7 @@ function createMockLogger (): MockLogger {
   }
 }
 
-function createMockWdk (overrides: Record<string, any> = {}): any {
+function createMockFacade (overrides: Record<string, any> = {}): any {
   const account = {
     sendTransaction: jest.fn<() => Promise<{ hash: string; fee: string }>>().mockResolvedValue({ hash: '0xabc123', fee: '0.001' }),
     signTransaction: jest.fn<() => Promise<{ signedTx: string; intentHash: string; requestId: string }>>().mockResolvedValue({
@@ -40,15 +40,9 @@ function createMockWdk (overrides: Record<string, any> = {}): any {
 
   return {
     getAccount: jest.fn<() => Promise<any>>().mockResolvedValue(account),
-    getApprovalBroker: jest.fn().mockReturnValue(null),
     on: jest.fn(),
     off: jest.fn(),
-    ...overrides.wdk
-  }
-}
-
-function createMockStore (overrides: Record<string, any> = {}): any {
-  return {
+    // Store read methods
     loadPolicy: jest.fn<() => Promise<{ policies: unknown[]; signature: Record<string, unknown>; accountIndex: number; chainId: number; policyVersion: number; updatedAt: number }>>().mockResolvedValue({
       policies: [{ type: 'auto', maxUsd: 100 }],
       signature: {},
@@ -57,45 +51,36 @@ function createMockStore (overrides: Record<string, any> = {}): any {
       policyVersion: 1,
       updatedAt: Date.now()
     }),
-    loadPendingApprovals: jest.fn<() => Promise<Array<{ requestId: string; type: string; status: string }>>>().mockResolvedValue([
+    getPendingApprovals: jest.fn<() => Promise<Array<{ requestId: string; type: string; status: string }>>>().mockResolvedValue([
       { requestId: 'req_1', type: 'policy', status: 'pending' }
     ]),
+    listRejections: jest.fn<() => Promise<unknown[]>>().mockResolvedValue([]),
+    listPolicyVersions: jest.fn<() => Promise<unknown[]>>().mockResolvedValue([]),
+    getPolicyVersion: jest.fn<() => Promise<number>>().mockResolvedValue(1),
+    saveRejection: jest.fn<() => Promise<undefined>>().mockResolvedValue(undefined),
+    // Broker methods
+    submitApproval: jest.fn<() => Promise<undefined>>().mockResolvedValue(undefined),
+    createApprovalRequest: jest.fn<() => Promise<undefined>>().mockResolvedValue(undefined),
+    ...overrides.facade
+  }
+}
+
+function createMockDaemonStore (overrides: Record<string, any> = {}): any {
+  return {
     saveCron: jest.fn<() => Promise<string>>().mockResolvedValue('mock-cron-id'),
     listCrons: jest.fn<() => Promise<Array<{ id: string; interval: string; prompt: string }>>>().mockResolvedValue([
       { id: 'cron_1', interval: '5m', prompt: 'check balance' }
     ]),
     removeCron: jest.fn<() => Promise<undefined>>().mockResolvedValue(undefined),
-    saveRejection: jest.fn<() => Promise<undefined>>().mockResolvedValue(undefined),
-    getPolicyVersion: jest.fn<() => Promise<number>>().mockResolvedValue(1),
-    listRejections: jest.fn<() => Promise<unknown[]>>().mockResolvedValue([]),
-    listPolicyVersions: jest.fn<() => Promise<unknown[]>>().mockResolvedValue([]),
     ...overrides
   }
 }
 
-function createMockBroker (overrides: Record<string, any> = {}): any {
+function buildContext (overrides: Record<string, any> = {}): ToolExecutionContext & { facade: any; daemonStore: any; logger: MockLogger } {
   return {
-    submitApproval: jest.fn<() => Promise<undefined>>().mockResolvedValue(undefined),
-    createRequest: jest.fn<() => Promise<undefined>>().mockResolvedValue(undefined),
-    ...overrides
-  }
-}
-
-function createMockJournal (): any {
-  return {
-    isDuplicate: jest.fn<() => boolean>().mockReturnValue(false),
-    track: jest.fn(),
-    updateStatus: jest.fn()
-  }
-}
-
-function buildContext (overrides: Record<string, any> = {}): ToolExecutionContext & { wdk: any; broker: any; store: any; logger: MockLogger; journal: any } {
-  return {
-    wdk: createMockWdk(overrides),
-    broker: createMockBroker(overrides.broker),
-    store: createMockStore(overrides.store),
+    facade: createMockFacade(overrides),
+    daemonStore: createMockDaemonStore(overrides.daemonStore),
     logger: createMockLogger() as any,
-    journal: createMockJournal(),
     ...overrides.extra
   }
 }
@@ -141,23 +126,6 @@ describe('executeToolCall', () => {
     expect(result).not.toHaveProperty('context')
   })
 
-  // 2. sendTransaction -- duplicate intent
-  test('sendTransaction returns { status: "duplicate" } when journal detects duplicate', async () => {
-    const ctx = buildContext()
-    ctx.journal!.isDuplicate = jest.fn<() => boolean>().mockReturnValue(true)
-
-    const result = await executeToolCall('sendTransaction', {
-      chain: 'ethereum',
-      to: '0xdead',
-      data: '0x',
-      value: '0',
-      accountIndex: 0
-    }, ctx) as any
-
-    expect(result.status).toBe('duplicate')
-    expect(result.intentHash).toBeDefined()
-  })
-
   // 3. sendTransaction -- PolicyRejectionError
   test('sendTransaction returns { status: "rejected" } on PolicyRejectionError', async () => {
     const ctx = buildContext()
@@ -167,7 +135,7 @@ describe('executeToolCall', () => {
     const mockAccount = {
       sendTransaction: jest.fn<() => Promise<never>>().mockRejectedValue(policyErr)
     }
-    ;(ctx.wdk as any).getAccount.mockResolvedValue(mockAccount)
+    ;(ctx.facade as any).getAccount.mockResolvedValue(mockAccount)
 
     const result = await executeToolCall('sendTransaction', {
       chain: 'ethereum',
@@ -180,17 +148,10 @@ describe('executeToolCall', () => {
     expect(result.status).toBe('rejected')
     expect(result.reason).toBe('Amount exceeds daily limit')
     expect(result).toHaveProperty('context')
-
-    // F7/F8: verify saveRejection was called with correct intentHash
-    expect(ctx.store.saveRejection).toHaveBeenCalledTimes(1)
-    const savedRejection = ctx.store.saveRejection.mock.calls[0][0]
-    expect(savedRejection.intentHash).toBe(result.intentHash)
-    expect(savedRejection.reason).toBe('Amount exceeds daily limit')
-    expect(savedRejection.policyVersion).toBe(1)
   })
 
-  // 3b. transfer -- PolicyRejectionError + saveRejection (E6)
-  test('transfer rejection calls saveRejection with proper hash', async () => {
+  // 3b. transfer -- PolicyRejectionError (E6)
+  test('transfer rejection returns rejected status', async () => {
     const ctx = buildContext()
     const policyErr = new Error('no matching permission')
     policyErr.name = 'PolicyRejectionError'
@@ -198,7 +159,7 @@ describe('executeToolCall', () => {
     const mockAccount = {
       sendTransaction: jest.fn<() => Promise<never>>().mockRejectedValue(policyErr)
     }
-    ;(ctx.wdk as any).getAccount.mockResolvedValue(mockAccount)
+    ;(ctx.facade as any).getAccount.mockResolvedValue(mockAccount)
 
     const result = await executeToolCall('transfer', {
       chain: 'ethereum',
@@ -209,15 +170,7 @@ describe('executeToolCall', () => {
     }, ctx) as any
 
     expect(result.status).toBe('rejected')
-    expect(ctx.store.saveRejection).toHaveBeenCalledTimes(1)
-    const saved = ctx.store.saveRejection.mock.calls[0][0]
-    expect(saved.reason).toBe('no matching permission')
-    expect(saved.intentHash).toBeDefined()
-    expect(typeof saved.intentHash).toBe('string')
-    expect(saved.intentHash.startsWith('0x')).toBe(true)
-    expect(saved.intentHash.length).toBe(66) // 0x + 64 hex chars (SHA-256)
-    expect(saved.targetHash).toBe(saved.intentHash) // transfer: intentHash === targetHash
-    expect(saved.chainId).toBe(1)
+    expect(result.reason).toBe('no matching permission')
   })
 
   // 4. transfer -- ALLOW policy
@@ -290,8 +243,8 @@ describe('executeToolCall', () => {
     expect(result.policyHash).toBeDefined()
     expect(result.policyHash!.startsWith('0x')).toBe(true)
 
-    // Verify broker.createRequest was called
-    expect(ctx.broker.createRequest).toHaveBeenCalledWith('policy', expect.objectContaining({
+    // Verify facade.createApprovalRequest was called
+    expect(ctx.facade.createApprovalRequest).toHaveBeenCalledWith('policy', expect.objectContaining({
       chainId: 1,
       targetHash: expect.any(String),
       accountIndex: 0,
@@ -313,7 +266,7 @@ describe('executeToolCall', () => {
 
     expect(result.status).toBe('registered')
     expect(result.cronId).toBe('mock-cron-id')
-    expect(ctx.store.saveCron).toHaveBeenCalledWith(0, expect.objectContaining({
+    expect(ctx.daemonStore.saveCron).toHaveBeenCalledWith(0, expect.objectContaining({
       interval: '5m',
       prompt: 'check ETH balance',
       chainId: 1,
@@ -329,7 +282,7 @@ describe('executeToolCall', () => {
 
     expect(result.crons).toHaveLength(1)
     expect((result.crons as any[])[0].id).toBe('cron_1')
-    expect(ctx.store.listCrons).toHaveBeenCalled()
+    expect(ctx.daemonStore.listCrons).toHaveBeenCalled()
   })
 
   // 11. removeCron
@@ -341,7 +294,7 @@ describe('executeToolCall', () => {
     }, ctx) as any
 
     expect(result.status).toBe('removed')
-    expect(ctx.store.removeCron).toHaveBeenCalledWith('cron_1')
+    expect(ctx.daemonStore.removeCron).toHaveBeenCalledWith('cron_1')
   })
 
   // 12. Unknown tool returns error
@@ -357,9 +310,9 @@ describe('executeToolCall', () => {
   })
 
   // 13. getBalance error propagation
-  test('getBalance returns error when wdk.getAccount throws', async () => {
+  test('getBalance returns error when facade.getAccount throws', async () => {
     const ctx = buildContext()
-    ;(ctx.wdk as any).getAccount.mockRejectedValue(new Error('Chain not supported'))
+    ;(ctx.facade as any).getAccount.mockRejectedValue(new Error('Chain not supported'))
 
     const result = await executeToolCall('getBalance', {
       chain: 'unsupported_chain'
@@ -372,7 +325,7 @@ describe('executeToolCall', () => {
   // 14. policyList with no policies
   test('policyList returns empty array when no policy exists', async () => {
     const ctx = buildContext()
-    ctx.store.loadPolicy.mockResolvedValue(null)
+    ctx.facade.loadPolicy.mockResolvedValue(null)
 
     const result = await executeToolCall('policyList', {
       chain: 'ethereum'
@@ -410,7 +363,7 @@ describe('executeToolCall', () => {
       signTransaction: jest.fn<() => Promise<never>>().mockRejectedValue(policyErr),
       sendTransaction: jest.fn<() => Promise<never>>().mockRejectedValue(policyErr)
     }
-    ;(ctx.wdk as any).getAccount.mockResolvedValue(mockAccount)
+    ;(ctx.facade as any).getAccount.mockResolvedValue(mockAccount)
 
     const result = await executeToolCall('signTransaction', {
       chain: 'ethereum',
@@ -423,23 +376,6 @@ describe('executeToolCall', () => {
     expect(result.status).toBe('rejected')
     expect(result.reason).toBe('Amount exceeds daily limit')
     expect(result).toHaveProperty('context')
-  })
-
-  // 17. signTransaction -- duplicate intent
-  test('signTransaction returns { status: "duplicate" } when journal detects duplicate', async () => {
-    const ctx = buildContext()
-    ctx.journal!.isDuplicate = jest.fn<() => boolean>().mockReturnValue(true)
-
-    const result = await executeToolCall('signTransaction', {
-      chain: 'ethereum',
-      to: '0xdead',
-      data: '0x',
-      value: '0',
-      accountIndex: 0
-    }, ctx) as any
-
-    expect(result.status).toBe('duplicate')
-    expect(result.intentHash).toBeDefined()
   })
 
   // 18. sendTransaction -- PolicyRejectionError includes context
@@ -458,7 +394,7 @@ describe('executeToolCall', () => {
     const mockAccount = {
       sendTransaction: jest.fn<() => Promise<never>>().mockRejectedValue(policyErr)
     }
-    ;(ctx.wdk as any).getAccount.mockResolvedValue(mockAccount)
+    ;(ctx.facade as any).getAccount.mockResolvedValue(mockAccount)
 
     const result = await executeToolCall('sendTransaction', {
       chain: 'ethereum',
@@ -477,10 +413,10 @@ describe('executeToolCall', () => {
     }))
   })
 
-  // 19. listRejections returns rejections from store
-  test('listRejections returns rejections from store', async () => {
+  // 19. listRejections returns rejections from facade
+  test('listRejections returns rejections from facade', async () => {
     const ctx = buildContext({
-      store: {
+      facade: {
         listRejections: jest.fn<() => Promise<any[]>>().mockResolvedValue([
           { intentHash: 'r1', accountIndex: 0, chainId: 1, targetHash: '0x1', reason: 'no match', context: null, policyVersion: 1, rejectedAt: 1000 }
         ])
@@ -494,13 +430,13 @@ describe('executeToolCall', () => {
 
     expect(result.rejections).toHaveLength(1)
     expect((result.rejections as any[])[0].reason).toBe('no match')
-    expect(ctx.store.listRejections).toHaveBeenCalledWith({ accountIndex: 0, chainId: 1, limit: undefined })
+    expect(ctx.facade.listRejections).toHaveBeenCalledWith({ accountIndex: 0, chainId: 1, limit: undefined })
   })
 
-  // 20. listPolicyVersions returns versions from store
-  test('listPolicyVersions returns versions from store', async () => {
+  // 20. listPolicyVersions returns versions from facade
+  test('listPolicyVersions returns versions from facade', async () => {
     const ctx = buildContext({
-      store: {
+      facade: {
         listPolicyVersions: jest.fn<() => Promise<any[]>>().mockResolvedValue([
           { accountIndex: 0, chainId: 1, version: 1, description: 'initial', diff: null, changedAt: 1000 }
         ])
@@ -514,6 +450,6 @@ describe('executeToolCall', () => {
 
     expect(result.policyVersions).toHaveLength(1)
     expect((result.policyVersions as any[])[0].description).toBe('initial')
-    expect(ctx.store.listPolicyVersions).toHaveBeenCalledWith(0, 1)
+    expect(ctx.facade.listPolicyVersions).toHaveBeenCalledWith(0, 1)
   })
 })
