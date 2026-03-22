@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!-- v13: Shield + "T" + diagonal "GUARDED" bar -->
+  <rect width="512" height="512" fill="#0F172A"/>
+
+  <!-- Shield -->
+  <path d="M256 52 L428 130 C428 130 440 314 256 466 C72 314 84 130 84 130 Z"
+        fill="#1E3A8A" opacity="0.12" stroke="#1E3A8A" stroke-width="3"/>
+
+  <!-- "T" letterform (Tether) -->
+  <text x="256" y="310" text-anchor="middle" font-family="'Helvetica Neue', Arial, sans-serif"
+        font-size="220" font-weight="800" fill="#3B82F6" letter-spacing="-2">T</text>
+
+  <!-- Diagonal "GUARDED" bar -->
+  <rect x="-30" y="-20" width="600" height="38" rx="3"
+        fill="#EF4444" opacity="0.85"
+        transform="rotate(-35, 256, 256)"/>
+
+  <!-- "GUARDED" text on the bar -->
+  <text transform="rotate(-35, 256, 256)" x="256" y="8" text-anchor="middle"
+        font-family="'Helvetica Neue', Arial, sans-serif"
+        font-size="18" font-weight="700" fill="#0F172A" letter-spacing="8">GUARDED</text>
+</svg>
