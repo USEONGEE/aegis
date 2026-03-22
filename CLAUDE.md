@@ -4,11 +4,6 @@ AI DeFi Agent 서명 엔진 + 제어 인프라.
 
 ## 현재 페이즈
 
-### v0.5.9 — Chat Markdown 렌더링
-- **상태**: Step 5 완료 (커밋 대기)
-- **문서**: [docs/phases/v0.5.9-chat-markdown-render/](docs/phases/v0.5.9-chat-markdown-render/)
-- **시작일**: 2026-03-23
-
 ### v0.5.8 — 세션별 isLoading 분리
 - **상태**: Step 1 - PRD
 - **문서**: [docs/phases/v0.5.8-session-loading-isolation/](docs/phases/v0.5.8-session-loading-isolation/)
@@ -101,6 +96,7 @@ AI DeFi Agent 서명 엔진 + 제어 인프라.
 | v0.5.4 | Wallet Address SSOT |
 | v0.5.5 | OpenClaw Plugin Integration |
 | v0.5.6 | Portfolio Enso Pricing |
+| v0.5.9 | Chat Markdown 렌더링 |
 | v0.5.7 | Manifest DeFi Tools |
 
 ## 프로젝트 구조

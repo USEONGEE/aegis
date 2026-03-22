@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.5.9 - Chat Markdown 렌더링 (2026-03-23)
+
+- **MarkdownBubble 컴포넌트**: AI(assistant) 응답을 `@ronradtke/react-native-markdown-display`로 마크다운 렌더링. 헤딩, 볼드, 코드블록, 목록, 테이블, 링크 지원
+- **다크테마 스타일시트**: 기존 앱 다크테마(#ffffff 텍스트, #1a1a1a 배경)와 톤 일치하는 마크다운 전용 스타일
+- **선택적 적용**: assistant 메시지만 마크다운. user/system/tool 메시지는 기존 plain text 유지
+- **React.memo 최적화**: 스트리밍 중 이전 메시지 리렌더 방지
+- 📝 [Phase 문서](../archive/v0.5.9-chat-markdown-render/README.md)
+
+### 수치
+- v0.5.9 관련 tsc 0 errors
+- 3 new files + 1 modified file
+
 ## v0.5.6 - Portfolio Enso Pricing (2026-03-23)
 
 - **Token Registry**: HypurrQuant_FE에서 999체인(Hyperliquid EVM) 토큰 70+개 레지스트리 포팅 (`daemon/src/token/`)
