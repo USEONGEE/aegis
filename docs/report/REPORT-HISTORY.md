@@ -12,6 +12,7 @@
 | 2026-03-22 | [guarded-wdk-architecture-one-pager.md](./guarded-wdk-architecture-one-pager.md) | guarded-wdk 패키지 아키텍처 정리 | 타입 그래프(39 nodes, 84 edges) + 13개 소스 파일 전체 분석 | 5개 도메인(Policy/Approval/Journal/WdkStore/Crypto) + 3축(정책평가/승인처리/보호조립). v0.4.6 store 분리(WdkStore, cron 제거, journal 내부화) + v0.4.7 dead export 반영 |
 | 2026-03-22 | [daemon-architecture-one-pager.md](./daemon-architecture-one-pager.md) | daemon 패키지 아키텍처 정리 | 타입 그래프(41 nodes, 50 edges) + 17개 소스 파일 전체 분석 | 4개 도메인(Tool/Message/Relay/Cron) + 3축(AI대화루프/제어채널/자동화인프라). v0.4.6 DaemonStore 추가, facade port 패턴, Journal→WDK 이동, store 경계 해결 |
 | 2026-03-22 | [app-architecture-one-pager.md](./app-architecture-one-pager.md) | app 패키지 아키텍처 정리 | 타입 그래프(31 nodes, 27 edges) + 23개 소스 파일 전체 분석 | 5개 도메인(Approval/Chat/Identity&Crypto/Relay/Policy) + 3축(AI대화/서명승인/실시간동기화) + 3시나리오 |
+| 2026-03-23 | [issue-docker-ws-reconnect.md](./issue-docker-ws-reconnect.md) | v0.5.5 OpenClaw 통합 후 채팅 응답 미수신 종합 분석 | relay/daemon/app 4레이어 로그 추적 + 코드 분석 | 5개 독립 버그(daemon retry, dead socket, app reconnect, done 핸들러 content 누락, 메시지 중복+chain key) + 6개 수정 + 디버깅 타임라인 + 교훈 |
 
 ## 갱신 이력
 
