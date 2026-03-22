@@ -11,7 +11,7 @@ const CODE_LENGTH = 8;
  * 8-character PIN-style input with auto-dash between 4th and 5th characters.
  * User enters the code displayed on the daemon terminal to bind their account.
  */
-export function EnrollmentScreen({ onEnrolled, onSkip }: { onEnrolled: () => void, onSkip: () => void }) {
+export function EnrollmentScreen({ onEnrolled, onSkip }: { onEnrolled: () => void, onSkip?: (() => void) | undefined }) {
   const [code, setCode] = useState('');
   const [loading, setLoading] = useState(false);
   const token = useAuthStore(s => s.token);
@@ -106,9 +106,11 @@ export function EnrollmentScreen({ onEnrolled, onSkip }: { onEnrolled: () => voi
         )}
       </TouchableOpacity>
 
-      <TouchableOpacity style={styles.skipButton} onPress={onSkip}>
-        <Text style={styles.skipText}>Skip for now</Text>
-      </TouchableOpacity>
+      {onSkip && (
+        <TouchableOpacity style={styles.skipButton} onPress={onSkip}>
+          <Text style={styles.skipText}>Skip for now</Text>
+        </TouchableOpacity>
+      )}
     </View>
   );
 }

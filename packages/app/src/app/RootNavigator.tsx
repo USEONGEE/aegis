@@ -268,10 +268,7 @@ export function RootNavigator() {
         await SecureStore.setItemAsync('wdk_enrollment_done', 'true');
         setEnrollmentDone(true);
       }}
-      onSkip={() => {
-        // Skip without persisting — will show again on next app restart
-        setEnrollmentDone(true);
-      }}
+      onSkip={undefined}
     />;
   }
 
