@@ -325,8 +325,11 @@ export default async function wsRoutes (fastify: FastifyInstance): Promise<void>
         const sessionId = (msg.payload as Record<string, unknown> | undefined)?.sessionId as string | undefined
         const cursor = (msg.payload as Record<string, unknown> | undefined)?.cursor as string | undefined
         if (sessionId && userId) {
+          // backfill first, then poll from last backfilled ID (no gap)
           backfillChatStream(userId, sessionId, cursor || '0', socket)
-          pollChatForApp(userId, sessionId, cursor || '$', socket, ac.signal)
+            .then((lastId) => {
+              pollChatForApp(userId, sessionId, lastId, socket, ac.signal)
+            })
         }
         return
       }
@@ -471,11 +474,13 @@ export default async function wsRoutes (fastify: FastifyInstance): Promise<void>
 
   async function backfillChatStream (
     userId: string, sessionId: string, startId: string, socket: WebSocket
-  ): Promise<void> {
+  ): Promise<string> {
+    let lastId = startId
     try {
       const stream = `chat:${userId}:${sessionId}`
       const entries = await queue.readRange(stream, startId, '+', 1000)
       for (const entry of entries) {
+        lastId = entry.id
         if (entry.data.sender === 'app') continue // echo 방지
         const payload = tryParseJSON(entry.data.payload)
         const encrypted = entry.data.encrypted === '1'
@@ -487,6 +492,7 @@ export default async function wsRoutes (fastify: FastifyInstance): Promise<void>
     } catch (err: unknown) {
       fastify.log.error({ err: err instanceof Error ? err.message : String(err), userId, sessionId }, 'Chat backfill error')
     }
+    return lastId
   }
 
   // -----------------------------------------------------------------------
@@ -498,11 +504,23 @@ export default async function wsRoutes (fastify: FastifyInstance): Promise<void>
   ): Promise<void> {
     const stream = `chat:${userId}:${sessionId}`
     let cursor = initialCursor
+    // Use non-blocking readRange + short sleep to avoid head-of-line blocking
+    // with other XREAD BLOCK consumers sharing the same Redis connection
+    const exclusiveStart = (id: string) => {
+      // XRANGE is inclusive; to exclude `id`, increment the sequence
+      const parts = id.split('-')
+      if (parts.length === 2) return `${parts[0]}-${Number(parts[1]) + 1}`
+      return id
+    }
     while (!signal.aborted) {
       try {
-        const entries = await queue.consume(stream, cursor, 20)
+        const startId = cursor === '0' || cursor === '$' ? '0' : exclusiveStart(cursor)
+        const entries = await queue.readRange(stream, startId, '+', 100)
+        let hasNew = false
         for (const entry of entries) {
+          if (entry.id <= cursor && cursor !== '0' && cursor !== '$') continue
           cursor = entry.id
+          hasNew = true
           if (entry.data.sender === 'app') continue // echo 방지
           const payload = tryParseJSON(entry.data.payload)
           const encrypted = entry.data.encrypted === '1'
@@ -510,6 +528,7 @@ export default async function wsRoutes (fastify: FastifyInstance): Promise<void>
           if (encrypted) out.encrypted = true
           send(socket, out)
         }
+        if (!hasNew) await sleep(200)
       } catch (err: unknown) {
         if (!signal.aborted) {
           fastify.log.error({ err: err instanceof Error ? err.message : String(err), userId, sessionId }, 'App chat poll error')

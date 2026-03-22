@@ -68,6 +68,9 @@ export class RelayClient {
   /** E2E session key (NaCl secretbox key, 32 bytes). Set after key exchange. */
   private sessionKey: Uint8Array | null = null;
 
+  /** Track subscribed chat sessions to avoid duplicate subscribe_chat */
+  private subscribedSessions: Set<string> = new Set();
+
   /** v0.3.0: callback invoked once 'authenticated' response is received */
   private onceAuthenticated: (() => void) | null = null;
 
@@ -171,6 +174,7 @@ export class RelayClient {
       const onOpen = () => {
         // v0.3.0: Do NOT set connected=true until 'authenticated' response
         this.reconnectAttempts = 0;
+        this.subscribedSessions.clear();
 
         // Authenticate — use persisted cursors for cold-start offline recovery
         const persistedControlCursor = this.controlCursorProvider ? this.controlCursorProvider() : '0';
@@ -395,6 +399,11 @@ export class RelayClient {
    */
   async sendChat(sessionId: string, text: string): Promise<void> {
     this.ensureConnected();
+    // Subscribe to chat stream for this session so we receive daemon responses
+    if (!this.subscribedSessions.has(sessionId)) {
+      this.subscribedSessions.add(sessionId);
+      this.ws!.send(JSON.stringify({ type: 'subscribe_chat', payload: { sessionId } }));
+    }
     const input: RelayChatInput = { userId: this.userId, sessionId, text };
     this.ws!.send(this.buildEnvelope('chat', input, { sessionId }));
   }
