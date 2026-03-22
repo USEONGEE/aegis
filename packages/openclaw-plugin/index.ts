@@ -47,7 +47,7 @@ export default function register (api: { registerTool: (tool: unknown) => void }
   api.registerTool(tool('sendTransaction',
     'Send a raw transaction on-chain. Returns execution result or requests approval.',
     Type.Object({
-      chain: Type.String({ description: 'Target chain identifier (e.g. "ethereum")' }),
+      chain: Type.String({ description: 'Target chain identifier (use "999" for HyperEVM)' }),
       to: Type.String({ description: 'Destination address (0x-prefixed)' }),
       data: Type.String({ description: 'Calldata hex string (0x-prefixed)' }),
       value: Type.String({ description: 'Value in wei as decimal string' }),
@@ -73,7 +73,7 @@ export default function register (api: { registerTool: (tool: unknown) => void }
   api.registerTool(tool('signTransaction',
     'Sign a transaction without broadcasting. Returns signed tx data for later submission.',
     Type.Object({
-      chain: Type.String({ description: 'Target chain identifier (e.g. "ethereum")' }),
+      chain: Type.String({ description: 'Target chain identifier (use "999" for HyperEVM)' }),
       to: Type.String({ description: 'Destination address (0x-prefixed)' }),
       data: Type.String({ description: 'Calldata hex string (0x-prefixed)' }),
       value: Type.String({ description: 'Value in wei as decimal string' }),
@@ -141,6 +141,15 @@ export default function register (api: { registerTool: (tool: unknown) => void }
     Type.Object({
       cronId: Type.String({ description: 'The cron job ID to remove' }),
       accountIndex: Type.Number({ description: 'BIP-44 account index' })
+    })))
+
+  // ERC-20 read-only query
+  api.registerTool(tool('erc20Balances',
+    'Query ERC-20 token balances for an address. Pass a list of token addresses and an owner address. Returns balances in smallest unit.',
+    Type.Object({
+      tokens: Type.Array(Type.String(), { description: 'List of ERC-20 token contract addresses (0x-prefixed)' }),
+      owner: Type.String({ description: 'Owner address to query balances for (0x-prefixed)' }),
+      chain: Type.String({ description: 'Target chain identifier' })
     })))
 
   // DeFi (Manifest) tools — pure computation, returns { tx, policy, description }

@@ -1,11 +1,10 @@
 #!/bin/sh
 set -e
 
-# Install WDK plugin if not already installed
-if [ ! -d "$HOME/.openclaw/extensions/wdk-tools" ]; then
-  echo "[entrypoint] Installing WDK tools plugin..."
-  openclaw plugins install /opt/wdk-plugin 2>/dev/null || true
-fi
+# Always reinstall WDK plugin (volume may contain stale version)
+echo "[entrypoint] Installing WDK tools plugin..."
+rm -rf "$HOME/.openclaw/extensions/wdk-tools" 2>/dev/null || true
+openclaw plugins install /opt/wdk-plugin 2>/dev/null || true
 
 # Enable /v1/responses HTTP endpoint
 openclaw config set gateway.http.endpoints.responses.enabled true 2>/dev/null || true
@@ -31,6 +30,7 @@ if (daemon) {
       "sendTransaction", "getBalance", "getWalletAddress", "signTransaction",
       "policyList", "policyPending", "policyRequest", "listRejections", "listPolicyVersions",
       "registerCron", "listCrons", "removeCron",
+      "erc20Balances",
       "erc20Transfer", "erc20Approve", "hyperlendDepositUsdt"
     ]
   };

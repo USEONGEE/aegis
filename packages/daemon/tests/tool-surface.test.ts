@@ -90,8 +90,8 @@ function buildContext (overrides: Record<string, any> = {}): ToolExecutionContex
 // ---------------------------------------------------------------------------
 
 describe('TOOL_DEFINITIONS', () => {
-  test('exports exactly 15 tool definitions', () => {
-    expect(TOOL_DEFINITIONS).toHaveLength(15)
+  test('exports exactly 16 tool definitions', () => {
+    expect(TOOL_DEFINITIONS).toHaveLength(16)
   })
 
   test('every tool has a valid function schema', () => {
@@ -111,7 +111,7 @@ describe('executeToolCall', () => {
     const ctx = buildContext()
 
     const result = await executeToolCall('sendTransaction', {
-      chain: 'ethereum',
+      chain: '999',
       to: '0x1234567890abcdef1234567890abcdef12345678',
       data: '0x',
       value: '1000000000000000000',
@@ -138,7 +138,7 @@ describe('executeToolCall', () => {
     ;(ctx.facade as any).getAccount.mockResolvedValue(mockAccount)
 
     const result = await executeToolCall('sendTransaction', {
-      chain: 'ethereum',
+      chain: '999',
       to: '0xdead',
       data: '0x',
       value: '999999',
@@ -150,53 +150,14 @@ describe('executeToolCall', () => {
     expect(result).toHaveProperty('context')
   })
 
-  // 3b. transfer -- PolicyRejectionError (E6)
-  test('transfer rejection returns rejected status', async () => {
-    const ctx = buildContext()
-    const policyErr = new Error('no matching permission')
-    policyErr.name = 'PolicyRejectionError'
-
-    const mockAccount = {
-      sendTransaction: jest.fn<() => Promise<never>>().mockRejectedValue(policyErr)
-    }
-    ;(ctx.facade as any).getAccount.mockResolvedValue(mockAccount)
-
-    const result = await executeToolCall('transfer', {
-      chain: 'ethereum',
-      token: 'USDC',
-      to: '0xrecipient',
-      amount: '100',
-      accountIndex: 0
-    }, ctx) as any
-
-    expect(result.status).toBe('rejected')
-    expect(result.reason).toBe('no matching permission')
-  })
-
-  // 4. transfer -- ALLOW policy
-  test('transfer returns { status: "executed" } for AUTO policy', async () => {
-    const ctx = buildContext()
-
-    const result = await executeToolCall('transfer', {
-      chain: 'ethereum',
-      token: 'USDC',
-      to: '0xrecipient',
-      amount: '100',
-      accountIndex: 0
-    }, ctx) as any
-
-    expect(result.status).toBe('executed')
-    expect(result.hash).toBe('0xabc123')
-    expect(result.token).toBe('USDC')
-    expect(result.amount).toBe('100')
-  })
+  // transfer 테스트 제거됨 (v0.5.11) — erc20Transfer + policyRequest + sendTransaction으로 대체
 
   // 5. getBalance
   test('getBalance returns balances array', async () => {
     const ctx = buildContext()
 
     const result = await executeToolCall('getBalance', {
-      chain: 'ethereum'
+      chain: '999'
     }, ctx) as any
 
     expect(result.balances).toHaveLength(2)
@@ -209,7 +170,7 @@ describe('executeToolCall', () => {
     const ctx = buildContext()
 
     const result = await executeToolCall('policyList', {
-      chain: 'ethereum'
+      chain: '999'
     }, ctx) as any
 
     expect(result.policies).toHaveLength(1)
@@ -221,7 +182,7 @@ describe('executeToolCall', () => {
     const ctx = buildContext()
 
     const result = await executeToolCall('policyPending', {
-      chain: 'ethereum'
+      chain: '999'
     }, ctx) as any
 
     expect(result.pending).toHaveLength(1)
@@ -233,7 +194,7 @@ describe('executeToolCall', () => {
     const ctx = buildContext()
 
     const result = await executeToolCall('policyRequest', {
-      chain: 'ethereum',
+      chain: '999',
       description: 'Increase daily limit',
       policies: [{ type: 'auto', maxUsd: 500 }],
       accountIndex: 0
@@ -245,7 +206,7 @@ describe('executeToolCall', () => {
 
     // Verify facade.createApprovalRequest was called
     expect(ctx.facade.createApprovalRequest).toHaveBeenCalledWith('policy', expect.objectContaining({
-      chainId: 1,
+      chainId: 999,
       targetHash: expect.any(String),
       accountIndex: 0,
       content: 'Increase daily limit'
@@ -259,7 +220,7 @@ describe('executeToolCall', () => {
     const result = await executeToolCall('registerCron', {
       interval: '5m',
       prompt: 'check ETH balance',
-      chain: 'ethereum',
+      chain: '999',
       sessionId: 'session_001',
       accountIndex: 0
     }, ctx) as any
@@ -269,7 +230,7 @@ describe('executeToolCall', () => {
     expect(ctx.daemonStore.saveCron).toHaveBeenCalledWith(0, expect.objectContaining({
       interval: '5m',
       prompt: 'check ETH balance',
-      chain: { kind: 'specific', chainId: 1 },
+      chain: { kind: 'specific', chainId: 999 },
       sessionId: 'session_001'
     }))
   })
@@ -328,7 +289,7 @@ describe('executeToolCall', () => {
     ctx.facade.loadPolicy.mockResolvedValue(null)
 
     const result = await executeToolCall('policyList', {
-      chain: 'ethereum'
+      chain: '999'
     }, ctx) as any
 
     expect(result.policies).toEqual([])
@@ -339,7 +300,7 @@ describe('executeToolCall', () => {
     const ctx = buildContext()
 
     const result = await executeToolCall('signTransaction', {
-      chain: 'ethereum',
+      chain: '999',
       to: '0x1234567890abcdef1234567890abcdef12345678',
       data: '0x',
       value: '1000000000000000000',
@@ -366,7 +327,7 @@ describe('executeToolCall', () => {
     ;(ctx.facade as any).getAccount.mockResolvedValue(mockAccount)
 
     const result = await executeToolCall('signTransaction', {
-      chain: 'ethereum',
+      chain: '999',
       to: '0xdead',
       data: '0x',
       value: '999999',
@@ -397,7 +358,7 @@ describe('executeToolCall', () => {
     ;(ctx.facade as any).getAccount.mockResolvedValue(mockAccount)
 
     const result = await executeToolCall('sendTransaction', {
-      chain: 'ethereum',
+      chain: '999',
       to: '0xdead',
       data: '0xdeadbeef',
       value: '0',
@@ -424,13 +385,13 @@ describe('executeToolCall', () => {
     })
 
     const result = await executeToolCall('listRejections', {
-      chain: 'ethereum',
+      chain: '999',
       accountIndex: 0
     }, ctx) as any
 
     expect(result.rejections).toHaveLength(1)
     expect((result.rejections as any[])[0].reason).toBe('no match')
-    expect(ctx.facade.listRejections).toHaveBeenCalledWith({ accountIndex: 0, chainId: 1, limit: undefined })
+    expect(ctx.facade.listRejections).toHaveBeenCalledWith({ accountIndex: 0, chainId: 999, limit: undefined })
   })
 
   // 20. listPolicyVersions returns versions from facade
@@ -444,12 +405,12 @@ describe('executeToolCall', () => {
     })
 
     const result = await executeToolCall('listPolicyVersions', {
-      chain: 'ethereum',
+      chain: '999',
       accountIndex: 0
     }, ctx) as any
 
     expect(result.policyVersions).toHaveLength(1)
     expect((result.policyVersions as any[])[0].description).toBe('initial')
-    expect(ctx.facade.listPolicyVersions).toHaveBeenCalledWith(0, 1)
+    expect(ctx.facade.listPolicyVersions).toHaveBeenCalledWith(0, 999)
   })
 })

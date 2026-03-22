@@ -25,7 +25,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
       parameters: {
         type: 'object',
         properties: {
-          chain: { type: 'string', description: 'Target chain identifier (e.g. "ethereum")' },
+          chain: { type: 'string', description: 'Target chain identifier (use "999" for HyperEVM)' },
           to: { type: 'string', description: 'Destination address (0x-prefixed)' },
           data: { type: 'string', description: 'Calldata hex string (0x-prefixed)' },
           value: { type: 'string', description: 'Value in wei as decimal string' },
@@ -172,7 +172,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
       parameters: {
         type: 'object',
         properties: {
-          chain: { type: 'string', description: 'Target chain identifier (e.g. "ethereum")' },
+          chain: { type: 'string', description: 'Target chain identifier (use "999" for HyperEVM)' },
           to: { type: 'string', description: 'Destination address (0x-prefixed)' },
           data: { type: 'string', description: 'Calldata hex string (0x-prefixed)' },
           value: { type: 'string', description: 'Value in wei as decimal string' },
@@ -214,6 +214,22 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
     }
   },
   // kittenFetch/kittenMint/kittenBurn — 제거됨 (v0.5.13)
+  {
+    type: 'function',
+    function: {
+      name: 'erc20Balances',
+      description: 'Query ERC-20 token balances for an address. Pass a list of token addresses and an owner address. Returns balances in smallest unit.',
+      parameters: {
+        type: 'object',
+        properties: {
+          tokens: { type: 'array', description: 'List of ERC-20 token contract addresses (0x-prefixed)', items: { type: 'string' } },
+          owner: { type: 'string', description: 'Owner address to query balances for (0x-prefixed)' },
+          chain: { type: 'string', description: 'Target chain identifier' }
+        },
+        required: ['tokens', 'owner', 'chain']
+      }
+    }
+  },
   {
     type: 'function',
     function: {

@@ -3,6 +3,9 @@ import type { QueryMessage, QueryResult } from '@wdk-app/protocol'
 import type { QueryFacadePort } from './ports.js'
 import { getPortfolio } from './portfolio.js'
 
+// WDK에 등록된 chain key (wdk-host.ts 참조). WDK는 이 key로 wallet manager를 조회한다.
+const EVM_CHAIN_KEY = '999'
+
 // ---------------------------------------------------------------------------
 // Handler
 // ---------------------------------------------------------------------------
@@ -56,7 +59,8 @@ export async function handleQueryMessage (
         if (!facade.getAccount) {
           return { requestId: msg.requestId, status: 'error', error: 'Account provider not available' }
         }
-        const account = await facade.getAccount(msg.params.chain, msg.params.accountIndex)
+        // WDK wallet key는 '999' (wdk-host.ts EVM_CHAIN_KEY). 'ethereum'이 아님.
+        const account = await facade.getAccount(EVM_CHAIN_KEY, msg.params.accountIndex)
         const address = await (account as unknown as { getAddress: () => Promise<string> }).getAddress()
         return { requestId: msg.requestId, status: 'ok', data: { address } }
       }
@@ -65,7 +69,7 @@ export async function handleQueryMessage (
         if (!facade.getAccount) {
           return { requestId: msg.requestId, status: 'error', error: 'Account provider not available' }
         }
-        const account = await facade.getAccount('ethereum', msg.params.accountIndex)
+        const account = await facade.getAccount(EVM_CHAIN_KEY, msg.params.accountIndex)
         const walletAddress = await account.getAddress()
         const result = await getPortfolio(walletAddress, logger)
         return { requestId: msg.requestId, status: 'ok', data: result }

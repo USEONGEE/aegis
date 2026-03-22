@@ -80,7 +80,7 @@ export function DashboardScreen() {
   const fetchWalletAddress = useCallback(async (accountIndex: number) => {
     try {
       const result = await relay.query<{ address: string }>('getWalletAddress', {
-        chain: 'ethereum',
+        chain: '999',
         accountIndex,
       });
       setAddress(accountIndex, result.address);

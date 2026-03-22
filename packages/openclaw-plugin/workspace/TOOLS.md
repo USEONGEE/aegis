@@ -12,14 +12,24 @@ All tools that take a `chain` parameter must receive the **number** `999`, not a
 ❌ chain: "hyperevm"
 ```
 
+## Known Token Addresses (HyperEVM, chain 999)
+
+| Token | Address | Decimals |
+|-------|---------|----------|
+| USDT0 | `0xB8CE59FC3717ada4C02eaDF9682A9e934F625ebb` | 6 |
+| WHYPE | `0x2Bf3E86E6b74526F6f0490F35981578D14FD2658` | 18 |
+
+Use these addresses when calling `erc20Transfer`, `erc20Approve`, `erc20Balances`, or `hyperlendDepositUsdt`.
+
 ## Tool Categories
 
 ### 1. Read-Only (safe, no approval needed)
 
 | Tool | Purpose | Key Params |
 |------|---------|------------|
-| `getBalance` | Check wallet balances | chain, accountIndex |
+| `getBalance` | Check native wallet balance | chain, accountIndex |
 | `getWalletAddress` | Get wallet address | chain, accountIndex |
+| `erc20Balances` | Query ERC-20 token balances (batch) | tokens (list), owner, chain |
 | `policyList` | List active policies | chain, accountIndex |
 | `policyPending` | List pending approval requests | chain, accountIndex |
 | `listRejections` | Transaction rejection history | chain, accountIndex |
@@ -60,14 +70,17 @@ These tools **build** a transaction + policy but do NOT execute. You must call `
 
 ## Common Patterns
 
-### Check balance
+### Check wallet address and token balances
 ```
-getBalance(chain: "999", accountIndex: 0)
+1. getWalletAddress(chain: "999", accountIndex: 0)
+   → returns { address: "0x..." }
+2. erc20Balances(tokens: ["0xB8CE59FC3717ada4C02eaDF9682A9e934F625ebb"], owner: "0x...", chain: "999")
+   → returns { balances: [{ token: "0x...", balance: "1000000" }] }
 ```
 
 ### Transfer tokens (2-step)
 ```
-1. erc20Transfer(token: "0x...", to: "0x...", amount: "1000000", accountIndex: 0)
+1. erc20Transfer(token: "0xB8CE59FC3717ada4C02eaDF9682A9e934F625ebb", to: "0x...", amount: "1000000", accountIndex: 0)
    → returns { tx, policy, description }
 2. sendTransaction(chain: "999", to: tx.to, data: tx.data, value: tx.value, accountIndex: 0)
    → policy engine evaluates → sign or request approval
@@ -75,7 +88,7 @@ getBalance(chain: "999", accountIndex: 0)
 
 ### Deposit to HyperLend (3-step)
 ```
-1. erc20Approve(token: USDT0_ADDRESS, spender: HYPERLEND_POOL, amount: "...", accountIndex: 0)
+1. erc20Approve(token: "0xB8CE59FC3717ada4C02eaDF9682A9e934F625ebb", spender: HYPERLEND_POOL, amount: "...", accountIndex: 0)
    → returns { tx, policy }
 2. sendTransaction(...approve tx...)
 3. hyperlendDepositUsdt(amount: "1000000", onBehalfOf: WALLET_ADDRESS, accountIndex: 0)

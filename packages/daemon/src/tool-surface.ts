@@ -5,6 +5,7 @@ import type { Logger } from 'pino'
 import type { WDKInstance } from './wdk-host.js'
 import type { ToolFacadePort } from './ports.js'
 import type { DaemonStore } from './daemon-store.js'
+import type { DaemonConfig } from './config.js'
 import type { EvaluationContext, Policy, PendingApprovalRequest, RejectionEntry, PolicyVersionEntry } from '@wdk-app/guarded-wdk'
 import type { StoredCron } from './daemon-store.js'
 
@@ -42,6 +43,7 @@ interface ToolAccount {
 export interface ToolExecutionContext {
   facade: (WDKInstance & ToolFacadePort) | null
   daemonStore: DaemonStore
+  config: DaemonConfig
   logger: Logger
 }
 
@@ -181,6 +183,18 @@ interface ListPolicyVersionsSuccess {
 
 export type ListPolicyVersionsResult = ListPolicyVersionsSuccess | ToolErrorResult
 
+// 13. erc20Balances
+interface Erc20BalanceEntry {
+  token: string
+  balance: string
+}
+
+interface Erc20BalancesSuccess {
+  balances: Erc20BalanceEntry[]
+}
+
+export type Erc20BalancesResult = Erc20BalancesSuccess | ToolErrorResult
+
 // Manifest tool result (erc20Transfer, erc20Approve, hyperlendDepositUsdt)
 interface ManifestPreparedResult {
   status: 'prepared'
@@ -196,6 +210,7 @@ export type AnyToolResult =
   | SendTransactionResult
   | GetBalanceResult
   | GetWalletAddressResult
+  | Erc20BalancesResult
   | PolicyListResult
   | PolicyPendingResult
   | PolicyRequestResult
@@ -251,7 +266,13 @@ interface PolicyVersionListArgs {
   chain: string
 }
 
-type ToolArgs = SendTransactionArgs | ChainArgs | PolicyRequestArgs | RegisterCronArgs | CronIdArgs | RejectionListArgs | PolicyVersionListArgs | Record<string, unknown>
+interface Erc20BalancesArgs {
+  tokens: string[]
+  owner: string
+  chain: string
+}
+
+type ToolArgs = SendTransactionArgs | ChainArgs | PolicyRequestArgs | RegisterCronArgs | CronIdArgs | RejectionListArgs | PolicyVersionListArgs | Erc20BalancesArgs | Record<string, unknown>
 
 // ---------------------------------------------------------------------------
 // Tool call dispatcher
@@ -261,7 +282,7 @@ type ToolArgs = SendTransactionArgs | ChainArgs | PolicyRequestArgs | RegisterCr
  * Execute a single tool call.
  */
 export async function executeToolCall (name: string, args: ToolArgs, ctx: ToolExecutionContext): Promise<AnyToolResult> {
-  const { facade: facadeOrNull, daemonStore, logger } = ctx
+  const { facade: facadeOrNull, daemonStore, config, logger } = ctx
   const accountIndex = (args as Record<string, unknown>).accountIndex as number | undefined
 
   // Tools that require facade (WDK) — fail fast if not initialized
@@ -360,10 +381,10 @@ export async function executeToolCall (name: string, args: ToolArgs, ctx: ToolEx
     // 5. policyPending
     // -----------------------------------------------------------------------
     case 'policyPending': {
-      const { chain } = args as ChainArgs
+      const { chain, accountIndex: acctIdx } = args as ChainArgs
       try {
         const chainId = resolveChainId(chain)
-        const pending = await facade.getPendingApprovals({ accountIndex, type: 'policy', chainId })
+        const pending = await facade.getPendingApprovals({ accountIndex: acctIdx, type: 'policy', chainId })
         return { pending: pending || [] }
       } catch (err: unknown) {
         logger.error({ err, name: 'policyPending' }, 'Tool execution error')
@@ -427,8 +448,9 @@ export async function executeToolCall (name: string, args: ToolArgs, ctx: ToolEx
     // 8. listCrons
     // -----------------------------------------------------------------------
     case 'listCrons': {
+      const { accountIndex: acctIdx } = args as { accountIndex: number }
       try {
-        const crons = await daemonStore.listCrons({ accountIndex })
+        const crons = await daemonStore.listCrons({ accountIndex: acctIdx })
         return { crons }
       } catch (err: unknown) {
         logger.error({ err, name: 'listCrons' }, 'Tool execution error')
@@ -510,6 +532,52 @@ export async function executeToolCall (name: string, args: ToolArgs, ctx: ToolEx
     }
 
     // kittenFetch/kittenMint/kittenBurn — 제거됨 (v0.5.13)
+
+    // -----------------------------------------------------------------------
+    // 13. erc20Balances — read-only RPC call, no facade required
+    // -----------------------------------------------------------------------
+    case 'erc20Balances': {
+      const { tokens, owner, chain } = args as Erc20BalancesArgs
+      try {
+        const rpcUrl = config.evmRpcUrl
+        if (!rpcUrl) {
+          return { status: 'error', error: 'EVM_RPC_URL not configured' }
+        }
+
+        // balanceOf(address) selector: 0x70a08231
+        const ownerPadded = owner.replace(/^0x/i, '').toLowerCase().padStart(64, '0')
+        const calldata = '0x70a08231' + ownerPadded
+
+        const calls = tokens.map((token, i) => ({
+          jsonrpc: '2.0' as const,
+          method: 'eth_call',
+          params: [{ to: token, data: calldata }, 'latest'],
+          id: i
+        }))
+
+        const res = await fetch(rpcUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(calls),
+          signal: AbortSignal.timeout(15_000)
+        })
+
+        const results = await res.json() as Array<{ id: number; result?: string; error?: { message: string } }>
+
+        const balances: Erc20BalanceEntry[] = tokens.map((token, i) => {
+          const r = results.find(x => x.id === i)
+          if (!r || r.error || !r.result) {
+            return { token, balance: '0' }
+          }
+          return { token, balance: BigInt(r.result).toString() }
+        })
+
+        return { balances }
+      } catch (err: unknown) {
+        logger.error({ err, name: 'erc20Balances' }, 'Tool execution error')
+        return { status: 'error', error: errMsg(err) }
+      }
+    }
 
     // -----------------------------------------------------------------------
     // Manifest tools (pure computation — no facade required)
