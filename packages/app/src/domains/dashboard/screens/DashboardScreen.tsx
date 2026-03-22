@@ -282,9 +282,9 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   dot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
+    width: 8,
+    height: 8,
+    borderRadius: 4,
     marginRight: 6,
   },
   connectedDot: {
@@ -298,13 +298,14 @@ const styles = StyleSheet.create({
     color: '#6b7280',
   },
   sectionHeader: {
-    fontSize: 15,
+    fontSize: 12,
     fontWeight: '600',
-    color: '#9ca3af',
+    color: '#6b7280',
     paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingTop: 24,
+    paddingBottom: 8,
     textTransform: 'uppercase',
-    letterSpacing: 0.5,
+    letterSpacing: 1,
   },
   placeholder: {
     paddingHorizontal: 16,

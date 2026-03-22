@@ -4,11 +4,9 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { Text } from 'react-native';
 import { ChatListScreen } from '../domains/chat/screens/ChatListScreen';
 import { ChatDetailScreen } from '../domains/chat/screens/ChatDetailScreen';
-import { PolicyScreen } from '../domains/policy/screens/PolicyScreen';
-import { ApprovalScreen } from '../domains/approval/screens/ApprovalScreen';
 import { ActivityScreen } from '../domains/activity/screens/ActivityScreen';
 import { DashboardScreen } from '../domains/dashboard/screens/DashboardScreen';
-import { SettingsScreen } from '../domains/settings/screens/SettingsScreen';
+import { DevSettingsScreen } from '../domains/settings/screens/DevSettingsScreen';
 import { TxApprovalSheet } from '../shared/tx/TxApprovalSheet';
 import { useChatStore, type TextChatMessage } from '../stores/useChatStore';
 import { useAuthStore } from '../stores/useAuthStore';
@@ -19,7 +17,7 @@ import { RelayClient } from '../core/relay/RelayClient';
 import { IdentityKeyManager } from '../core/identity/IdentityKeyManager';
 import type { AnyStreamEvent, ChatEvent } from '@wdk-app/protocol';
 import { useEffect, useState, useRef } from 'react';
-import { ActivityIndicator, View } from 'react-native';
+import { ActivityIndicator, View, Pressable } from 'react-native';
 
 // --- Chat Stack ---
 
@@ -152,20 +150,27 @@ function ChatNavigator() {
         headerStyle: { backgroundColor: '#0a0a0a' },
         headerTintColor: '#ffffff',
       }}
-      initialRouteName={hasRestoredSession ? 'ChatDetail' : 'ChatList'}
+      initialRouteName="ChatList"
     >
       <ChatStack.Screen
         name="ChatList"
         component={ChatListScreen}
-        options={{ title: 'Chat' }}
+        options={({ navigation: nav }) => ({
+          title: 'Chat',
+          headerRight: () => (
+            <Pressable onPress={() => {
+              const id = useChatStore.getState().createSession('user');
+              nav.navigate('ChatDetail', { sessionId: id });
+            }}>
+              <Text style={{ color: '#3b82f6', fontSize: 14, fontWeight: '600', marginRight: 8 }}>+ New</Text>
+            </Pressable>
+          ),
+        })}
       />
       <ChatStack.Screen
         name="ChatDetail"
         component={ChatDetailScreen}
         options={{ title: '대화', headerBackTitle: '목록' }}
-        initialParams={
-          hasRestoredSession ? { sessionId: currentSessionId! } : undefined
-        }
       />
     </ChatStack.Navigator>
   );
@@ -175,23 +180,13 @@ function ChatNavigator() {
 
 type RootTabParamList = {
   Chat: undefined;
-  Policy: undefined;
-  Approval: undefined;
   Activity: undefined;
-  Dashboard: undefined;
+  Wallet: undefined;
   Settings: undefined;
 };
 
 const Tab = createBottomTabNavigator<RootTabParamList>();
 
-const TAB_ICONS: Record<keyof RootTabParamList, string> = {
-  Chat: 'C',
-  Policy: 'P',
-  Approval: 'A',
-  Activity: 'T',
-  Dashboard: 'D',
-  Settings: 'S',
-};
 
 export function RootNavigator() {
   const isAuthenticated = useAuthStore(s => s.isAuthenticated);
@@ -286,14 +281,11 @@ export function RootNavigator() {
         screenOptions={({ route }) => ({
           headerStyle: { backgroundColor: '#0a0a0a' },
           headerTintColor: '#ffffff',
-          tabBarStyle: { backgroundColor: '#0a0a0a', borderTopColor: '#1a1a1a' },
-          tabBarActiveTintColor: '#3b82f6',
-          tabBarInactiveTintColor: '#6b7280',
-          tabBarIcon: ({ color, size }) => (
-            <Text style={{ color, fontSize: size - 4, fontWeight: 'bold' }}>
-              {TAB_ICONS[route.name as keyof RootTabParamList]}
-            </Text>
-          ),
+          tabBarStyle: { backgroundColor: '#0a0a0a', borderTopWidth: 0, elevation: 0 },
+          tabBarActiveTintColor: '#ffffff',
+          tabBarInactiveTintColor: '#4b5563',
+          tabBarLabelStyle: { fontSize: 12, fontWeight: '600' },
+          tabBarShowIcon: false,
         })}
       >
         <Tab.Screen
@@ -301,11 +293,9 @@ export function RootNavigator() {
           component={ChatNavigator}
           options={{ headerShown: false }}
         />
-        <Tab.Screen name="Policy" component={PolicyScreen} />
-        <Tab.Screen name="Approval" component={ApprovalScreen} />
         <Tab.Screen name="Activity" component={ActivityScreen} />
-        <Tab.Screen name="Dashboard" component={DashboardScreen} />
-        <Tab.Screen name="Settings" component={SettingsScreen} />
+        <Tab.Screen name="Wallet" component={DashboardScreen} />
+        <Tab.Screen name="Settings" component={DevSettingsScreen} />
       </Tab.Navigator>
       <TxApprovalSheet />
     </>
