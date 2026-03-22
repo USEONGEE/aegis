@@ -2,6 +2,13 @@
 // Chat channel wire types (app <-> daemon)
 // ---------------------------------------------------------------------------
 
+export interface ToolResultWire {
+  toolCallId: string
+  name: string
+  args: Record<string, unknown>
+  result: Record<string, unknown>
+}
+
 export interface RelayChatInput {
   userId: string
   sessionId: string
@@ -27,7 +34,7 @@ export interface ChatDoneEvent {
   userId: string
   sessionId: string
   content: string | null
-  toolResults: unknown[]
+  toolResults: ToolResultWire[]
   iterations: number
   source?: 'user' | 'cron'
 }

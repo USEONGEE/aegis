@@ -41,9 +41,10 @@ export type {
   JournalQueryOpts,
   RejectionEntry,
   PolicyVersionEntry,
-  RejectionQueryOpts
+  RejectionQueryOpts,
+  PolicyDiff
 } from './approval-store.js'
 export type { VerificationContext } from './approval-verifier.js'
 export type { KeyPair } from './crypto-utils.js'
-export type { EvaluationResult, EvaluationContext, FailedArg, RuleFailure, Rule, PermissionDict, SignTransactionResult, ArgCondition, Decision } from './guarded-middleware.js'
+export type { EvaluationResult, EvaluationContext, FailedArg, RuleFailure, Rule, PermissionDict, SignTransactionResult, ArgCondition, Decision, Policy, CallPolicy, TimestampPolicy } from './guarded-middleware.js'
 export { permissionsToDict, validatePolicies } from './guarded-middleware.js'

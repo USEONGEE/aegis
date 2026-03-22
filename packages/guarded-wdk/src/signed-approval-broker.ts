@@ -2,7 +2,8 @@ import { randomUUID, createHash } from 'node:crypto'
 import { verifyApproval } from './approval-verifier.js'
 import type { VerificationContext } from './approval-verifier.js'
 import { ApprovalTimeoutError } from './errors.js'
-import type { SignedApproval, ApprovalStore, ApprovalType, ApprovalRequest, PendingApprovalRequest } from './approval-store.js'
+import type { SignedApproval, ApprovalStore, ApprovalType, ApprovalRequest, PendingApprovalRequest, PolicyInput } from './approval-store.js'
+import type { Policy } from './guarded-middleware.js'
 import type { EventEmitter } from 'node:events'
 
 interface CreateRequestOptions {
@@ -28,7 +29,7 @@ type PendableApprovalType = 'policy' | 'wallet_create' | 'wallet_delete'
 
 export type ApprovalSubmitContext =
   | { kind: 'tx'; expectedTargetHash: string }
-  | { kind: 'policy_approval'; expectedTargetHash: string; policies: unknown[]; description: string }
+  | { kind: 'policy_approval'; expectedTargetHash: string; policies: Policy[]; description: string }
   | { kind: 'policy_reject' }
   | { kind: 'device_revoke'; expectedTargetHash: string }
   | { kind: 'wallet_create' }

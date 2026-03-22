@@ -1,5 +1,6 @@
 // Internal store row types (not part of public API)
 import type { PendingApprovalRow, CronRow } from './store-types.js'
+import type { Policy, EvaluationContext } from './guarded-middleware.js'
 
 // --- Domain interfaces ---
 
@@ -50,7 +51,7 @@ export interface ApprovalRequest {
 }
 
 export interface PolicyInput {
-  policies: unknown[]
+  policies: Policy[]
   signature: Record<string, unknown>
 }
 
@@ -142,9 +143,15 @@ export interface RejectionEntry {
   chainId: number
   targetHash: string
   reason: string
-  context: unknown
+  context: EvaluationContext | null
   policyVersion: number
   rejectedAt: number
+}
+
+export interface PolicyDiff {
+  added: Policy[]
+  removed: Policy[]
+  modified: Array<{ before: Policy; after: Policy }>
 }
 
 export interface PolicyVersionEntry {
@@ -152,7 +159,7 @@ export interface PolicyVersionEntry {
   chainId: number
   version: number
   description: string
-  diff: unknown
+  diff: PolicyDiff | null
   changedAt: number
 }
 

@@ -1,3 +1,5 @@
+import type { EvaluationContext } from './guarded-middleware.js'
+
 export class ForbiddenError extends Error {
   constructor (method: string) {
     super(`Access to '${method}' is forbidden through GuardedAccount.`)
@@ -6,8 +8,8 @@ export class ForbiddenError extends Error {
 }
 
 export class PolicyRejectionError extends Error {
-  context: unknown
-  constructor (reason: string, context: unknown) {
+  context: EvaluationContext | null
+  constructor (reason: string, context: EvaluationContext | null) {
     super(reason || 'Policy rejected the transaction.')
     this.name = 'PolicyRejectionError'
     this.context = context

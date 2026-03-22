@@ -5,6 +5,7 @@ import type { Logger } from 'pino'
 import type { WDKInstance } from './wdk-host.js'
 import type { ExecutionJournal } from './execution-journal.js'
 import type { ToolStorePort, ApprovalBrokerPort } from './ports.js'
+import type { EvaluationContext, Policy, PendingApprovalRequest, StoredCron, RejectionEntry, PolicyVersionEntry } from '@wdk-app/guarded-wdk'
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -16,8 +17,8 @@ function errMsg (err: unknown): string {
 }
 
 /** Narrow unknown catch value to an object with optional typed fields. */
-function errObj (err: unknown): { name?: string; message?: string; context?: unknown } {
-  if (err instanceof Error) return err as Error & { context?: unknown }
+function errObj (err: unknown): { name?: string; message?: string; context?: EvaluationContext | null } {
+  if (err instanceof Error) return err as Error & { context?: EvaluationContext | null }
   return {}
 }
 
@@ -65,13 +66,13 @@ export interface IntentRejectedResult {
   status: 'rejected'
   reason: string
   intentHash: string
-  context: unknown
+  context: EvaluationContext | null
 }
 
 export interface TransferRejectedResult {
   status: 'rejected'
   reason: string
-  context: unknown
+  context: EvaluationContext | null
 }
 
 // 1. sendTransaction
@@ -116,14 +117,14 @@ export type GetBalanceResult = GetBalanceSuccess | ToolErrorResult
 
 // 4. policyList
 interface PolicyListSuccess {
-  policies: unknown[]
+  policies: Policy[]
 }
 
 export type PolicyListResult = PolicyListSuccess | ToolErrorResult
 
 // 5. policyPending
 interface PolicyPendingSuccess {
-  pending: unknown[]
+  pending: PendingApprovalRequest[]
 }
 
 export type PolicyPendingResult = PolicyPendingSuccess | ToolErrorResult
@@ -146,7 +147,7 @@ export type RegisterCronResult = RegisterCronRegistered | ToolErrorResult
 
 // 8. listCrons
 interface ListCronsSuccess {
-  crons: unknown[]
+  crons: StoredCron[]
 }
 
 export type ListCronsResult = ListCronsSuccess | ToolErrorResult
@@ -179,14 +180,14 @@ export type SignTransactionResult =
 
 // 11. listRejections
 interface ListRejectionsSuccess {
-  rejections: unknown[]
+  rejections: RejectionEntry[]
 }
 
 export type ListRejectionsResult = ListRejectionsSuccess | ToolErrorResult
 
 // 12. listPolicyVersions
 interface ListPolicyVersionsSuccess {
-  policyVersions: unknown[]
+  policyVersions: PolicyVersionEntry[]
 }
 
 export type ListPolicyVersionsResult = ListPolicyVersionsSuccess | ToolErrorResult

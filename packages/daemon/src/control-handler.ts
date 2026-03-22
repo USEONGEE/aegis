@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import type { Logger } from 'pino'
-import type { SignedApproval } from '@wdk-app/guarded-wdk'
+import type { SignedApproval, Policy } from '@wdk-app/guarded-wdk'
 import { SignedApprovalBroker } from '@wdk-app/guarded-wdk'
 import type { ApprovalSubmitContext } from '@wdk-app/guarded-wdk'
 import type {
@@ -88,7 +88,7 @@ export async function handleControlMessage (
         const context: ApprovalSubmitContext = {
           kind: 'policy_approval',
           expectedTargetHash: payload.targetHash,
-          policies: (payload.policies as unknown[]) || [],
+          policies: (payload.policies ?? []) as unknown as Policy[],
           description: ''
         }
         await broker.submitApproval(signedApproval, context)

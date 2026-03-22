@@ -23,8 +23,10 @@ import {
   type SignedApproval,
   type RejectionEntry,
   type RejectionQueryOpts,
-  type PolicyVersionEntry
+  type PolicyVersionEntry,
+  type PolicyDiff
 } from './approval-store.js'
+import type { Policy, EvaluationContext } from './guarded-middleware.js'
 import type { PendingApprovalRow, StoredHistoryEntry, CronRow, StoredJournalEntry, SignerRow, MasterSeedRow, WalletRow, PolicyRow, RejectionRow, PolicyVersionRow } from './store-types.js'
 
 /**
@@ -240,7 +242,7 @@ export class SqliteApprovalStore extends ApprovalStore {
     return {
       accountIndex: row.account_index,
       chainId: row.chain_id,
-      policies: JSON.parse(row.policies_json) as unknown[],
+      policies: JSON.parse(row.policies_json) as Policy[],
       signature: JSON.parse(row.signature_json) as Record<string, unknown>,
       policyVersion: row.policy_version,
       updatedAt: row.updated_at
@@ -249,7 +251,7 @@ export class SqliteApprovalStore extends ApprovalStore {
 
   override async savePolicy (accountIndex: number, chainId: number, input: PolicyInput, description: string = ''): Promise<void> {
     const existing = await this.loadPolicy(accountIndex, chainId)
-    const oldPolicies: unknown[] = existing ? existing.policies : []
+    const oldPolicies: Policy[] = existing ? existing.policies : []
     const version = existing ? existing.policyVersion + 1 : 1
     const now = Date.now()
 
@@ -599,7 +601,7 @@ export class SqliteApprovalStore extends ApprovalStore {
       chainId: r.chain_id,
       targetHash: r.target_hash,
       reason: r.reason,
-      context: r.context_json ? JSON.parse(r.context_json) : null,
+      context: r.context_json ? JSON.parse(r.context_json) as EvaluationContext : null,
       policyVersion: r.policy_version,
       rejectedAt: r.rejected_at
     }))
@@ -616,19 +618,19 @@ export class SqliteApprovalStore extends ApprovalStore {
       chainId: v.chain_id,
       version: v.version,
       description: v.description,
-      diff: v.diff_json ? JSON.parse(v.diff_json) : null,
+      diff: v.diff_json ? JSON.parse(v.diff_json) as PolicyDiff : null,
       changedAt: v.changed_at
     }))
   }
 }
 
-function computePolicyDiff (oldPolicies: unknown[], newPolicies: unknown[]): { added: unknown[]; removed: unknown[]; modified: Array<{ before: unknown; after: unknown }> } {
+function computePolicyDiff (oldPolicies: Policy[], newPolicies: Policy[]): PolicyDiff {
   const oldJSON = oldPolicies.map(p => JSON.stringify(p))
   const newJSON = newPolicies.map(p => JSON.stringify(p))
 
-  const added: unknown[] = []
-  const removed: unknown[] = []
-  const modified: Array<{ before: unknown; after: unknown }> = []
+  const added: Policy[] = []
+  const removed: Policy[] = []
+  const modified: Array<{ before: Policy; after: Policy }> = []
 
   const matchedNew = new Set<number>()
 

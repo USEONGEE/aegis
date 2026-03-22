@@ -23,12 +23,15 @@ export {
 } from './control.js'
 
 export {
+  type ToolResultWire,
   type RelayChatInput,
   type ChatTypingEvent,
   type ChatStreamEvent,
   type ChatDoneEvent,
   type ChatErrorEvent,
   type ChatCancelledEvent,
+  type ChatToolStartEvent,
+  type ChatToolDoneEvent,
   type ChatEvent
 } from './chat.js'
 
@@ -38,6 +41,11 @@ export {
 } from './relay.js'
 
 export {
+  type PolicyArgConditionWire,
+  type PolicyRuleWire,
+  type PolicyFailedArgWire,
+  type PolicyRuleFailureWire,
+  type PolicyEvaluationContextWire,
   type WDKEventBase,
   type IntentProposedEvent,
   type PolicyEvaluatedEvent,

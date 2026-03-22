@@ -15,6 +15,41 @@ export interface WDKEventBase {
 }
 
 // ---------------------------------------------------------------------------
+// Policy evaluation wire types (structurally compatible with guarded-wdk)
+// ---------------------------------------------------------------------------
+
+export interface PolicyArgConditionWire {
+  condition: string
+  value: string | string[]
+}
+
+export interface PolicyRuleWire {
+  order: number
+  args?: Record<string, PolicyArgConditionWire>
+  valueLimit?: string | number
+  decision: 'ALLOW' | 'REJECT'
+}
+
+export interface PolicyFailedArgWire {
+  argIndex: string
+  condition: string
+  expected: string | string[]
+  actual: string
+}
+
+export interface PolicyRuleFailureWire {
+  rule: PolicyRuleWire
+  failedArgs: PolicyFailedArgWire[]
+}
+
+export interface PolicyEvaluationContextWire {
+  target: string
+  selector: string
+  effectiveRules: PolicyRuleWire[]
+  ruleFailures: PolicyRuleFailureWire[]
+}
+
+// ---------------------------------------------------------------------------
 // Transaction Lifecycle (from guarded-middleware)
 // ---------------------------------------------------------------------------
 
@@ -28,10 +63,10 @@ export interface IntentProposedEvent extends WDKEventBase {
 export interface PolicyEvaluatedEvent extends WDKEventBase {
   type: 'PolicyEvaluated'
   requestId: string
-  decision: string
-  matchedPermission: unknown
+  decision: 'ALLOW' | 'REJECT'
+  matchedPermission: PolicyRuleWire | null
   reason: string | null
-  context: unknown
+  context: PolicyEvaluationContextWire | null
 }
 
 export interface ExecutionBroadcastedEvent extends WDKEventBase {
