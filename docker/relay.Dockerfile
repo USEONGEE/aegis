@@ -14,7 +14,11 @@ RUN node -e "\
   p.workspaces=['packages/canonical','packages/protocol','packages/relay'];\
   require('fs').writeFileSync('package.json',JSON.stringify(p,null,2))"
 
+# Rewrite pnpm "workspace:*" refs to "*" so npm can resolve them
+RUN find packages -name package.json -exec sed -i 's/"workspace:\*"/"*"/g' {} +
+
 RUN npm install
+RUN npm install -g tsx
 
 # ── source ───────────────────────────────────────────────────────────
 COPY packages/canonical/ packages/canonical/
@@ -25,4 +29,4 @@ WORKDIR /app/packages/relay
 
 EXPOSE 3000
 
-CMD ["node", "--loader", "ts-node/esm", "src/index.ts"]
+CMD ["tsx", "src/index.ts"]
