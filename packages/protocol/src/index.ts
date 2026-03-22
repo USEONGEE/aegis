@@ -1,5 +1,6 @@
 export {
   type SignedApprovalFields,
+  type DeviceRegisterPayload,
   type ControlMessage
 } from './control.js'
 

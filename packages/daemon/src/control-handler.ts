@@ -5,6 +5,7 @@ import type { ApprovalSubmitContext } from '@wdk-app/guarded-wdk'
 import type { ControlFacadePort } from './ports.js'
 import type {
   SignedApprovalFields, ControlMessage,
+  DeviceRegisterPayload,
   CancelCompletedEvent, CancelFailedEvent
 } from '@wdk-app/protocol'
 import type { MessageQueueManager } from './message-queue.js'
@@ -18,18 +19,21 @@ import type { MessageQueueManager } from './message-queue.js'
  * Wire uses `signature`/`approverPubKey`, guarded-wdk uses `sig`/`approver`.
  */
 function toSignedApproval (fields: SignedApprovalFields, type: SignedApproval['type']): SignedApproval {
+  // App sends { approver, sig }, protocol defines { approverPubKey, signature }.
+  // Support both field names for wire compatibility.
+  const f = fields as SignedApprovalFields & { approver?: string; sig?: string }
   return {
     type,
-    requestId: fields.requestId,
-    chainId: fields.chainId,
-    targetHash: fields.targetHash,
-    approver: fields.approverPubKey,
-    accountIndex: fields.accountIndex,
-    policyVersion: fields.policyVersion,
-    expiresAt: fields.expiresAt,
-    nonce: fields.nonce,
-    sig: fields.signature,
-    content: fields.content
+    requestId: f.requestId,
+    chainId: f.chainId,
+    targetHash: f.targetHash,
+    approver: f.approverPubKey || f.approver || '',
+    accountIndex: f.accountIndex,
+    policyVersion: f.policyVersion,
+    expiresAt: f.expiresAt,
+    nonce: f.nonce,
+    sig: f.signature || f.sig || '',
+    content: f.content
   }
 }
 
@@ -43,10 +47,16 @@ export type CancelEventPayload = CancelCompletedEvent | CancelFailedEvent
 // Handler
 // ---------------------------------------------------------------------------
 
+export interface SignerRegistrar {
+  saveSigner (publicKey: string, deviceId: string): Promise<void>
+  refreshTrustedApprovers (): Promise<void>
+}
+
 interface ControlHandlerDeps {
   facade: ControlFacadePort
   logger: Logger
   queueManager: MessageQueueManager
+  signerRegistrar: SignerRegistrar
 }
 
 /**
@@ -60,9 +70,15 @@ export async function handleControlMessage (
   msg: ControlMessage,
   deps: ControlHandlerDeps
 ): Promise<CancelEventPayload | null> {
-  const { facade, logger, queueManager } = deps
-  if (!msg.type || !msg.payload) {
-    logger.warn({ msg }, 'Malformed control message: missing type or payload')
+  const { facade, logger, queueManager, signerRegistrar } = deps
+  // App sends flat format: { type, ...fields } (no nested payload).
+  // Normalize to ControlMessage shape: { type, payload: { ...fields } }
+  if (msg.type && !msg.payload) {
+    const { type, ...rest } = msg as unknown as Record<string, unknown>
+    ;(msg as unknown as Record<string, unknown>).payload = rest
+  }
+  if (!msg.type) {
+    logger.warn({ msg }, 'Malformed control message: missing type')
     return null
   }
 
@@ -176,6 +192,22 @@ export async function handleControlMessage (
         return null
       } catch (err: unknown) {
         logger.error({ err, requestId: payload.requestId }, 'Wallet deletion approval verification failed')
+        return null
+      }
+    }
+
+    // -----------------------------------------------------------------------
+    // device_register -- app registers its identity public key as trusted approver
+    // -----------------------------------------------------------------------
+    case 'device_register': {
+      const payload = msg.payload as DeviceRegisterPayload
+      try {
+        await signerRegistrar.saveSigner(payload.publicKey, payload.deviceId)
+        await signerRegistrar.refreshTrustedApprovers()
+        logger.info({ deviceId: payload.deviceId, publicKey: payload.publicKey.slice(0, 16) + '...' }, 'Device registered as trusted approver')
+        return null
+      } catch (err: unknown) {
+        logger.error({ err, deviceId: payload.deviceId }, 'Device registration failed')
         return null
       }
     }

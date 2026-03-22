@@ -20,8 +20,14 @@ export type WDKInstance = Pick<GuardedWDK,
   'on' | 'off' | 'dispose'
 >
 
+export interface WdkStore {
+  saveSigner (publicKey: string, name: string): Promise<void>
+  listSigners (): Promise<Array<{ publicKey: string; status: { kind: string } }>>
+}
+
 interface WDKInitResult {
   facade: WDKInstance | null
+  store: WdkStore | null
 }
 
 /**
@@ -51,7 +57,7 @@ export async function initWDK (config: DaemonConfig, logger: Logger): Promise<WD
   if (!masterSeed) {
     logger.warn('No master seed found. WDK will not be initialized until a seed is added.')
     await store.dispose()
-    return { facade: null }
+    return { facade: null, store: null }
   }
 
   const mnemonic: string = masterSeed.mnemonic
@@ -80,5 +86,5 @@ export async function initWDK (config: DaemonConfig, logger: Logger): Promise<WD
 
   logger.info({ approverCount: trustedApprovers.length }, 'WDK host initialized.')
 
-  return { facade }
+  return { facade, store }
 }

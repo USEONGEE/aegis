@@ -7,6 +7,7 @@ import { initWDK } from './wdk-host.js'
 import { createOpenClawClient } from './openclaw-client.js'
 import { RelayClient } from './relay-client.js'
 import { handleControlMessage } from './control-handler.js'
+import type { SignerRegistrar } from './control-handler.js'
 import { handleQueryMessage } from './query-handler.js'
 import type { ControlMessage, RelayChatInput, QueryMessage } from '@wdk-app/protocol'
 import { handleChatMessage, _processChatDirect } from './chat-handler.js'
@@ -36,8 +37,8 @@ async function main (): Promise<void> {
   const config = loadConfig()
   logger.info({ wdkHome: config.wdkHome, relayUrl: config.relayUrl }, 'Config loaded')
 
-  // 2. Init WDK (load master seed -> facade)
-  const { facade } = await initWDK(config, logger)
+  // 2. Init WDK (load master seed -> facade + store)
+  const { facade, store: wdkStore } = await initWDK(config, logger)
 
   // 2b. Init daemon store (cron persistence)
   await mkdir(config.daemonStorePath, { recursive: true })
@@ -54,6 +55,22 @@ async function main (): Promise<void> {
     reconnectMaxMs: config.reconnectMaxMs,
     heartbeatIntervalMs: config.heartbeatIntervalMs
   })
+
+  // 5b. Build signer registrar (device pairing: identity key → trusted approver)
+  const signerRegistrar: SignerRegistrar = {
+    async saveSigner (publicKey: string, deviceId: string) {
+      if (!wdkStore) throw new Error('WDK store not available')
+      await wdkStore.saveSigner(publicKey, deviceId)
+      logger.info({ deviceId }, 'Signer saved to store')
+    },
+    async refreshTrustedApprovers () {
+      if (!wdkStore || !facade) throw new Error('WDK not available')
+      const signers = await wdkStore.listSigners()
+      const approvers = signers.filter(s => s.status.kind === 'active').map(s => s.publicKey)
+      facade.setTrustedApprovers(approvers)
+      logger.info({ approverCount: approvers.length }, 'Trusted approvers refreshed')
+    }
+  }
 
   // 6. Build tool execution context (passed to tool execution)
   const ctx: ToolExecutionContext = {
@@ -102,7 +119,7 @@ async function main (): Promise<void> {
           logger.warn('Control message received but WDK not initialized (no master seed)')
           break
         }
-        handleControlMessage(payload as ControlMessage, { facade, logger, queueManager })
+        handleControlMessage(payload as ControlMessage, { facade, logger, queueManager, signerRegistrar })
           .then((result) => {
             if (result === null) return // 승인 타입: WDK 이벤트가 대신 전달
             const incomingUserId = (payload as Record<string, unknown>)?.userId as string | undefined

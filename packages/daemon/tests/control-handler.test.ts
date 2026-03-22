@@ -68,6 +68,8 @@ describe('handleControlMessage', () => {
   let facade: any
   let queueManager: any
 
+  const signerRegistrar = { saveSigner: async () => {}, refreshTrustedApprovers: async () => {} }
+
   beforeEach(() => {
     logger = createMockLogger()
     facade = createMockFacade()
@@ -80,7 +82,7 @@ describe('handleControlMessage', () => {
 
   test('returns null for message with missing type', async () => {
     const msg = { payload: { requestId: 'r1' } } as any
-    const result = await handleControlMessage(msg, { facade, logger: logger as any, queueManager })
+    const result = await handleControlMessage(msg, { facade, logger: logger as any, queueManager, signerRegistrar })
 
     expect(result).toBeNull()
     expect(logger.warn).toHaveBeenCalled()
@@ -88,7 +90,7 @@ describe('handleControlMessage', () => {
 
   test('returns null for message with missing payload', async () => {
     const msg = { type: 'policy_approval' } as any
-    const result = await handleControlMessage(msg, { facade, logger: logger as any, queueManager })
+    const result = await handleControlMessage(msg, { facade, logger: logger as any, queueManager, signerRegistrar })
 
     expect(result).toBeNull()
   })
@@ -109,7 +111,7 @@ describe('handleControlMessage', () => {
       }
     }
 
-    const result = await handleControlMessage(msg, { facade, logger: logger as any, queueManager })
+    const result = await handleControlMessage(msg, { facade, logger: logger as any, queueManager, signerRegistrar })
 
     expect(result).toBeNull()
     expect(facade.submitApproval).toHaveBeenCalledWith(expect.objectContaining({
@@ -129,7 +131,7 @@ describe('handleControlMessage', () => {
       }
     }
 
-    const result = await handleControlMessage(msg, { facade, logger: logger as any, queueManager })
+    const result = await handleControlMessage(msg, { facade, logger: logger as any, queueManager, signerRegistrar })
 
     expect(result).toBeNull()
     expect(logger.error).toHaveBeenCalled()
@@ -148,7 +150,7 @@ describe('handleControlMessage', () => {
       })
     }
 
-    const result = await handleControlMessage(msg, { facade, logger: logger as any, queueManager })
+    const result = await handleControlMessage(msg, { facade, logger: logger as any, queueManager, signerRegistrar })
 
     expect(result).toBeNull()
     expect(facade.submitApproval).toHaveBeenCalledWith(expect.objectContaining({
@@ -173,7 +175,7 @@ describe('handleControlMessage', () => {
       }), targetPublicKey: signerToRevoke }
     }
 
-    const result = await handleControlMessage(msg, { facade, logger: logger as any, queueManager })
+    const result = await handleControlMessage(msg, { facade, logger: logger as any, queueManager, signerRegistrar })
 
     expect(result).toBeNull()
     expect(facade.submitApproval).toHaveBeenCalledWith(
@@ -191,7 +193,7 @@ describe('handleControlMessage', () => {
       }), targetPublicKey: '0xdev_x' }
     }
 
-    await handleControlMessage(msg, { facade, logger: logger as any, queueManager })
+    await handleControlMessage(msg, { facade, logger: logger as any, queueManager, signerRegistrar })
 
     expect(facade.setTrustedApprovers).not.toHaveBeenCalled()
   })
@@ -207,7 +209,7 @@ describe('handleControlMessage', () => {
       }), targetPublicKey: '0xdev_y' }
     }
 
-    const result = await handleControlMessage(msg, { facade, logger: logger as any, queueManager })
+    const result = await handleControlMessage(msg, { facade, logger: logger as any, queueManager, signerRegistrar })
 
     expect(result).toBeNull()
   })
@@ -225,7 +227,7 @@ describe('handleControlMessage', () => {
       })
     }
 
-    const result = await handleControlMessage(msg, { facade, logger: logger as any, queueManager })
+    const result = await handleControlMessage(msg, { facade, logger: logger as any, queueManager, signerRegistrar })
 
     expect(result).toBeNull()
     expect(facade.submitApproval).toHaveBeenCalledWith(
@@ -244,7 +246,7 @@ describe('handleControlMessage', () => {
       payload: defaultApprovalFields({ requestId: 'req_wc_1' })
     }
 
-    const result = await handleControlMessage(msg, { facade, logger: logger as any, queueManager })
+    const result = await handleControlMessage(msg, { facade, logger: logger as any, queueManager, signerRegistrar })
 
     expect(result).toBeNull()
     expect(facade.submitApproval).toHaveBeenCalledWith(
@@ -259,7 +261,7 @@ describe('handleControlMessage', () => {
       payload: defaultApprovalFields({ requestId: 'req_wd_1' })
     }
 
-    const result = await handleControlMessage(msg, { facade, logger: logger as any, queueManager })
+    const result = await handleControlMessage(msg, { facade, logger: logger as any, queueManager, signerRegistrar })
 
     expect(result).toBeNull()
     expect(facade.submitApproval).toHaveBeenCalledWith(
@@ -278,7 +280,7 @@ describe('handleControlMessage', () => {
       payload: { messageId: '' }
     }
 
-    const result = await handleControlMessage(msg, { facade, logger: logger as any, queueManager }) as CancelFailedEvent
+    const result = await handleControlMessage(msg, { facade, logger: logger as any, queueManager, signerRegistrar }) as CancelFailedEvent
 
     expect(result).not.toBeNull()
     expect(result.type).toBe('CancelFailed')
@@ -293,7 +295,7 @@ describe('handleControlMessage', () => {
       payload: { messageId: 'msg-123' }
     }
 
-    const result = await handleControlMessage(msg, { facade, logger: logger as any, queueManager }) as CancelCompletedEvent
+    const result = await handleControlMessage(msg, { facade, logger: logger as any, queueManager, signerRegistrar }) as CancelCompletedEvent
 
     expect(result).not.toBeNull()
     expect(result.type).toBe('CancelCompleted')
@@ -310,7 +312,7 @@ describe('handleControlMessage', () => {
       payload: { messageId: 'msg-active' }
     }
 
-    const result = await handleControlMessage(msg, { facade, logger: logger as any, queueManager }) as CancelFailedEvent
+    const result = await handleControlMessage(msg, { facade, logger: logger as any, queueManager, signerRegistrar }) as CancelFailedEvent
 
     expect(result).not.toBeNull()
     expect(result.type).toBe('CancelFailed')
@@ -327,7 +329,7 @@ describe('handleControlMessage', () => {
       payload: { messageId: '' }
     }
 
-    const result = await handleControlMessage(msg, { facade, logger: logger as any, queueManager }) as CancelFailedEvent
+    const result = await handleControlMessage(msg, { facade, logger: logger as any, queueManager, signerRegistrar }) as CancelFailedEvent
 
     expect(result).not.toBeNull()
     expect(result.type).toBe('CancelFailed')
@@ -342,7 +344,7 @@ describe('handleControlMessage', () => {
       payload: { messageId: 'msg-456' }
     }
 
-    const result = await handleControlMessage(msg, { facade, logger: logger as any, queueManager }) as CancelCompletedEvent
+    const result = await handleControlMessage(msg, { facade, logger: logger as any, queueManager, signerRegistrar }) as CancelCompletedEvent
 
     expect(result).not.toBeNull()
     expect(result.type).toBe('CancelCompleted')
@@ -359,7 +361,7 @@ describe('handleControlMessage', () => {
       payload: { messageId: 'msg-queued' }
     }
 
-    const result = await handleControlMessage(msg, { facade, logger: logger as any, queueManager }) as CancelFailedEvent
+    const result = await handleControlMessage(msg, { facade, logger: logger as any, queueManager, signerRegistrar }) as CancelFailedEvent
 
     expect(result).not.toBeNull()
     expect(result.type).toBe('CancelFailed')
@@ -376,7 +378,7 @@ describe('handleControlMessage', () => {
       payload: { requestId: 'r1' }
     } as any
 
-    const result = await handleControlMessage(msg, { facade, logger: logger as any, queueManager })
+    const result = await handleControlMessage(msg, { facade, logger: logger as any, queueManager, signerRegistrar })
 
     expect(result).toBeNull()
     expect(logger.warn).toHaveBeenCalled()

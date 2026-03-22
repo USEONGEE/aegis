@@ -287,6 +287,9 @@ export class RelayClient extends EventEmitter {
         return
       }
 
+      // DEBUG: log all incoming messages
+      this._logger.info({ type: msg.type, hasPayload: !!msg.payload, encrypted: !!msg.encrypted }, 'WS message received from Relay')
+
       // Handle pong
       if (msg.type === 'pong') {
         this._lastPong = Date.now()
