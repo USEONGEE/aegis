@@ -7,11 +7,13 @@ import {
   FlatList,
   KeyboardAvoidingView,
   Platform,
+  ActivityIndicator,
   StyleSheet,
 } from 'react-native';
 import { useChatStore, type ChatMessage } from '../../../stores/useChatStore';
 import { RelayClient } from '../../../core/relay/RelayClient';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
+import MarkdownBubble from '../components/MarkdownBubble';
 import type { ChatStackParamList } from '../../../app/RootNavigator';
 import type { ChatEvent, AnyStreamEvent } from '@wdk-app/protocol';
 
@@ -49,6 +51,7 @@ export function ChatDetailScreen({ route }: Props) {
   } = useChatStore();
   const [inputText, setInputText] = useState('');
   const [streamError, setStreamError] = useState<string | null>(null);
+  const [relayConnected, setRelayConnected] = useState(true);
   const currentSessionId = sessionId;
   const messages = sessions[currentSessionId] || [];
   const streamBufferRef = useRef<string>('');
@@ -61,11 +64,19 @@ export function ChatDetailScreen({ route }: Props) {
     switchSession(currentSessionId);
   }, [currentSessionId, switchSession]);
 
+  // Track relay connection state for UI
+  useEffect(() => {
+    setRelayConnected(relay.isConnected());
+    const handler = (connected: boolean) => setRelayConnected(connected);
+    relay.addConnectionHandler(handler);
+    return () => relay.removeConnectionHandler(handler);
+  }, [relay]);
+
   // Cursor providers and cron_session_created handler are registered at app-level (ChatNavigator)
 
   // Subscribe to incoming chat messages from Relay
   useEffect(() => {
-    const handler = (message: { channel: string; payload: unknown; timestamp: number }) => {
+    const handler = (message: { channel: string; payload: unknown; timestamp: number; messageId?: string }) => {
       // Use flexible type for payload — protocol types + extra fields from relay
       const data = message.payload as RelayPayloadData;
 
@@ -231,16 +242,46 @@ export function ChatDetailScreen({ route }: Props) {
         }
 
         case 'done': {
-          // Stream complete — finalize
+          // IMPORTANT: 'done' 이벤트는 두 가지 모드로 동작한다.
+          //
+          // [Mode A] Streaming 모드 (v0.5.4 이전):
+          //   'stream' 이벤트로 delta가 누적 → streamMsgIdRef에 메시지 ID 존재
+          //   → 'done'은 UI 상태 리셋만 수행, content는 이미 stream으로 표시됨
+          //
+          // [Mode B] Non-streaming 모드 (v0.5.5+ OpenClaw 통합):
+          //   OpenClaw이 tool-call loop를 내부 처리 후 최종 텍스트만 반환
+          //   → 'stream' 이벤트 없음, streamMsgIdRef === null
+          //   → 'done'의 data.content가 유일한 응답 전달 경로
+          //   → 반드시 addMessage()로 화면에 표시해야 함
+          //
+          // streamMsgIdRef.current 유무로 모드를 판별한다.
+          // streaming이 있었으면 content는 이미 표시됨 → skip
+          // streaming이 없었으면 content를 여기서 표시 → addMessage
           if (isCurrentSession) {
             setTyping(false);
             setLoading(false);
             setQueuedMessageId(null);
             setMessageState('idle');
+          }
+          if (data.content && !streamMsgIdRef.current) {
+            // IMPORTANT: relay의 Redis entry ID (message.messageId)를 사용한다.
+            // 랜덤 ID를 생성하면 backfill/poll 이중 전달 시 같은 content가
+            // 다른 ID로 중복 추가된다. Redis entry ID는 유일하므로
+            // addMessage의 id 중복 체크(findIndex)로 자연스럽게 방지된다.
+            addMessage({
+              kind: 'text',
+              id: message.messageId || `msg_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+              role: 'assistant',
+              content: data.content,
+              timestamp: message.timestamp,
+              sessionId: msgSessionId!,
+              source: msgSource,
+            });
+          }
+          if (isCurrentSession) {
             streamBufferRef.current = '';
             streamMsgIdRef.current = null;
           }
-          // Non-current session done messages are saved at app-level (ChatNavigator)
           return;
         }
 
@@ -287,6 +328,8 @@ export function ChatDetailScreen({ route }: Props) {
     addMessage(userMsg);
     setInputText('');
     setLoading(true);
+    // TODO: 타임아웃 추가 — daemon 무응답 시 isLoading 영구 잠금 방지
+    // TODO: isLoading을 세션별로 분리 — 현재 글로벌이라 다른 세션도 잠김
 
     try {
       await relay.sendChat(currentSessionId, text);
@@ -352,7 +395,10 @@ export function ChatDetailScreen({ route }: Props) {
         <Text style={[styles.roleLabel, isSystem && { color: '#f59e0b' }]}>
           {item.role === 'user' ? 'You' : item.role === 'assistant' ? 'AI' : 'System'}
         </Text>
-        <Text style={styles.messageText}>{item.content}</Text>
+        {isUser || isSystem
+          ? <Text style={styles.messageText}>{item.content}</Text>
+          : <MarkdownBubble content={item.content} />
+        }
         <View style={styles.messageFooter}>
           <Text style={styles.timestamp}>
             {new Date(item.timestamp).toLocaleTimeString()}
@@ -371,18 +417,21 @@ export function ChatDetailScreen({ route }: Props) {
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       keyboardVerticalOffset={90}
     >
-      {/* Connection status */}
+      {/* Session header */}
       <View style={styles.statusBar}>
-        <View style={[styles.statusDot, relay.isConnected() ? styles.connectedDot : styles.disconnectedDot]} />
-        <Text style={styles.statusText}>
-          {relay.isConnected() ? 'Connected' : 'Disconnected'}
-        </Text>
         {currentSessionId && (
           <Text style={styles.sessionText}>
-            {currentSessionId.slice(0, 16)}...
+            {currentSessionId}
           </Text>
         )}
       </View>
+
+      {/* Disconnected banner */}
+      {!relayConnected && (
+        <View style={styles.disconnectedBanner}>
+          <Text style={styles.disconnectedBannerText}>Disconnected — reconnecting...</Text>
+        </View>
+      )}
 
       {/* Messages */}
       {messages.length === 0 ? (
@@ -442,11 +491,15 @@ export function ChatDetailScreen({ route }: Props) {
           blurOnSubmit={false}
         />
         <Pressable
-          style={[styles.sendButton, !inputText.trim() && styles.sendButtonDisabled]}
-          onPress={sendMessage}
-          disabled={!inputText.trim() || isLoading}
+          style={[styles.sendButton, (!inputText.trim() || isLoading) && styles.sendButtonDisabled]}
+          onPress={isLoading ? cancelPendingMessage : sendMessage}
+          disabled={!inputText.trim() && !isLoading}
         >
-          <Text style={styles.sendButtonText}>Send</Text>
+          {isLoading ? (
+            <ActivityIndicator size="small" color="#ffffff" />
+          ) : (
+            <Text style={styles.sendButtonText}>Send</Text>
+          )}
         </Pressable>
       </View>
     </KeyboardAvoidingView>
@@ -462,31 +515,25 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 16,
-    paddingVertical: 8,
+    paddingVertical: 6,
     borderBottomWidth: 1,
     borderBottomColor: '#1a1a1a',
-  },
-  statusDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    marginRight: 8,
-  },
-  connectedDot: {
-    backgroundColor: '#22c55e',
-  },
-  disconnectedDot: {
-    backgroundColor: '#ef4444',
-  },
-  statusText: {
-    fontSize: 12,
-    color: '#6b7280',
   },
   sessionText: {
     fontSize: 11,
     color: '#4b5563',
-    marginLeft: 'auto',
     fontFamily: 'Menlo',
+  },
+  disconnectedBanner: {
+    backgroundColor: '#dc2626',
+    paddingVertical: 4,
+    paddingHorizontal: 16,
+    alignItems: 'center',
+  },
+  disconnectedBannerText: {
+    fontSize: 12,
+    color: '#ffffff',
+    fontWeight: '600',
   },
   emptyState: {
     flex: 1,

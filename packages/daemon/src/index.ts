@@ -111,6 +111,7 @@ async function main (): Promise<void> {
         break
 
       case 'chat':
+        logger.info({ payload: JSON.stringify(payload).slice(0, 200) }, 'Chat message received from relay')
         handleChatMessage(payload as unknown as RelayChatInput, openclawClient, relayClient, null, {}, queueManager)
           .catch((err: Error) => logger.error({ err }, 'Unhandled error in chat handler'))
         break
@@ -174,27 +175,40 @@ async function main (): Promise<void> {
     // RELAY_URL is the base URL (http://host:port). Derive HTTP and WS URLs.
     relayHttpBase = config.relayUrl.replace(/\/$/, '')
     const relayWsUrl = relayHttpBase.replace(/^http/, 'ws') + '/ws/daemon'
-    try {
-      const token = await authenticateWithRelay(relayHttpBase, config.daemonId, config.daemonSecret, logger)
-      relayToken = token
 
-      // F29: Request enrollment code and display in terminal
+    // Retry loop: relay may not be ready at daemon boot time (Docker startup order)
+    const MAX_RETRIES = 10
+    const RETRY_DELAY_MS = 3000
+    let connected = false
+    for (let attempt = 1; attempt <= MAX_RETRIES && !connected; attempt++) {
       try {
-        const enrollRes = await fetch(`${relayHttpBase}/api/auth/daemon/enroll`, {
-          method: 'POST',
-          headers: { 'Authorization': `Bearer ${token}` },
-        })
-        if (enrollRes.ok) {
-          const { enrollmentCode, expiresIn } = await enrollRes.json() as { enrollmentCode: string, expiresIn: number }
-          logger.info({ enrollmentCode, expiresIn }, 'Daemon enrollment code generated — enter this code in the WDK App')
-        }
-      } catch (err: unknown) {
-        logger.warn({ err: err instanceof Error ? err.message : String(err) }, 'Could not request enrollment code')
-      }
+        const token = await authenticateWithRelay(relayHttpBase, config.daemonId, config.daemonSecret, logger)
+        relayToken = token
 
-      relayClient.connect(relayWsUrl, token)
-    } catch (err: unknown) {
-      logger.error({ err: err instanceof Error ? err.message : String(err) }, 'Daemon bootstrap failed — relay connection skipped')
+        // F29: Request enrollment code and display in terminal
+        try {
+          const enrollRes = await fetch(`${relayHttpBase}/api/auth/daemon/enroll`, {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${token}` },
+          })
+          if (enrollRes.ok) {
+            const { enrollmentCode, expiresIn } = await enrollRes.json() as { enrollmentCode: string, expiresIn: number }
+            logger.info({ enrollmentCode, expiresIn }, 'Daemon enrollment code generated — enter this code in the WDK App')
+          }
+        } catch (err: unknown) {
+          logger.warn({ err: err instanceof Error ? err.message : String(err) }, 'Could not request enrollment code')
+        }
+
+        relayClient.connect(relayWsUrl, token)
+        connected = true
+      } catch (err: unknown) {
+        if (attempt < MAX_RETRIES) {
+          logger.warn({ attempt, maxRetries: MAX_RETRIES, delayMs: RETRY_DELAY_MS }, 'Relay not ready, retrying...')
+          await new Promise(r => setTimeout(r, RETRY_DELAY_MS))
+        } else {
+          logger.error({ err: err instanceof Error ? err.message : String(err) }, 'Daemon bootstrap failed after max retries — relay connection skipped')
+        }
+      }
     }
   } else if (config.relayUrl && config.relayToken) {
     // Legacy fallback: direct token (relayUrl must include /ws/daemon path)

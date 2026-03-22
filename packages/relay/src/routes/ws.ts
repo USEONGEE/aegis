@@ -369,6 +369,9 @@ export default async function wsRoutes (fastify: FastifyInstance): Promise<void>
         return
       }
 
+      // DEBUG: log all app WS messages after auth
+      fastify.log.info({ type: msg.type, userId, sessionId: msg.sessionId }, 'App WS message received')
+
       /* ---- control / chat (app → daemon) ---- */
       if (msg.type === 'control' || msg.type === 'chat') {
         if (msg.type === 'chat' && !msg.sessionId) {
@@ -396,11 +399,17 @@ export default async function wsRoutes (fastify: FastifyInstance): Promise<void>
         // control은 pollControlForDaemon()이 전달한다.
         if (msg.type === 'chat') {
           const daemonId = userToDaemon.get(userId)
+          fastify.log.info({ userId, daemonId: daemonId ?? 'NONE', hasDaemonSocket: daemonId ? !!daemonSockets.get(daemonId) : false }, 'Chat forward attempt')
           if (daemonId) {
             const ds = daemonSockets.get(daemonId)
             if (ds) {
               send(ds.socket, { type: 'chat', userId, sessionId: msg.sessionId, payload: msg.payload })
+              fastify.log.info({ daemonId, sessionId: msg.sessionId }, 'Chat forwarded to daemon')
+            } else {
+              fastify.log.warn({ daemonId }, 'Daemon socket not found')
             }
+          } else {
+            fastify.log.warn({ userId }, 'No daemon mapped for user')
           }
         }
         return
@@ -534,6 +543,7 @@ export default async function wsRoutes (fastify: FastifyInstance): Promise<void>
       if (parts.length === 2) return `${parts[0]}-${Number(parts[1]) + 1}`
       return id
     }
+    fastify.log.info({ userId, sessionId, cursor }, 'pollChatForApp started')
     while (!signal.aborted) {
       try {
         const startId = cursor === '0' || cursor === '$' ? '0' : exclusiveStart(cursor)
@@ -548,6 +558,7 @@ export default async function wsRoutes (fastify: FastifyInstance): Promise<void>
           const encrypted = entry.data.encrypted === '1'
           const out: OutgoingMessage = { type: 'chat', id: entry.id, sessionId, payload }
           if (encrypted) out.encrypted = true
+          fastify.log.info({ sessionId, entryId: entry.id, socketOpen: socket.readyState === 1 }, 'pollChatForApp delivering message')
           send(socket, out)
         }
         if (!hasNew) await sleep(200)

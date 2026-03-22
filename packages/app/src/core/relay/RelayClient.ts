@@ -337,7 +337,8 @@ export class RelayClient {
       try {
         await this.doConnect();
       } catch (_err: unknown) {
-        return
+        // Reconnect failed — schedule another attempt
+        this.scheduleReconnect();
       }
     }, backoff);
   }
