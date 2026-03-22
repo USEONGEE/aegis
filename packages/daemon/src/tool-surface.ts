@@ -646,6 +646,31 @@ export async function executeToolCall (name: string, args: ToolArgs, ctx: ToolEx
     }
 
     // -----------------------------------------------------------------------
+    // Manifest tools (pure computation — no facade required)
+    // -----------------------------------------------------------------------
+
+    case 'erc20Transfer': {
+      const { erc20Transfer } = await import('@wdk-app/manifest')
+      const { token, to, amount } = args as { token: string; to: string; amount: string }
+      const result = erc20Transfer({ token, to, amount })
+      return { status: 'prepared', tx: result.tx, policy: result.policy, description: result.description }
+    }
+
+    case 'erc20Approve': {
+      const { erc20Approve } = await import('@wdk-app/manifest')
+      const { token, spender, amount } = args as { token: string; spender: string; amount: string }
+      const result = erc20Approve({ token, spender, amount })
+      return { status: 'prepared', tx: result.tx, policy: result.policy, description: result.description }
+    }
+
+    case 'hyperlendDepositUsdt': {
+      const { hyperlendDepositUsdt } = await import('@wdk-app/manifest')
+      const { amount, onBehalfOf } = args as { amount: string; onBehalfOf: string }
+      const result = hyperlendDepositUsdt({ amount, onBehalfOf })
+      return { status: 'prepared', tx: result.tx, policy: result.policy, description: result.description }
+    }
+
+    // -----------------------------------------------------------------------
     // Unknown tool
     // -----------------------------------------------------------------------
     default:

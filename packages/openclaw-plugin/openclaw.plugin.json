@@ -1,0 +1,7 @@
+{
+  "id": "wdk-tools",
+  "kind": "tools",
+  "name": "WDK Tools",
+  "description": "WDK DeFi agent tools — wallet, transaction, policy, cron, and DeFi operations",
+  "configSchema": {}
+}

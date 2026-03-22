@@ -16,9 +16,9 @@ export interface DaemonConfig {
   openclawBaseUrl: string
   openclawToken: string
 
-  // --- Anthropic ---
-  anthropicApiKey: string
-  anthropicModel: string
+  // --- Tool API (HTTP server for OpenClaw plugin) ---
+  toolApiPort: number
+  toolApiToken: string
 
   // --- Relay ---
   /** Relay base URL (e.g. http://localhost:3000). WS path is appended automatically. */
@@ -59,9 +59,9 @@ export function loadConfig (): DaemonConfig {
     openclawBaseUrl: process.env.OPENCLAW_BASE_URL || 'http://localhost:18789',
     openclawToken: process.env.OPENCLAW_TOKEN || '',
 
-    // --- Anthropic ---
-    anthropicApiKey: process.env.ANTHROPIC_API_KEY || '',
-    anthropicModel: process.env.ANTHROPIC_MODEL || 'claude-haiku-4-5-20251001',
+    // --- Tool API ---
+    toolApiPort: parseInt(process.env.TOOL_API_PORT || '18790', 10),
+    toolApiToken: process.env.TOOL_API_TOKEN || '',
 
     // --- Relay ---
     relayUrl: process.env.RELAY_URL || 'http://localhost:3000',

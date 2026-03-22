@@ -275,5 +275,55 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         required: ['tokenId', 'liquidity', 'amount0Min', 'amount1Min', 'deadline', 'recipient', 'accountIndex']
       }
     }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'erc20Transfer',
+      description: 'Build ERC-20 transfer tx and matching policy. Does NOT execute — use sendTransaction with the returned tx.',
+      parameters: {
+        type: 'object',
+        properties: {
+          token: { type: 'string', description: 'Token contract address (0x-prefixed)' },
+          to: { type: 'string', description: 'Recipient address (0x-prefixed)' },
+          amount: { type: 'string', description: 'Amount in smallest unit (decimal string, e.g. "1000000" for 1 USDT)' },
+          accountIndex: { type: 'number', description: 'BIP-44 account index' }
+        },
+        required: ['token', 'to', 'amount', 'accountIndex']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'erc20Approve',
+      description: 'Build ERC-20 approve tx and matching policy. Does NOT execute — use sendTransaction with the returned tx.',
+      parameters: {
+        type: 'object',
+        properties: {
+          token: { type: 'string', description: 'Token contract address (0x-prefixed)' },
+          spender: { type: 'string', description: 'Spender address to approve (0x-prefixed)' },
+          amount: { type: 'string', description: 'Allowance amount in smallest unit (decimal string)' },
+          accountIndex: { type: 'number', description: 'BIP-44 account index' }
+        },
+        required: ['token', 'spender', 'amount', 'accountIndex']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'hyperlendDepositUsdt',
+      description: 'Build HyperLend USDT0 deposit (supply) tx and matching policy on HyperEVM (chain 999). Does NOT execute — use sendTransaction with the returned tx. Requires prior erc20Approve for USDT0 to HyperLend Pool.',
+      parameters: {
+        type: 'object',
+        properties: {
+          amount: { type: 'string', description: 'Deposit amount in smallest unit (6 decimals, e.g. "1000000" for 1 USDT0)' },
+          onBehalfOf: { type: 'string', description: 'Depositor address (0x-prefixed)' },
+          accountIndex: { type: 'number', description: 'BIP-44 account index' }
+        },
+        required: ['amount', 'onBehalfOf', 'accountIndex']
+      }
+    }
   }
 ]

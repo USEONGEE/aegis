@@ -1,0 +1,14 @@
+{
+  "name": "wdk-tools",
+  "version": "0.5.5",
+  "type": "module",
+  "openclaw": {
+    "extensions": ["./index.ts"]
+  },
+  "dependencies": {
+    "@sinclair/typebox": "^0.34.0"
+  },
+  "peerDependencies": {
+    "openclaw": "*"
+  }
+}

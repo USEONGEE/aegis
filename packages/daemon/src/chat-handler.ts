@@ -1,12 +1,14 @@
-import { processChat } from './tool-call-loop.js'
-import type { ToolExecutionContext } from './tool-surface.js'
 import type { OpenClawClient } from './openclaw-client.js'
 import type { RelayClient } from './relay-client.js'
 import type { MessageQueueManager } from './message-queue.js'
-import type { RelayChatInput, ChatEvent } from '@wdk-app/protocol'
+import type { RelayChatInput } from '@wdk-app/protocol'
+import type { Logger } from 'pino'
 
 // ---------------------------------------------------------------------------
-// Types
+// Chat Handler — forwards messages to OpenClaw and relays the response.
+//
+// OpenClaw manages the tool-call loop internally via registered plugins.
+// The daemon only sends the user text and receives the final response.
 // ---------------------------------------------------------------------------
 
 interface ChatHandlerOptions {
@@ -15,29 +17,19 @@ interface ChatHandlerOptions {
 
 /**
  * Handle an incoming chat message from the Relay.
- *
- * Flow:
- *   1. Extract userId, sessionId, text from the message.
- *   2. Enqueue into the FIFO MessageQueue.
- *   3. The queue processor sends the final response back through the Relay.
+ * Enqueues into the FIFO MessageQueue for ordered processing.
  */
 export async function handleChatMessage (
   msg: RelayChatInput,
   openclawClient: OpenClawClient,
   relayClient: RelayClient,
-  ctx: ToolExecutionContext,
-  opts: ChatHandlerOptions = {},
+  _ctx: unknown,
+  _opts: ChatHandlerOptions = {},
   queueManager: MessageQueueManager
 ): Promise<void> {
-  const { logger } = ctx
   const { userId, sessionId, text } = msg
 
-  if (!userId || !text) {
-    logger.warn({ msg }, 'Malformed chat message: missing userId or text')
-    return
-  }
-
-  logger.info({ userId, sessionId, textLen: text.length }, 'Processing chat message')
+  if (!userId || !text) return
 
   const messageId = queueManager.enqueue(sessionId, {
     sessionId,
@@ -48,7 +40,6 @@ export async function handleChatMessage (
     cronId: null
   })
 
-  // Notify the app that the message was queued (via control channel)
   relayClient.send('control', {
     type: 'message_queued',
     userId,
@@ -58,7 +49,7 @@ export async function handleChatMessage (
 }
 
 /**
- * Direct chat processing (used when no queue manager, or as the queue processor).
+ * Direct chat processing — calls OpenClaw and sends the final response via Relay.
  */
 export async function _processChatDirect (
   userId: string,
@@ -66,96 +57,34 @@ export async function _processChatDirect (
   text: string,
   openclawClient: OpenClawClient,
   relayClient: RelayClient,
-  ctx: ToolExecutionContext,
-  opts: ChatHandlerOptions = {},
+  _ctx: unknown,
+  _opts: ChatHandlerOptions = {},
   signal?: AbortSignal,
   source: 'user' | 'cron' = 'user'
 ): Promise<void> {
-  const { logger } = ctx
-
-  // Send typing indicator (skip for cron messages)
+  // Send typing indicator (skip for cron)
   if (source !== 'cron') {
-    relayClient.send('chat', {
-      type: 'typing',
-      userId,
-      sessionId
-    })
+    relayClient.send('chat', { type: 'typing', userId, sessionId })
   }
 
   try {
-    const result = await processChat(
-      userId,
-      sessionId,
-      text,
-      ctx,
-      openclawClient,
-      {
-        maxIterations: opts.maxIterations || 10,
-        signal,
-        onDelta: (delta: string) => {
-          // Stream deltas to the app in real-time
-          relayClient.send('chat', {
-            type: 'stream',
-            userId,
-            sessionId,
-            delta,
-            source
-          })
-        },
-        onToolStart: (toolName: string, toolCallId: string) => {
-          relayClient.send('chat', {
-            type: 'tool_start',
-            userId,
-            sessionId,
-            toolName,
-            toolCallId,
-            source
-          })
-        },
-        onToolDone: (toolName: string, toolCallId: string, ok: boolean) => {
-          relayClient.send('chat', {
-            type: 'tool_done',
-            userId,
-            sessionId,
-            toolName,
-            toolCallId,
-            status: ok ? 'success' : 'error',
-            source
-          })
-        }
-      }
-    )
+    const content = await openclawClient.chat(userId, sessionId, text, { signal })
 
-    // Send the final completed response
     relayClient.send('chat', {
       type: 'done',
       userId,
       sessionId,
-      content: result.content,
-      toolResults: result.toolResults,
-      iterations: result.iterations,
+      content,
+      toolResults: [],
+      iterations: 1,
       source
     })
-
-    logger.info(
-      { userId, sessionId, iterations: result.iterations, tools: result.toolResults.length },
-      'Chat message processed'
-    )
   } catch (err: unknown) {
     if (signal?.aborted) {
-      logger.info({ userId, sessionId }, 'Chat processing aborted')
-      relayClient.send('chat', {
-        type: 'cancelled',
-        userId,
-        sessionId,
-        source
-      })
+      relayClient.send('chat', { type: 'cancelled', userId, sessionId, source })
       return
     }
 
-    logger.error({ err, userId, sessionId }, 'Failed to process chat message')
-
-    // Send error response back to app
     relayClient.send('chat', {
       type: 'error',
       userId,

@@ -9,15 +9,15 @@ import { RelayClient } from './relay-client.js'
 import { handleControlMessage } from './control-handler.js'
 import { handleQueryMessage } from './query-handler.js'
 import type { ControlMessage, RelayChatInput, QueryMessage } from '@wdk-app/protocol'
-import { handleChatMessage } from './chat-handler.js'
+import { handleChatMessage, _processChatDirect } from './chat-handler.js'
 import { CronScheduler } from './cron-scheduler.js'
 import type { CronDispatch } from './cron-scheduler.js'
 import { AdminServer } from './admin-server.js'
+import { ToolApiServer } from './tool-api-server.js'
 import { SqliteDaemonStore } from './sqlite-daemon-store.js'
 import { MessageQueueManager } from './message-queue.js'
 import { authenticateWithRelay } from './relay-auth.js'
 import type { QueuedMessage } from './message-queue.js'
-import { _processChatDirect } from './chat-handler.js'
 import type { ToolExecutionContext } from './tool-surface.js'
 
 // ---------------------------------------------------------------------------
@@ -80,8 +80,8 @@ async function main (): Promise<void> {
           msg.text,
           openclawClient,
           relayClient,
-          ctx,
-          { maxIterations: config.toolCallMaxIterations },
+          null,
+          {},
           signal,
           msg.source
         )
@@ -111,9 +111,7 @@ async function main (): Promise<void> {
         break
 
       case 'chat':
-        handleChatMessage(payload as unknown as RelayChatInput, openclawClient, relayClient, ctx, {
-          maxIterations: config.toolCallMaxIterations
-        }, queueManager)
+        handleChatMessage(payload as unknown as RelayChatInput, openclawClient, relayClient, null, {}, queueManager)
           .catch((err: Error) => logger.error({ err }, 'Unhandled error in chat handler'))
         break
 
@@ -233,7 +231,14 @@ async function main (): Promise<void> {
   )
   await cronScheduler.start()
 
-  // 8. Start admin server
+  // 8a. Start Tool API HTTP server (for OpenClaw plugin)
+  const toolApiServer = new ToolApiServer(
+    { port: config.toolApiPort, token: config.toolApiToken },
+    ctx, logger
+  )
+  await toolApiServer.start()
+
+  // 8b. Start admin server
   const adminServer = new AdminServer(
     { socketPath: config.socketPath },
     { facade, cronScheduler, relayClient, logger, relayHttpBase, relayToken }
@@ -255,7 +260,8 @@ async function main (): Promise<void> {
     // Disconnect relay
     relayClient.disconnect()
 
-    // Stop admin server
+    // Stop servers
+    await toolApiServer.stop()
     await adminServer.stop()
 
     // Dispose facade (also disposes internal store)

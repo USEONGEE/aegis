@@ -16,11 +16,9 @@
     "test": "node --experimental-vm-modules ../../node_modules/.bin/jest"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.80.0",
     "@wdk-app/canonical": "*",
     "@wdk-app/guarded-wdk": "*",
     "@wdk-app/protocol": "*",
-    "openai": "^4.40.0",
     "pino": "^8.19.0",
     "tweetnacl": "^1.0.3",
     "ws": "^8.16.0"
